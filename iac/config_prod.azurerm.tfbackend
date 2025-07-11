@@ -1,0 +1,3 @@
+resource_group_name   = "VortexIQ"
+storage_account_name  = "vortexiqprodsa"
+container_name        = "tfstate"

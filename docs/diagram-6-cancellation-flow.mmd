@@ -1,0 +1,156 @@
+graph TD
+    A["Client Request<br/>DELETE /migrations/{id}"] --> B["Cancel Migration API<br/>(HTTP Trigger)"]
+    
+    B --> C["Validate Migration<br/>Exists & In Progress"]
+    C --> D["Create Cancellation Token<br/>(Queue Storage)"]
+    D --> E["Update Migration Status<br/>(Cancelling)"]
+    
+    E --> F["Send Cancellation Signal<br/>to Main Orchestrator"]
+    F --> G["Main Migration Orchestrator<br/>(Receives Cancellation)"]
+    
+    G --> H["Check Cancellation Token<br/>(Before Each Phase)"]
+    H --> I{"Cancellation<br/>Requested?"}
+    
+    I -->|"Yes"| J["Initiate Graceful<br/>Shutdown"]
+    I -->|"No"| K["Continue Processing"]
+    
+    J --> L["Cancel Current Phase<br/>Processing"]
+    L --> M["Signal Product<br/>Orchestrators"]
+    
+    M --> N["Product Orchestrator 1<br/>(Receives Cancellation)"]
+    M --> O["Product Orchestrator 2<br/>(Receives Cancellation)"]
+    M --> P["Product Orchestrator N<br/>(Receives Cancellation)"]
+    
+    N --> Q["Check Product Status<br/>(In Progress Check)"]
+    O --> Q
+    P --> Q
+    
+    Q --> R{"Product<br/>Processing?"}
+    R -->|"Simple Product"| S["Cancel Activity<br/>Function"]
+    R -->|"Complex Product"| T["Cancel Sub-Orchestrators"]
+    
+    S --> U["Mark Product<br/>as Cancelled"]
+    
+    T --> V["Signal Variants<br/>Sub-Orchestrator"]
+    T --> W["Signal Images<br/>Sub-Orchestrator"]
+    T --> X["Signal Modifiers<br/>Sub-Orchestrator"]
+    
+    V --> Y["Variants Sub-Orchestrator<br/>(Receives Cancellation)"]
+    W --> Z["Images Sub-Orchestrator<br/>(Receives Cancellation)"]
+    X --> AA["Modifiers Sub-Orchestrator<br/>(Receives Cancellation)"]
+    
+    Y --> BB["Check Current Batch<br/>Processing"]
+    Z --> BB
+    AA --> BB
+    
+    BB --> CC{"Batch<br/>In Progress?"}
+    CC -->|"Yes"| DD["Complete Current Batch<br/>(Graceful)"]
+    CC -->|"No"| EE["Cancel Immediately"]
+    
+    DD --> FF["Cancel Remaining<br/>Batches"]
+    EE --> FF
+    
+    FF --> GG["Update Component<br/>Status (Cancelled)"]
+    GG --> HH["Log Cancellation<br/>(OpenSearch)"]
+    
+    U --> HH
+    
+    HH --> II["Aggregate Cancellation<br/>Results"]
+    II --> JJ["Update Migration Status<br/>(Cancelled)"]
+    
+    JJ --> KK["Generate Cancellation<br/>Report"]
+    KK --> LL["Return Final Status<br/>(Client Response)"]
+    
+    MM["Cancellation Token<br/>Management"] --> NN["Distributed Cancellation<br/>Token Store"]
+    NN --> OO["Token Propagation<br/>Through Hierarchy"]
+    NN --> PP["Token Cleanup<br/>After Cancellation"]
+    
+    OO --> H
+    OO --> Q
+    OO --> BB
+    
+    QQ["Graceful Shutdown<br/>Mechanisms"] --> RR["Complete Current<br/>API Calls"]
+    QQ --> SS["Save Progress<br/>State"]
+    QQ --> TT["Clean Up<br/>Resources"]
+    
+    RR --> DD
+    SS --> GG
+    TT --> HH
+    
+    UU["Cancellation Status<br/>Tracking"] --> VV["Entity-Level<br/>Cancellation Status"]
+    UU --> WW["Component-Level<br/>Cancellation Status"]
+    UU --> XX["Batch-Level<br/>Cancellation Status"]
+    
+    VV --> II
+    WW --> II
+    XX --> II
+    
+    YY["Error Handling<br/>During Cancellation"] --> ZZ["Handle Partial<br/>Completion"]
+    YY --> AAA["Rollback<br/>Incomplete Operations"]
+    YY --> BBB["Log Cancellation<br/>Errors"]
+    
+    ZZ --> GG
+    AAA --> GG
+    BBB --> HH
+    
+    CCC["Cancellation Validation<br/>& Constraints"] --> DDD["Check Migration<br/>State"]
+    CCC --> EEE["Validate User<br/>Permissions"]
+    CCC --> FFF["Ensure Safe<br/>Cancellation Point"]
+    
+    DDD --> C
+    EEE --> C
+    FFF --> I
+    
+    GGG["Resume After<br/>Cancellation"] --> HHH["Partial Migration<br/>Resume Capability"]
+    GGG --> III["Skip Cancelled<br/>Entities"]
+    GGG --> JJJ["Continue from<br/>Last Checkpoint"]
+    
+    HHH --> KK
+    III --> KK
+    JJJ --> KK
+    
+    style A fill:#e1f5fe
+    style B fill:#e3f2fd
+    style I fill:#fff9c4
+    style R fill:#fff9c4
+    style CC fill:#fff9c4
+    style J fill:#ffcdd2
+    style L fill:#ffcdd2
+    style T fill:#ffcdd2
+    style FF fill:#ffcdd2
+    style G fill:#fce4ec
+    style N fill:#fce4ec
+    style O fill:#fce4ec
+    style P fill:#fce4ec
+    style Y fill:#f8bbd9
+    style Z fill:#f8bbd9
+    style AA fill:#f8bbd9
+    style HH fill:#f1f8e9
+    style II fill:#fff3e0
+    style JJ fill:#fff3e0
+    style KK fill:#fff3e0
+    style LL fill:#c8e6c9
+    style MM fill:#e8f5e8
+    style NN fill:#f1f8e9
+    style OO fill:#f1f8e9
+    style PP fill:#f1f8e9
+    style QQ fill:#e3f2fd
+    style RR fill:#e1f5fe
+    style SS fill:#e1f5fe
+    style TT fill:#e1f5fe
+    style UU fill:#fff8e1
+    style VV fill:#fff8e1
+    style WW fill:#fff8e1
+    style XX fill:#fff8e1
+    style YY fill:#ffebee
+    style ZZ fill:#ffcdd2
+    style AAA fill:#ffcdd2
+    style BBB fill:#ffcdd2
+    style CCC fill:#e8f5e8
+    style DDD fill:#f1f8e9
+    style EEE fill:#f1f8e9
+    style FFF fill:#f1f8e9
+    style GGG fill:#e3f2fd
+    style HHH fill:#e1f5fe
+    style III fill:#e1f5fe
+    style JJJ fill:#e1f5fe 

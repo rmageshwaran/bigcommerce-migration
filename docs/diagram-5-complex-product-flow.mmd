@@ -1,0 +1,135 @@
+graph TD
+    A["Product Worker<br/>(Main Orchestrator)"] --> B["Analyze Product<br/>Complexity"]
+    
+    B --> C{"Product<br/>Complexity?"}
+    C -->|"Simple<br/>< 50 components"| D["Direct Processing<br/>(Single Activity)"]
+    C -->|"Complex<br/>500+ components"| E["Sub-Orchestration<br/>Pattern"]
+    
+    D --> F["Process All Components<br/>(Variants + Images)"]
+    F --> G["Complete Product<br/>Migration"]
+    
+    E --> H["Create Main Product<br/>(Activity Function)"]
+    H --> I["Launch Component<br/>Sub-Orchestrations"]
+    
+    I --> J["Variants Sub-Orchestrator<br/>(500+ variants)"]
+    I --> K["Images Sub-Orchestrator<br/>(1000+ images)"]
+    I --> L["Modifiers Sub-Orchestrator<br/>(If applicable)"]
+    
+    J --> M["Variants Chunking<br/>(Batch: 20)"]
+    M --> N["Variant Batch 1<br/>(20 variants)"]
+    M --> O["Variant Batch 2<br/>(20 variants)"]
+    M --> P["Variant Batch N<br/>(20 variants)"]
+    
+    N --> Q["Process Variant Batch<br/>(Activity Function)"]
+    O --> Q
+    P --> Q
+    
+    Q --> R["Rate Limit Check<br/>(2 second delay)"]
+    R --> S["BigCommerce API<br/>(Create Variants)"]
+    
+    K --> T["Images Chunking<br/>(Batch: 5)"]
+    T --> U["Image Batch 1<br/>(5 images)"]
+    T --> V["Image Batch 2<br/>(5 images)"]
+    T --> W["Image Batch N<br/>(5 images)"]
+    
+    U --> X["Process Image Batch<br/>(Activity Function)"]
+    V --> X
+    W --> X
+    
+    X --> Y["Rate Limit Check<br/>(5 second delay)"]
+    Y --> Z["BigCommerce API<br/>(Upload Images)"]
+    
+    L --> AA["Modifiers Processing<br/>(Similar Pattern)"]
+    AA --> BB["Modifier Batches<br/>(Batch: 15)"]
+    BB --> CC["Process Modifier Batch<br/>(Activity Function)"]
+    
+    S --> DD["Log Variant Status<br/>(OpenSearch)"]
+    Z --> EE["Log Image Status<br/>(OpenSearch)"]
+    CC --> FF["Log Modifier Status<br/>(OpenSearch)"]
+    
+    DD --> GG["Component Status<br/>Aggregator"]
+    EE --> GG
+    FF --> GG
+    
+    GG --> HH["Check All Components<br/>Complete"]
+    HH --> II{"All Components<br/>Processed?"}
+    
+    II -->|"No"| JJ["Continue Processing<br/>(Remaining Components)"]
+    II -->|"Yes"| KK["Complete Product<br/>Migration"]
+    
+    JJ --> GG
+    KK --> LL["Update Product Status<br/>(OpenSearch)"]
+    
+    MM["Timeout Prevention<br/>Mechanisms"] --> NN["Sub-Orchestration<br/>(Unlimited Duration)"]
+    MM --> OO["Checkpointing<br/>(Progress Tracking)"]
+    MM --> PP["Chunked Processing<br/>(Small Batches)"]
+    MM --> QQ["Rate Limit Delays<br/>(Prevent Overload)"]
+    
+    NN --> E
+    OO --> GG
+    PP --> M
+    PP --> T
+    QQ --> R
+    QQ --> Y
+    
+    RR["Error Handling<br/>for Complex Products"] --> SS["Component-Level<br/>Error Isolation"]
+    RR --> TT["Retry Failed<br/>Components Only"]
+    RR --> UU["Continue Processing<br/>Other Components"]
+    
+    SS --> Q
+    SS --> X
+    TT --> Q
+    TT --> X
+    UU --> GG
+    
+    VV["Performance Monitoring<br/>Complex Products"] --> WW["Track Processing<br/>Time per Batch"]
+    VV --> XX["Monitor Component<br/>Success Rates"]
+    VV --> YY["Adaptive Batch<br/>Size Adjustment"]
+    
+    WW --> GG
+    XX --> GG
+    YY --> M
+    YY --> T
+    
+    ZZ["Configuration<br/>for Complex Products"] --> AAA["Dynamic Batch Sizing<br/>Based on Complexity"]
+    ZZ --> BBB["Timeout Prevention<br/>Settings"]
+    ZZ --> CCC["Resource Allocation<br/>Optimization"]
+    
+    AAA --> B
+    BBB --> E
+    CCC --> I
+    
+    style A fill:#e1f5fe
+    style B fill:#e3f2fd
+    style C fill:#fff9c4
+    style D fill:#c8e6c9
+    style E fill:#ffcdd2
+    style H fill:#fce4ec
+    style I fill:#fce4ec
+    style J fill:#f8bbd9
+    style K fill:#f8bbd9
+    style L fill:#f8bbd9
+    style Q fill:#fce4ec
+    style X fill:#fce4ec
+    style CC fill:#fce4ec
+    style GG fill:#fff3e0
+    style HH fill:#fff3e0
+    style II fill:#fff9c4
+    style KK fill:#c8e6c9
+    style MM fill:#e8f5e8
+    style NN fill:#f1f8e9
+    style OO fill:#f1f8e9
+    style PP fill:#f1f8e9
+    style QQ fill:#f1f8e9
+    style RR fill:#ffebee
+    style SS fill:#ffcdd2
+    style TT fill:#ffcdd2
+    style UU fill:#ffcdd2
+    style VV fill:#e3f2fd
+    style WW fill:#e1f5fe
+    style XX fill:#e1f5fe
+    style YY fill:#e1f5fe
+    style ZZ fill:#fff3e0
+    style AAA fill:#fff8e1
+    style BBB fill:#fff8e1
+    style CCC fill:#fff8e1 

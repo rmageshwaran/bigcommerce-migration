@@ -1,0 +1,95 @@
+﻿Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{8BB2217D-0F2D-4BB1-8E4B-CDD04ADCF3DF}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{ED8079DD-2B06-4030-9F0F-DC548F98929C}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "BigCommerce.Migration.Core", "src\BigCommerce.Migration.Core\BigCommerce.Migration.Core.csproj", "{4C7261F2-BA66-4B55-9DAD-A3225BB3B0EF}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "BigCommerce.Migration.Infrastructure", "src\BigCommerce.Migration.Infrastructure\BigCommerce.Migration.Infrastructure.csproj", "{6BF84C53-E190-42E8-B05B-A5C05261E91C}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "BigCommerce.Migration.Functions", "src\BigCommerce.Migration.Functions\BigCommerce.Migration.Functions.csproj", "{2C146AA0-C2E0-4A29-B5AA-1F8C6379FFA7}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "BigCommerce.Migration.UnitTests", "tests\BigCommerce.Migration.UnitTests\BigCommerce.Migration.UnitTests.csproj", "{A6F89292-334A-4DFA-B5E6-48CF1CB7A091}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "docs", "docs", "{F7038A76-2C94-4F26-A3B6-4E2B6A4B7E8C}"
+	ProjectSection(SolutionItems) = preProject
+		docs\Architecture-Documentation.md = docs\Architecture-Documentation.md
+		docs\DOCUMENTATION-SUMMARY.md = docs\DOCUMENTATION-SUMMARY.md
+		README.md = README.md
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "iac", "iac", "{D4B5F0C5-1A8F-4F4A-8F7D-8E4C3F2E1A9B}"
+	ProjectSection(SolutionItems) = preProject
+		iac\main.tf = iac\main.tf
+		iac\variables.tf = iac\variables.tf
+		iac\terraform.dev.tfvars = iac\terraform.dev.tfvars
+		iac\terraform.prod.tfvars = iac\terraform.prod.tfvars
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "cicd", "cicd", "{E7D6C4B3-2A1F-4E2A-9C8B-7F5E9D1C3A7E}"
+	ProjectSection(SolutionItems) = preProject
+		azure-pipelines-dev.yml = azure-pipelines-dev.yml
+		azure-pipelines-prod.yml = azure-pipelines-prod.yml
+		docker-compose.yml = docker-compose.yml
+	EndProjectSection
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BigCommerce.Migration.Orchestration", "src\BigCommerce.Migration.Orchestration\BigCommerce.Migration.Orchestration.csproj", "{A4DD5E25-92A5-473E-BFD2-4530B7E5A8F8}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BigCommerce.Migration.OrchestrationTests", "tests\BigCommerce.Migration.OrchestrationTests\BigCommerce.Migration.OrchestrationTests.csproj", "{F59DC0CA-F4BC-4BD4-AD05-4B060350F808}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BigCommerce.Migration.IntegrationTests", "tests\BigCommerce.Migration.IntegrationTests\BigCommerce.Migration.IntegrationTests.csproj", "{4BC7A6F0-E55D-46C8-9902-7AE42D869737}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{4C7261F2-BA66-4B55-9DAD-A3225BB3B0EF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4C7261F2-BA66-4B55-9DAD-A3225BB3B0EF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4C7261F2-BA66-4B55-9DAD-A3225BB3B0EF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4C7261F2-BA66-4B55-9DAD-A3225BB3B0EF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6BF84C53-E190-42E8-B05B-A5C05261E91C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6BF84C53-E190-42E8-B05B-A5C05261E91C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6BF84C53-E190-42E8-B05B-A5C05261E91C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6BF84C53-E190-42E8-B05B-A5C05261E91C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2C146AA0-C2E0-4A29-B5AA-1F8C6379FFA7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2C146AA0-C2E0-4A29-B5AA-1F8C6379FFA7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2C146AA0-C2E0-4A29-B5AA-1F8C6379FFA7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2C146AA0-C2E0-4A29-B5AA-1F8C6379FFA7}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A6F89292-334A-4DFA-B5E6-48CF1CB7A091}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A6F89292-334A-4DFA-B5E6-48CF1CB7A091}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A6F89292-334A-4DFA-B5E6-48CF1CB7A091}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A6F89292-334A-4DFA-B5E6-48CF1CB7A091}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A4DD5E25-92A5-473E-BFD2-4530B7E5A8F8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A4DD5E25-92A5-473E-BFD2-4530B7E5A8F8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A4DD5E25-92A5-473E-BFD2-4530B7E5A8F8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A4DD5E25-92A5-473E-BFD2-4530B7E5A8F8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F59DC0CA-F4BC-4BD4-AD05-4B060350F808}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F59DC0CA-F4BC-4BD4-AD05-4B060350F808}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F59DC0CA-F4BC-4BD4-AD05-4B060350F808}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F59DC0CA-F4BC-4BD4-AD05-4B060350F808}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4BC7A6F0-E55D-46C8-9902-7AE42D869737}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4BC7A6F0-E55D-46C8-9902-7AE42D869737}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4BC7A6F0-E55D-46C8-9902-7AE42D869737}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4BC7A6F0-E55D-46C8-9902-7AE42D869737}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{4C7261F2-BA66-4B55-9DAD-A3225BB3B0EF} = {8BB2217D-0F2D-4BB1-8E4B-CDD04ADCF3DF}
+		{6BF84C53-E190-42E8-B05B-A5C05261E91C} = {8BB2217D-0F2D-4BB1-8E4B-CDD04ADCF3DF}
+		{2C146AA0-C2E0-4A29-B5AA-1F8C6379FFA7} = {8BB2217D-0F2D-4BB1-8E4B-CDD04ADCF3DF}
+		{A6F89292-334A-4DFA-B5E6-48CF1CB7A091} = {ED8079DD-2B06-4030-9F0F-DC548F98929C}
+		{A4DD5E25-92A5-473E-BFD2-4530B7E5A8F8} = {8BB2217D-0F2D-4BB1-8E4B-CDD04ADCF3DF}
+		{F59DC0CA-F4BC-4BD4-AD05-4B060350F808} = {ED8079DD-2B06-4030-9F0F-DC548F98929C}
+		{4BC7A6F0-E55D-46C8-9902-7AE42D869737} = {ED8079DD-2B06-4030-9F0F-DC548F98929C}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {8F7A9E2C-4B1D-4E3A-9F5B-2C8E7A1B9D4F}
+	EndGlobalSection
+EndGlobal

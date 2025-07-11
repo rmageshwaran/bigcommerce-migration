@@ -1,0 +1,269 @@
+###
+### BigCommerce Migration API Test Suite
+### Local Development Testing - http://localhost:7071
+### NOTE: API key authentication is temporarily disabled for local testing
+###
+
+@baseUrl = http://localhost:7071
+@contentType = application/json
+
+### Variables for test data
+@testSourceStoreId = "tmdsef6c6o"
+@testSourceAccessToken = "ar247sdrwg6b5oo4c8h2n2nu2yat0w7"
+@testDestStoreId = "in2msaitrc"  
+@testDestAccessToken = "bntqbbjvnnap8agkdbo5bekqehb473z"
+@testChannelId = 1
+
+###
+### 1. Health Check / List All Migrations (Empty Response Expected Initially)
+###
+GET {{baseUrl}}/api/migrations
+Content-Type: {{contentType}}
+
+###
+### 2. Create New Migration - Categories Only
+###
+POST {{baseUrl}}/api/migrations
+Content-Type: {{contentType}}
+
+{
+  "entities": ["categories"],
+  "sourceStore": {
+    "storeId": "{{testSourceStoreId}}",
+    "accessToken": "{{testSourceAccessToken}}",
+    "channelId": "{{testChannelId}}"
+  },
+  "destinationStore": {
+    "storeId": "{{testDestStoreId}}",
+    "accessToken": "{{testDestAccessToken}}",
+    "channelId": "{{testChannelId}}"
+  }
+}
+
+###
+### 3. Create New Migration - Multiple Entities
+###
+POST {{baseUrl}}/api/migrations
+Content-Type: {{contentType}}
+
+{
+  "entities": ["categories", "brands", "products"],
+  "sourceStore": {
+    "storeId": "{{testSourceStoreId}}",
+    "accessToken": "{{testSourceAccessToken}}",
+    "channelId": "{{testChannelId}}"
+  },
+  "destinationStore": {
+    "storeId": "{{testDestStoreId}}",
+    "accessToken": "{{testDestAccessToken}}",
+    "channelId": "{{testChannelId}}"
+  }
+}
+
+###
+### 4. Get Migration Status (Replace {migrationId} with actual ID from previous response)
+###
+@migrationId = replace-with-actual-migration-id
+GET {{baseUrl}}/api/migrations/{{migrationId}}
+Content-Type: {{contentType}}
+
+###
+### 5. Cancel Migration (Replace {migrationId} with actual ID)
+###
+POST {{baseUrl}}/api/migrations/{{migrationId}}/cancel
+Content-Type: {{contentType}}
+
+###
+### 6. List Migrations with Status Filter
+###
+GET {{baseUrl}}/api/migrations?status=queued&pageSize=10&page=1
+Content-Type: {{contentType}}
+
+###
+### 7. List Migrations with Different Status
+###
+GET {{baseUrl}}/api/migrations?status=inprogress
+Content-Type: {{contentType}}
+
+###
+### 8. Test Invalid Request - Missing Source Store
+###
+POST {{baseUrl}}/api/migrations
+Content-Type: {{contentType}}
+
+{
+  "entities": ["categories"],
+  "destinationStore": {
+    "storeId": "{{testDestStoreId}}",
+    "accessToken": "{{testDestAccessToken}}",
+    "channelId": "{{testChannelId}}"
+  }
+}
+
+###
+### 9. Test Invalid Request - Empty Entities
+###
+POST {{baseUrl}}/api/migrations
+Content-Type: {{contentType}}
+
+{
+  "entities": [],
+  "sourceStore": {
+    "storeId": "{{testSourceStoreId}}",
+    "accessToken": "{{testSourceAccessToken}}",
+    "channelId": "{{testChannelId}}"
+  },
+  "destinationStore": {
+    "storeId": "{{testDestStoreId}}",
+    "accessToken": "{{testDestAccessToken}}",
+    "channelId": "{{testChannelId}}"
+  }
+}
+
+###
+### 10. Test Invalid Request - Missing Access Token
+###
+POST {{baseUrl}}/api/migrations
+Content-Type: {{contentType}}
+
+{
+  "entities": ["categories"],
+  "sourceStore": {
+    "storeId": "{{testSourceStoreId}}",
+    "channelId": "{{testChannelId}}"
+  },
+  "destinationStore": {
+    "storeId": "{{testDestStoreId}}",
+    "accessToken": "{{testDestAccessToken}}",
+    "channelId": "{{testChannelId}}"
+  }
+}
+
+###
+### REAL BIGCOMMERCE STORE TESTING
+### Replace the values below with your actual BigCommerce store credentials
+###
+
+###
+### 11. Create Migration with Real Store Credentials (UPDATE BEFORE USING)
+###
+# POST {{baseUrl}}/api/migrations
+# Content-Type: {{contentType}}
+# 
+# {
+#   "entities": ["categories"],
+#   "sourceStore": {
+#     "storeId": "your-actual-source-store-id",
+#     "accessToken": "your-actual-source-access-token", 
+#     "channelId": "1"
+#   },
+#   "destinationStore": {
+#     "storeId": "your-actual-dest-store-id",
+#     "accessToken": "your-actual-dest-access-token",
+#     "channelId": "1"
+#   }
+# }
+
+###
+### 12. Test with BigCommerce Sandbox Stores (UPDATE CREDENTIALS)
+###
+# @sourceSandboxStoreId = v6q95r5n91
+# @sourceSandboxToken = your-sandbox-source-token
+# @destSandboxStoreId = in2msaitrc  
+# @destSandboxToken = your-sandbox-dest-token
+#
+# POST {{baseUrl}}/api/migrations
+# Content-Type: {{contentType}}
+#
+# {
+#   "entities": ["categories"],
+#   "sourceStore": {
+#     "storeId": "{{sourceSandboxStoreId}}",
+#     "accessToken": "{{sourceSandboxToken}}",
+#     "channelId": "1"
+#   },
+#   "destinationStore": {
+#     "storeId": "{{destSandboxStoreId}}",
+#     "accessToken": "{{destSandboxToken}}",
+#     "channelId": "1"
+#   }
+# }
+
+###
+### ADVANCED TESTING SCENARIOS
+###
+
+###
+### 13. Test All Supported Entity Types
+###
+POST {{baseUrl}}/api/migrations
+Content-Type: {{contentType}}
+
+{
+  "entities": ["categories", "brands", "products", "variants", "images", "modifiers"],
+  "sourceStore": {
+    "storeId": "{{testSourceStoreId}}",
+    "accessToken": "{{testSourceAccessToken}}",
+    "channelId": "{{testChannelId}}"
+  },
+  "destinationStore": {
+    "storeId": "{{testDestStoreId}}",
+    "accessToken": "{{testDestAccessToken}}",
+    "channelId": "{{testChannelId}}"
+  }
+}
+
+###
+### 14. Test with Different Channel ID
+###
+POST {{baseUrl}}/api/migrations
+Content-Type: {{contentType}}
+
+{
+  "entities": ["products"],
+  "sourceStore": {
+    "storeId": "{{testSourceStoreId}}",
+    "accessToken": "{{testSourceAccessToken}}",
+    "channelId": "2"
+  },
+  "destinationStore": {
+    "storeId": "{{testDestStoreId}}",
+    "accessToken": "{{testDestAccessToken}}",
+    "channelId": "1"
+  }
+}
+
+###
+### 15. Test Pagination in Migration List
+###
+GET {{baseUrl}}/api/migrations?pageSize=5&page=2
+Content-Type: {{contentType}}
+
+###
+### 16. Test Get Migration Status with Invalid ID
+###
+GET {{baseUrl}}/api/migrations/invalid-migration-id
+Content-Type: {{contentType}}
+
+###
+### 17. Test Cancel Already Completed Migration (Should Fail)
+###
+# POST {{baseUrl}}/api/migrations/completed-migration-id/cancel
+# Content-Type: {{contentType}}
+
+###
+### NOTES:
+### 
+### 1. Replace @migrationId variable with actual migration ID from responses
+### 2. Update real store credentials in sections 11-12 before testing with actual stores
+### 3. The API uses these BigCommerce fields:
+###    - storeId: Your BigCommerce store hash (e.g., "v6q95r5n91")
+###    - accessToken: Your BigCommerce API access token
+###    - channelId: Channel ID (usually "1" for main storefront)
+### 4. Expected responses:
+###    - POST /migrations: 202 Accepted with migration details
+###    - GET /migrations: 200 OK with migration list (or 204 if empty)
+###    - GET /migrations/{id}: 200 OK with migration status
+###    - POST /migrations/{id}/cancel: 200 OK with cancellation confirmation
+### 5. Error responses will be 400 Bad Request, 404 Not Found, or 500 Internal Server Error
+### 

@@ -1,0 +1,192 @@
+graph TD
+    A["Client Application"] --> B["StartMigration API<br/>(HTTP Trigger)"]
+    B --> C["Validate Request<br/>& Generate GUID"]
+    C --> D["Load Entity Configs<br/>(Per-Entity Settings)"]
+    D --> E["Queue Migration Request<br/>(Azure Queue Storage)"]
+    E --> F["Migration Orchestrator<br/>(Durable Function)"]
+    
+    F --> G["Initialize Migration<br/>(Log to OpenSearch)"]
+    G --> H["Phase 1: Dependencies<br/>(Parallel Processing)"]
+    
+    H --> I["Categories Worker<br/>(Batch:50, Concurrency:2)"]
+    H --> J["Brands Worker<br/>(Batch:30, Concurrency:2)"]
+    
+    I --> K["Rate Limiter Check<br/>(Table Storage)"]
+    J --> K
+    
+    K --> L["BigCommerce API<br/>(Source Store)"]
+    K --> M["BigCommerce API<br/>(Destination Store)"]
+    
+    L --> N["Store ID Mappings<br/>(Table Storage)"]
+    M --> N
+    
+    I --> O["Log Entity Success/Failure<br/>(OpenSearch)"]
+    J --> O
+    
+    H --> P["Phase 2: Products<br/>(Batch:10, Concurrency:4)"]
+    
+    P --> Q["Product Worker 1<br/>(Adaptive Batching)"]
+    P --> R["Product Worker 2<br/>(Adaptive Batching)"]
+    P --> S["Product Worker 3<br/>(Adaptive Batching)"]
+    P --> T["Product Worker N<br/>(Adaptive Batching)"]
+    
+    Q --> U["Performance Monitor<br/>(Processing Time/Errors)"]
+    R --> U
+    S --> U
+    T --> U
+    
+    U --> V["Adaptive Batch Sizer<br/>(Dynamic Optimization)"]
+    V --> W["Shared Rate Limiter<br/>(12 req/sec total)"]
+    
+    W --> X["Check ID Mappings<br/>(Categories/Brands)"]
+    X --> Y["Create/Update Product<br/>(BigCommerce API)"]
+    
+    Y --> Z["Phase 3: Components<br/>(Per Product)"]
+    
+    Z --> AA["Variants Worker<br/>(Batch:20, Concurrency:3)"]
+    Z --> BB["Images Worker<br/>(Batch:5, Concurrency:2)"]
+    Z --> CC["Modifiers Worker<br/>(Batch:15, Concurrency:2)"]
+    Z --> DD["Options Worker<br/>(Batch:25, Concurrency:3)"]
+    
+    AA --> W
+    BB --> W
+    CC --> W
+    DD --> W
+    
+    Q --> EE["Log Product Migration<br/>(OpenSearch)"]
+    R --> EE
+    S --> EE
+    T --> EE
+    
+    AA --> FF["Log Component Status<br/>(OpenSearch)"]
+    BB --> FF
+    CC --> FF
+    DD --> FF
+    
+    EE --> GG["Error Handling<br/>(If Failed)"]
+    FF --> GG
+    
+    GG --> HH["Log Detailed Errors<br/>(OpenSearch)"]
+    HH --> II["Continue Processing<br/>(Skip Failed Items)"]
+    
+    II --> JJ["Update Migration Status<br/>(OpenSearch)"]
+    JJ --> KK["Migration Complete<br/>(Final Status)"]
+    
+    LL["GetStatus API<br/>(HTTP Trigger)"] --> MM["Query OpenSearch<br/>(migration-status-*)"]
+    MM --> NN["Return Status<br/>(JSON Response)"]
+    
+    OO["GetAllMigrations API<br/>(HTTP Trigger)"] --> PP["Query OpenSearch<br/>(All Migrations)"]
+    PP --> QQ["Return Migration List<br/>(JSON Response)"]
+    
+    RR["GetMigrationErrors API<br/>(HTTP Trigger)"] --> SS["Query OpenSearch<br/>(migration-errors-*)"]
+    SS --> TT["Return Error Details<br/>(JSON Response)"]
+    
+    UU["ExportCSV API<br/>(HTTP Trigger)"] --> VV["Query All Migration Data<br/>(OpenSearch)"]
+    VV --> WW["Generate CSV Report<br/>(File Download)"]
+    
+    XX["CancelMigration API<br/>(HTTP Trigger)"] --> YY["Send Cancellation Token<br/>(Queue Storage)"]
+    YY --> ZZ["Stop Migration Process<br/>(Graceful Shutdown)"]
+    
+    AAA["EntityConfig API<br/>(HTTP Trigger)"] --> BBB["Get/Update Entity Settings<br/>(Table Storage)"]
+    BBB --> CCC["Return Config Data<br/>(JSON Response)"]
+    
+    DDD["Background Monitor<br/>(Timer Trigger)"] --> EEE["Check Migration Health<br/>(OpenSearch Query)"]
+    EEE --> FFF["Update Stuck Migrations<br/>(Timeout Detection)"]
+    
+    A --> LL
+    A --> OO
+    A --> RR
+    A --> UU
+    A --> XX
+    A --> AAA
+    
+    GGG["OpenSearch Indices"]
+    HHH["migration-status-{date}"]
+    III["migration-entities-{date}"]
+    JJJ["migration-errors-{date}"]
+    KKK["migration-audit-{date}"]
+    
+    GGG --> HHH
+    GGG --> III
+    GGG --> JJJ
+    GGG --> KKK
+    
+    G --> HHH
+    O --> III
+    EE --> III
+    FF --> III
+    HH --> JJJ
+    JJ --> HHH
+    
+    LLL["Table Storage Tables"]
+    MMM["ApiCallTracking<br/>(Rate Limiting)"]
+    NNN["EntityMappings<br/>(ID Mappings)"]
+    OOO["MigrationConfig<br/>(Settings)"]
+    PPP["DependencyGraph<br/>(Entity Dependencies)"]
+    QQQ["EntityConfiguration<br/>(Default Settings)"]
+    RRR["MigrationEntityConfig<br/>(Per-Migration Settings)"]
+    
+    LLL --> MMM
+    LLL --> NNN
+    LLL --> OOO
+    LLL --> PPP
+    LLL --> QQQ
+    LLL --> RRR
+    
+    K --> MMM
+    N --> NNN
+    F --> OOO
+    H --> PPP
+    D --> QQQ
+    V --> RRR
+    
+    SSS["Queue Storage Queues"]
+    TTT["migration-requests<br/>(Incoming Jobs)"]
+    UUU["entity-batches<br/>(Processing Queue)"]
+    VVV["cancellation-tokens<br/>(Stop Signals)"]
+    
+    SSS --> TTT
+    SSS --> UUU
+    SSS --> VVV
+    
+    E --> TTT
+    F --> UUU
+    YY --> VVV
+    
+    style A fill:#e1f5fe
+    style B fill:#e3f2fd
+    style LL fill:#e3f2fd
+    style OO fill:#e3f2fd
+    style RR fill:#e3f2fd
+    style UU fill:#e3f2fd
+    style XX fill:#e3f2fd
+    style AAA fill:#e3f2fd
+    style F fill:#ffebee
+    style I fill:#fce4ec
+    style J fill:#fce4ec
+    style Q fill:#fce4ec
+    style R fill:#fce4ec
+    style S fill:#fce4ec
+    style T fill:#fce4ec
+    style AA fill:#fce4ec
+    style BB fill:#fce4ec
+    style CC fill:#fce4ec
+    style DD fill:#fce4ec
+    style U fill:#fff3e0
+    style V fill:#fff3e0
+    style GGG fill:#e8f5e8
+    style HHH fill:#f1f8e9
+    style III fill:#f1f8e9
+    style JJJ fill:#f1f8e9
+    style KKK fill:#f1f8e9
+    style LLL fill:#fff3e0
+    style MMM fill:#fff8e1
+    style NNN fill:#fff8e1
+    style OOO fill:#fff8e1
+    style PPP fill:#fff8e1
+    style QQQ fill:#fff8e1
+    style RRR fill:#fff8e1
+    style SSS fill:#f3e5f5
+    style TTT fill:#fce4ec
+    style UUU fill:#fce4ec
+    style VVV fill:#fce4ec 

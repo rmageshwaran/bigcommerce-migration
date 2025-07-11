@@ -1,0 +1,58 @@
+# Simplified Dockerfile for BigCommerce Migration Functions - Local Testing
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+
+WORKDIR /src
+
+# Clear any existing NuGet cache and disable fallback folders
+ENV NUGET_PACKAGES=/root/.nuget/packages
+ENV DOTNET_SKIP_FIRST_TIME_EXPERIENCE=true
+RUN dotnet nuget locals all --clear
+
+# Copy only the required project files (no tests for now)
+COPY src/BigCommerce.Migration.Core/BigCommerce.Migration.Core.csproj src/BigCommerce.Migration.Core/
+COPY src/BigCommerce.Migration.Infrastructure/BigCommerce.Migration.Infrastructure.csproj src/BigCommerce.Migration.Infrastructure/
+COPY src/BigCommerce.Migration.Orchestration/BigCommerce.Migration.Orchestration.csproj src/BigCommerce.Migration.Orchestration/
+COPY src/BigCommerce.Migration.Functions/BigCommerce.Migration.Functions.csproj src/BigCommerce.Migration.Functions/
+
+# Restore only the Functions project and its dependencies with explicit settings
+RUN dotnet restore src/BigCommerce.Migration.Functions/BigCommerce.Migration.Functions.csproj \
+    --packages /root/.nuget/packages \
+    --force \
+    --no-cache
+
+# Copy source code
+COPY src/ src/
+
+# Build and publish only the Functions project
+RUN dotnet publish src/BigCommerce.Migration.Functions/BigCommerce.Migration.Functions.csproj \
+    -c Release \
+    -o /app/publish \
+    --no-restore \
+    /p:UseAppHost=false
+
+# Runtime stage
+FROM mcr.microsoft.com/azure-functions/dotnet-isolated:4-dotnet-isolated8.0
+
+# Install curl for health checks
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /home/site/wwwroot
+
+# Copy published application
+COPY --from=build /app/publish .
+
+# Copy local settings for Docker
+COPY src/BigCommerce.Migration.Functions/local.settings.docker.json ./local.settings.json
+
+# Expose the default Azure Functions port
+EXPOSE 80
+
+# Set environment variables for Azure Functions
+ENV AzureWebJobsScriptRoot=/home/site/wwwroot \
+    AzureFunctionsJobHost__Logging__Console__IsEnabled=true \
+    AzureWebJobsFeatureFlags=EnableWorkerIndexing
+
+# Health check endpoint
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost/api/health || exit 1 

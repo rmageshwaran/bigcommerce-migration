@@ -1,0 +1,131 @@
+version: '3.8'
+
+services:
+  # Azure Storage Emulator (Azurite) for local development
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:latest
+    container_name: bigcommerce-azurite
+    ports:
+      - "10000:10000"  # Blob service
+      - "10001:10001"  # Queue service  
+      - "10002:10002"  # Table service
+    volumes:
+      - azurite-data:/data
+    command: "azurite --silent --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0 --location /data --debug /data/debug.log"
+    environment:
+      - AZURITE_ACCOUNTS=devstoreaccount1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:10000/devstoreaccount1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # BigCommerce Migration Functions
+  bigcommerce-functions:
+    build:
+      context: .
+      dockerfile: Dockerfile.functions
+    container_name: bigcommerce-functions
+    ports:
+      - "7071:80"
+    environment:
+      # Core Function Configuration
+      - AzureWebJobsStorage=DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;QueueEndpoint=http://azurite:10001/devstoreaccount1;TableEndpoint=http://azurite:10002/devstoreaccount1;
+      - FUNCTIONS_WORKER_RUNTIME=dotnet-isolated
+      - WEBSITE_RUN_FROM_PACKAGE=1
+      - FUNCTIONS_EXTENSION_VERSION=~4
+      - ASPNETCORE_ENVIRONMENT=Development
+      
+      # Queue Configuration (matches our fixed environment variables)
+      - MigrationStartQueueName=migration-start
+      - EntityBatchQueueName=entity-batch
+      - BatchCompletionQueueName=batch-completion
+      - CancellationQueueName=cancellation
+      - ProgressUpdateQueueName=progress-update
+      - DeadLetterQueueName=dead-letter
+      - RetryQueueName=retry
+      
+      # BigCommerce Configuration
+      - BigCommerce__RateLimitRequestsPerSecond=12
+      - BigCommerce__UserAgent=BigCommerce-Migration-System/1.0-Docker
+      - BigCommerce__BaseUrl=https://api.bigcommerce.com
+      - BigCommerce__RequestTimeout=00:00:30
+      - BigCommerce__MaxRetries=3
+      - BigCommerce__EnableDebugLogging=true
+      
+      # OpenSearch Configuration (External AWS)
+      - OpenSearch__Endpoint=https://search-bigcommerceinsights-co3k7jb4ukk565b4c3bskzucpm.us-east-1.es.amazonaws.com
+      - OpenSearch__Username=admin
+      - OpenSearch__Password=VIQInsights@123
+      - OpenSearch__DefaultIndex=migration-local-docker
+      - OpenSearch__RequestTimeout=00:00:30
+      - OpenSearch__MaxRetries=3
+      - OpenSearch__EnableDebugMode=true
+      
+      # Processing Configuration
+      - AppSettings__BatchSize=10
+      - AppSettings__MaxConcurrency=3
+      - AppSettings__RetryAttempts=3
+      
+      # SignalR Configuration (optional for local testing)
+      - AzureSignalR=Endpoint=http://localhost:8080;Port=8080;
+      
+      # Logging Configuration
+      - Logging__LogLevel__Default=Information
+      - Logging__LogLevel__BigCommerce.Migration=Debug
+      - Logging__LogLevel__Microsoft=Warning
+      
+    depends_on:
+      azurite:
+        condition: service_healthy
+    volumes:
+      - ./src/BigCommerce.Migration.Functions:/app
+      - functions-logs:/tmp/functions-logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  # Migration Dashboard (React App)
+  bigcommerce-dashboard:
+    build:
+      context: ./src/BigCommerce.Migration.Dashboard
+      dockerfile: Dockerfile.dev
+    container_name: bigcommerce-dashboard
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_BASE_URL=http://localhost:7071/api/dashboard
+      - REACT_APP_SIGNALR_URL=http://localhost:7071/api
+      - REACT_APP_ENVIRONMENT=development
+      - CHOKIDAR_USEPOLLING=true
+    volumes:
+      - ./src/BigCommerce.Migration.Dashboard/src:/app/src
+      - ./src/BigCommerce.Migration.Dashboard/public:/app/public
+      - /app/node_modules
+    depends_on:
+      - bigcommerce-functions
+    restart: unless-stopped
+
+  # Optional: SignalR Service (for real-time updates)
+  signalr-emulator:
+    image: mcr.microsoft.com/signalr/signalr:latest
+    container_name: bigcommerce-signalr
+    ports:
+      - "8080:80"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+    restart: unless-stopped
+
+volumes:
+  azurite-data:
+    driver: local
+  functions-logs:
+    driver: local
+
+networks:
+  default:
+    name: bigcommerce-migration-network 

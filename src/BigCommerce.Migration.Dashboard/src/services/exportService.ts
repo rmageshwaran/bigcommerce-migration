@@ -101,9 +101,9 @@ export interface PerformanceExportData {
 
 class ExportService {
   // Generate filename with timestamp
-  private generateFilename(baseName: string, format: ExportFormat, includeTimestamp = true): string {
+  private generateFilename(baseName: string, formatType: ExportFormat, includeTimestamp = true): string {
     const timestamp = includeTimestamp ? `_${format(new Date(), 'yyyy-MM-dd_HH-mm-ss')}` : '';
-    const extension = format === 'excel' ? 'xlsx' : format;
+    const extension = formatType === 'excel' ? 'xlsx' : formatType;
     return `${baseName}${timestamp}.${extension}`;
   }
 
@@ -477,13 +477,13 @@ class ExportService {
 
     // Headers
     pdf.setFontSize(8);
-    pdf.setFont(undefined, 'bold');
+    pdf.setFont('helvetica', 'bold');
     headers.forEach((header, index) => {
       pdf.text(header, margin + (index * colWidth), tableY);
     });
 
     // Data rows
-    pdf.setFont(undefined, 'normal');
+    pdf.setFont('helvetica', 'normal');
     let currentY = tableY + rowHeight;
 
     rows.forEach((row, rowIndex) => {

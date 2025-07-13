@@ -58,5 +58,71 @@ namespace BigCommerce.Migration.Core.Interfaces
         /// <param name="healthData">System health data</param>
         /// <param name="cancellationToken">Cancellation token</param>
         Task BroadcastSystemHealthAsync(object healthData, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Broadcast migration started notification
+        /// </summary>
+        /// <param name="migrationId">Migration ID</param>
+        /// <param name="migrationData">Migration start data</param>
+        /// <param name="cancellationToken">Cancellation token</param>
+        Task BroadcastMigrationStartedAsync(string migrationId, object migrationData, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Broadcast migration completed notification
+        /// </summary>
+        /// <param name="migrationId">Migration ID</param>
+        /// <param name="completionData">Migration completion data</param>
+        /// <param name="cancellationToken">Cancellation token</param>
+        Task BroadcastMigrationCompletedAsync(string migrationId, object completionData, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Broadcast migration failed notification
+        /// </summary>
+        /// <param name="migrationId">Migration ID</param>
+        /// <param name="errorData">Error data</param>
+        /// <param name="cancellationToken">Cancellation token</param>
+        Task BroadcastMigrationFailedAsync(string migrationId, object errorData, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Broadcast migration cancelled notification
+        /// </summary>
+        /// <param name="migrationId">Migration ID</param>
+        /// <param name="cancellationData">Cancellation data</param>
+        /// <param name="cancellationToken">Cancellation token</param>
+        Task BroadcastMigrationCancelledAsync(string migrationId, object cancellationData, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Broadcast entity phase started notification
+        /// </summary>
+        /// <param name="migrationId">Migration ID</param>
+        /// <param name="entityType">Entity type</param>
+        /// <param name="phaseData">Phase start data</param>
+        /// <param name="cancellationToken">Cancellation token</param>
+        Task BroadcastEntityPhaseStartAsync(string migrationId, string entityType, object phaseData, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Broadcast entity phase completed notification
+        /// </summary>
+        /// <param name="migrationId">Migration ID</param>
+        /// <param name="entityType">Entity type</param>
+        /// <param name="completionData">Phase completion data</param>
+        /// <param name="cancellationToken">Cancellation token</param>
+        Task BroadcastEntityPhaseCompletedAsync(string migrationId, string entityType, object completionData, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Broadcast error notification for real-time error alerts
+        /// </summary>
+        /// <param name="migrationId">Migration ID</param>
+        /// <param name="errorData">Error data with context</param>
+        /// <param name="cancellationToken">Cancellation token</param>
+        Task BroadcastErrorNotificationAsync(string migrationId, object errorData, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Broadcast system alert notification
+        /// </summary>
+        /// <param name="alertType">Alert type</param>
+        /// <param name="alertData">Alert data</param>
+        /// <param name="cancellationToken">Cancellation token</param>
+        Task BroadcastSystemAlertAsync(string alertType, object alertData, CancellationToken cancellationToken = default);
     }
 } 

@@ -79,7 +79,7 @@ export const useMigrationProgress = (
     
     try {
       // Fetch current migration status from API
-      const response = await fetch(`/api/dashboard/migrations/${migrationId}/status`);
+              const response = await fetch(`/api/dashboard/migrations/${migrationId}/status`);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }

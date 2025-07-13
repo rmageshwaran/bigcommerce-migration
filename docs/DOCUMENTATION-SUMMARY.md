@@ -45,6 +45,12 @@
 - **OpenSearch-Logging-Strategy.md** - OpenSearch implementation
 - **OpenSearch-Index-Schemas-Complete.md** - Complete index schemas
 - **OpenSearch-Logging-Performance-Optimization.md** - Performance optimization
+- **Logging-API-Query-Capabilities.md** - **🆕 CRITICAL: Comprehensive logging API query documentation**
+- **Logging-API-Quick-Reference.md** - **🆕 CRITICAL: Quick reference guide for common queries**
+
+### 📱 **DASHBOARD INTEGRATION**
+- **Dashboard-E2E-Integration-Plan.md** - **🆕 CRITICAL: Comprehensive dashboard E2E integration plan with real-time notifications**
+- **Dashboard-Integration-Task-Tracker.md** - **🆕 CRITICAL: Detailed task tracking and progress monitoring for dashboard integration**
 
 ### 🎯 **ENTERPRISE FEATURES**
 - **Enterprise-Implementation-Standards.md** - Enterprise-grade standards

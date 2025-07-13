@@ -94,6 +94,12 @@ namespace BigCommerce.Migration.Functions.Hubs
         /// <param name="cancellationToken">Cancellation token</param>
         public async Task SendMigrationProgress(string migrationId, object progress, CancellationToken cancellationToken = default)
         {
+            if (_hubContext == null)
+            {
+                _logger.LogWarning("SignalR hub context not available. Progress update for {MigrationId} not sent.", migrationId);
+                return;
+            }
+
             try
             {
                 var groupName = GetMigrationGroupName(migrationId);
@@ -115,6 +121,12 @@ namespace BigCommerce.Migration.Functions.Hubs
         /// <param name="cancellationToken">Cancellation token</param>
         public async Task SendMigrationStatus(string migrationId, object status, CancellationToken cancellationToken = default)
         {
+            if (_hubContext == null)
+            {
+                _logger.LogWarning("SignalR hub context not available. Status update for {MigrationId} not sent.", migrationId);
+                return;
+            }
+
             try
             {
                 var groupName = GetMigrationGroupName(migrationId);

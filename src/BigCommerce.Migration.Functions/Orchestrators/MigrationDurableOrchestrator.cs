@@ -43,13 +43,30 @@ public static class MigrationDurableOrchestrator
         {
             logger.LogInformation("Starting migration orchestration for MigrationId: {MigrationId}", migrationId);
 
+            // Broadcast migration started event
+            await context.CallActivityAsync<bool>(
+                "BroadcastMigrationStarted",
+                new
+                {
+                    MigrationId = migrationId,
+                    Data = new
+                    {
+                        Status = "Started",
+                        SourceStore = input.MigrationRequest?.SourceStore?.StoreId ?? string.Empty,
+                        DestinationStore = input.MigrationRequest?.DestinationStore?.StoreId ?? string.Empty,
+                        RequestedEntities = input.MigrationRequest?.Entities ?? new List<string>(),
+                        StartTime = context.CurrentUtcDateTime,
+                        TotalEntityTypes = input.MigrationRequest?.Entities?.Count ?? 0
+                    }
+                });
+
             // Step 1: Initialize Migration
             logger.LogInformation("Step 1: Initializing migration for MigrationId: {MigrationId}", migrationId);
             var initializeResult = await context.CallActivityAsync<InitializeMigrationResult>(
                 "InitializeMigration", 
                 new InitializeMigrationRequest 
                 { 
-                    MigrationRequest = input.MigrationRequest,
+                    MigrationRequest = input.MigrationRequest ?? new MigrationRequest(),
                     CategoryTreeContext = input.CategoryTreeContext
                 });
 
@@ -67,8 +84,8 @@ public static class MigrationDurableOrchestrator
                 "ValidateMigrationStores",
                 new ValidateStoresRequest
                 {
-                    SourceStore = input.MigrationRequest.SourceStore ?? new StoreConfiguration(),
-                    DestinationStore = input.MigrationRequest.DestinationStore ?? new StoreConfiguration()
+                    SourceStore = input.MigrationRequest?.SourceStore ?? new StoreConfiguration(),
+                    DestinationStore = input.MigrationRequest?.DestinationStore ?? new StoreConfiguration()
                 });
 
             if (!validateResult.IsValid)
@@ -86,8 +103,8 @@ public static class MigrationDurableOrchestrator
                 new ResolveCategoryTreeIdsRequest
                 {
                     MigrationId = migrationId,
-                    SourceStore = input.MigrationRequest.SourceStore ?? new StoreConfiguration(),
-                    DestinationStore = input.MigrationRequest.DestinationStore ?? new StoreConfiguration(),
+                    SourceStore = input.MigrationRequest?.SourceStore ?? new StoreConfiguration(),
+                    DestinationStore = input.MigrationRequest?.DestinationStore ?? new StoreConfiguration(),
                     CategoryTreeContext = input.CategoryTreeContext
                 });
 
@@ -108,7 +125,7 @@ public static class MigrationDurableOrchestrator
             }
 
             // Step 5: Process entities in dependency order
-            var entityOrder = GetEntityDependencyOrder(input.MigrationRequest.Entities);
+            var entityOrder = GetEntityDependencyOrder(input.MigrationRequest?.Entities ?? new List<string>());
             logger.LogInformation("Step 5: Processing {EntityCount} entity types in dependency order for MigrationId: {MigrationId}", 
                 entityOrder.Count, migrationId);
 
@@ -116,6 +133,27 @@ public static class MigrationDurableOrchestrator
             {
                 logger.LogInformation("Processing entity type: {EntityType} for MigrationId: {MigrationId}", 
                     entityType, migrationId);
+
+                // Broadcast entity phase started event
+                await context.CallActivityAsync<bool>(
+                    "BroadcastEntityPhaseStarted",
+                    new
+                    {
+                        MigrationId = migrationId,
+                        EntityType = entityType,
+                        Data = new
+                        {
+                            Status = "EntityStarted",
+                            EntityType = entityType,
+                            StartTime = context.CurrentUtcDateTime,
+                            OverallProgress = new
+                            {
+                                CompletedEntityTypes = result.EntityResults.Count,
+                                TotalEntityTypes = entityOrder.Count,
+                                PercentComplete = (double)result.EntityResults.Count / entityOrder.Count * 100
+                            }
+                        }
+                    });
 
                 // Check for cancellation before each entity
                 var entityCancellationCheck = await context.CallActivityAsync<CheckCancellationResult>(
@@ -161,6 +199,35 @@ public static class MigrationDurableOrchestrator
                                             "Processed: {ProcessedCount} entities", 
                             entityType, migrationId, entityResult.ProcessedEntities);
                     }
+
+                    // Broadcast entity phase completed event
+                    await context.CallActivityAsync<bool>(
+                        "BroadcastEntityPhaseCompleted",
+                        new
+                        {
+                            MigrationId = migrationId,
+                            EntityType = entityType,
+                            Data = new
+                            {
+                                Status = "EntityCompleted",
+                                EntityType = entityType,
+                                EndTime = context.CurrentUtcDateTime,
+                                Results = new
+                                {
+                                    ProcessedEntities = entityResult.ProcessedEntities,
+                                    SuccessfulEntities = entityResult.SuccessfulEntities,
+                                    FailedEntities = entityResult.FailedEntities,
+                                    IsSuccess = entityResult.IsSuccess,
+                                    ProcessingTime = entityResult.EndTime - entityResult.StartTime
+                                },
+                                OverallProgress = new
+                                {
+                                    CompletedEntityTypes = result.EntityResults.Count,
+                                    TotalEntityTypes = entityOrder.Count,
+                                    PercentComplete = (double)result.EntityResults.Count / entityOrder.Count * 100
+                                }
+                            }
+                        });
                 }
                 catch (Exception ex)
                 {
@@ -201,6 +268,24 @@ public static class MigrationDurableOrchestrator
             {
                 result.Status = "Failed";
                 result.ErrorMessage = "No entities were processed";
+                
+                // Broadcast migration failed event
+                await context.CallActivityAsync<bool>(
+                    "BroadcastMigrationFailed",
+                    new
+                    {
+                        MigrationId = migrationId,
+                        Data = new
+                        {
+                            Status = "Failed",
+                            ErrorMessage = result.ErrorMessage,
+                            EndTime = result.EndTime,
+                            Duration = result.Duration,
+                            TotalEntitiesProcessed = totalProcessed,
+                            TotalEntitiesSuccessful = totalSuccessful,
+                            TotalEntitiesFailed = totalFailed
+                        }
+                    });
             }
             else if (totalFailed == 0)
             {
@@ -208,6 +293,24 @@ public static class MigrationDurableOrchestrator
                 logger.LogInformation("Migration completed successfully for MigrationId: {MigrationId}. " +
                                     "Processed: {ProcessedCount}, Successful: {SuccessfulCount}", 
                     migrationId, totalProcessed, totalSuccessful);
+                
+                // Broadcast migration completed event
+                await context.CallActivityAsync<bool>(
+                    "BroadcastMigrationCompleted",
+                    new
+                    {
+                        MigrationId = migrationId,
+                        Data = new
+                        {
+                            Status = "Completed",
+                            EndTime = result.EndTime,
+                            Duration = result.Duration,
+                            TotalEntitiesProcessed = totalProcessed,
+                            TotalEntitiesSuccessful = totalSuccessful,
+                            TotalEntitiesFailed = totalFailed,
+                            EntityResults = result.EntityResults
+                        }
+                    });
             }
             else if (totalSuccessful > 0)
             {
@@ -216,6 +319,25 @@ public static class MigrationDurableOrchestrator
                 logger.LogWarning("Migration completed with errors for MigrationId: {MigrationId}. " +
                                 "Processed: {ProcessedCount}, Successful: {SuccessfulCount}, Failed: {FailedCount}", 
                     migrationId, totalProcessed, totalSuccessful, totalFailed);
+                
+                // Broadcast migration completed with errors event
+                await context.CallActivityAsync<bool>(
+                    "BroadcastMigrationCompleted",
+                    new
+                    {
+                        MigrationId = migrationId,
+                        Data = new
+                        {
+                            Status = "CompletedWithErrors",
+                            ErrorMessage = result.ErrorMessage,
+                            EndTime = result.EndTime,
+                            Duration = result.Duration,
+                            TotalEntitiesProcessed = totalProcessed,
+                            TotalEntitiesSuccessful = totalSuccessful,
+                            TotalEntitiesFailed = totalFailed,
+                            EntityResults = result.EntityResults
+                        }
+                    });
             }
             else
             {
@@ -223,6 +345,25 @@ public static class MigrationDurableOrchestrator
                 result.ErrorMessage = $"All {totalFailed} entities failed to migrate";
                 logger.LogError("Migration failed - all entities failed for MigrationId: {MigrationId}. " +
                               "Failed: {FailedCount}", migrationId, totalFailed);
+                
+                // Broadcast migration failed event
+                await context.CallActivityAsync<bool>(
+                    "BroadcastMigrationFailed",
+                    new
+                    {
+                        MigrationId = migrationId,
+                        Data = new
+                        {
+                            Status = "Failed",
+                            ErrorMessage = result.ErrorMessage,
+                            EndTime = result.EndTime,
+                            Duration = result.Duration,
+                            TotalEntitiesProcessed = totalProcessed,
+                            TotalEntitiesSuccessful = totalSuccessful,
+                            TotalEntitiesFailed = totalFailed,
+                            EntityResults = result.EntityResults
+                        }
+                    });
             }
 
             return result;
@@ -233,6 +374,25 @@ public static class MigrationDurableOrchestrator
             result.Status = "Cancelled";
             result.ErrorMessage = "Migration orchestration was cancelled";
             result.EndTime = context.CurrentUtcDateTime;
+            
+            // Broadcast migration cancelled event
+            await context.CallActivityAsync<bool>(
+                "BroadcastMigrationCancelled",
+                new
+                {
+                    MigrationId = migrationId,
+                    Data = new
+                    {
+                        Status = "Cancelled",
+                        ErrorMessage = result.ErrorMessage,
+                        EndTime = result.EndTime,
+                        Duration = result.EndTime.Value - result.StartTime,
+                        TotalEntitiesProcessed = result.TotalEntitiesProcessed,
+                        TotalEntitiesSuccessful = result.TotalEntitiesSuccessful,
+                        TotalEntitiesFailed = result.TotalEntitiesFailed
+                    }
+                });
+            
             return result;
         }
         catch (Exception ex)

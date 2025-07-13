@@ -20,6 +20,7 @@ public class ProcessEntityBatchActivity
     private readonly IOpenSearchService _openSearchService;
     private readonly IMigrationStorageService _migrationStorageService;
     private readonly IBlobService _blobService;
+    private readonly IMigrationSignalRService _signalRService;
 
     // Supported entity types for validation
     private static readonly string[] SupportedEntityTypes = new[]
@@ -33,7 +34,8 @@ public class ProcessEntityBatchActivity
         IRateLimitService rateLimitService,
         IOpenSearchService openSearchService,
         IMigrationStorageService migrationStorageService,
-        IBlobService blobService)
+        IBlobService blobService,
+        IMigrationSignalRService signalRService)
     {
         _apiClient = apiClient ?? throw new ArgumentNullException(nameof(apiClient));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -41,6 +43,7 @@ public class ProcessEntityBatchActivity
         _openSearchService = openSearchService ?? throw new ArgumentNullException(nameof(openSearchService));
         _migrationStorageService = migrationStorageService ?? throw new ArgumentNullException(nameof(migrationStorageService));
         _blobService = blobService ?? throw new ArgumentNullException(nameof(blobService));
+        _signalRService = signalRService ?? throw new ArgumentNullException(nameof(signalRService));
     }
 
     /// <summary>
@@ -787,6 +790,16 @@ public class ProcessEntityBatchActivity
                 catch (Exception logEx)
                 {
                     _logger.LogWarning(logEx, "Failed to log structured error for entity {EntityId} in migration {MigrationId}", entityId, request.MigrationId);
+                }
+
+                // ENHANCED: Real-time error broadcasting for dashboard
+                try
+                {
+                    await BroadcastEntityErrorAsync(ex, entity, request, entityId, cancellationToken);
+                }
+                catch (Exception broadcastEx)
+                {
+                    _logger.LogWarning(broadcastEx, "Failed to broadcast real-time error for entity {EntityId} in migration {MigrationId}", entityId, request.MigrationId);
                 }
             }
         }
@@ -1615,5 +1628,82 @@ public class ProcessEntityBatchActivity
 
         // Take first part and add truncation notice
         return stackTrace.Substring(0, MAX_STACK_TRACE_LENGTH) + "\n... [STACK TRACE TRUNCATED]";
+    }
+
+    /// <summary>
+    /// Broadcasts real-time error notification for individual entity failures
+    /// </summary>
+    /// <param name="exception">Exception that occurred</param>
+    /// <param name="entity">Entity that failed</param>
+    /// <param name="request">Batch processing request</param>
+    /// <param name="entityId">Entity identifier</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    private async Task BroadcastEntityErrorAsync(
+        Exception exception, 
+        Dictionary<string, object> entity, 
+        BatchProcessingRequest request, 
+        string entityId,
+        CancellationToken cancellationToken)
+    {
+        // Extract error details
+        var httpStatusCode = ExtractHttpStatusFromException(exception);
+        var responsePayload = ExtractResponsePayloadFromException(exception);
+        
+        // Get entity name for blob storage
+        var entityName = entity.TryGetValue("name", out var name) ? name.ToString() : entityId;
+        
+        // Store error payloads for detailed investigation
+        var requestPayload = JsonSerializer.Serialize(entity, new JsonSerializerOptions { WriteIndented = true });
+        var requestId = $"{request.MigrationId}_{request.EntityType}_{entityId}_{DateTime.UtcNow:yyyyMMddHHmmss}";
+        
+        string? requestBlobUrl = null;
+        string? responseBlobUrl = null;
+        
+        try
+        {
+            var (requestPayloadRef, responsePayloadRef) = await StorePayloadsAsync(
+                request.MigrationId, 
+                requestId, 
+                requestPayload, 
+                responsePayload, 
+                entityName ?? "unknown");
+                
+            requestBlobUrl = requestPayloadRef.BlobUrl;
+            responseBlobUrl = responsePayloadRef.BlobUrl;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to store error payloads for entity {EntityId} in migration {MigrationId}", entityId, request.MigrationId);
+        }
+
+        // Create structured error data for dashboard
+        var errorData = new
+        {
+            EntityType = request.EntityType,
+            EntityId = entityId,
+            EntityName = entityName,
+            ErrorMessage = exception.Message,
+            ErrorType = exception.GetType().Name,
+            HttpStatusCode = httpStatusCode,
+            Timestamp = DateTime.UtcNow,
+            BatchNumber = request.BatchNumber,
+            TotalBatches = request.TotalBatches,
+            RequestPayloadBlobUrl = requestBlobUrl,
+            ResponsePayloadBlobUrl = responseBlobUrl,
+            SourceStore = new 
+            {
+                StoreId = request.SourceStore.StoreId
+            },
+            DestinationStore = new 
+            {
+                StoreId = request.DestinationStore.StoreId
+            }
+        };
+
+        // Broadcast real-time error notification
+        await _signalRService.BroadcastErrorNotificationAsync(request.MigrationId, errorData, cancellationToken);
+        
+        _logger.LogDebug("Broadcasted real-time error notification for {EntityType} {EntityId} in migration {MigrationId}", 
+            request.EntityType, entityId, request.MigrationId);
     }
 } 

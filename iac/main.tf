@@ -53,14 +53,46 @@ resource "azurerm_windows_function_app" "function_app" {
   }
 
   app_settings = {
-    "FUNCTIONS_WORKER_RUNTIME"              = var.worker_runtime
-    "WEBSITE_RUN_FROM_PACKAGE"              = var.run_from_package
-    "AzureWebJobsStorage"                   = data.azurerm_storage_account.existing_sa.primary_connection_string
+    "FUNCTIONS_WORKER_RUNTIME"             = var.worker_runtime
+    "WEBSITE_RUN_FROM_PACKAGE"             = var.run_from_package
+    "AzureWebJobsStorage"                  = data.azurerm_storage_account.existing_sa.primary_connection_string
+    "APPINSIGHTS_INSTRUMENTATIONKEY"       = azurerm_application_insights.app_insights.instrumentation_key
     "APPLICATIONINSIGHTS_CONNECTION_STRING" = azurerm_application_insights.app_insights.connection_string
-    "QueueName" : "bigcommerce-migration-request-queue",
-    "EntityMigrationRequestQueueName" : "bigcommerce-migration-request-queue",
-    "OutputQueueName" : "bigcommerce-migration-splitter-queue",
-    "AppSettings__BatchSize" : 100,
-    "ProductProcessingQueueName" : "product-processing-queue"
+
+    # SignalR Connection String (matches ConnectionStrings section in appsettings.json)
+    "AzureSignalR" = azurerm_signalr_service.migration_signalr.primary_connection_string
+
+    # Queue Configuration (matches appsettings.json)
+    "MigrationStartQueueName"              = "migration-start"
+    "EntityBatchQueueName"                 = "entity-batch"
+    "BatchCompletionQueueName"             = "batch-completion"
+    "CancellationQueueName"                = "cancellation"
+    "ProgressUpdateQueueName"              = "progress-update"
+    "DeadLetterQueueName"                  = "dead-letter"
+    "RetryQueueName"                       = "retry"
   }
+}
+
+# SignalR Service for real-time updates
+resource "azurerm_signalr_service" "migration_signalr" {
+  name                = "${var.function_app_name}-signalr"
+  location           = data.azurerm_resource_group.existing_rg.location
+  resource_group_name = data.azurerm_resource_group.existing_rg.name
+
+  sku {
+    name     = var.signalr_sku_name
+    capacity = var.signalr_capacity
+  }
+
+  service_mode = "Serverless"
+
+  cors {
+    allowed_origins = var.allowed_origins
+  }
+}
+
+# Output SignalR endpoint for reference
+output "signalr_endpoint" {
+  description = "SignalR service endpoint"
+  value       = azurerm_signalr_service.migration_signalr.hostname
 }

@@ -17,6 +17,7 @@ import {
   Settings as SettingsIcon,
   History as HistoryIcon,
   MonitorHeart as MonitorIcon,
+  PlayArrow as PlayArrowIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 
@@ -32,6 +33,7 @@ interface NavigationItem {
 
 const navigationItems: NavigationItem[] = [
   { text: 'Overview', icon: <DashboardIcon />, path: '/' },
+  { text: 'Start Migration', icon: <PlayArrowIcon />, path: '/start' },
   { text: 'Active Migrations', icon: <AssessmentIcon />, path: '/migrations' },
   { text: 'System Health', icon: <MonitorIcon />, path: '/health' },
   { text: 'Queue Status', icon: <QueueIcon />, path: '/queues' },

@@ -22,7 +22,7 @@ export class ApiService {
 
   constructor(config: Partial<ApiConfig> = {}) {
     this.config = {
-      baseURL: config.baseURL || '/api/dashboard',
+      baseURL: config.baseURL || '/api',
       timeout: config.timeout || 10000, // 10 seconds
       maxRetries: config.maxRetries || 3,
       retryDelay: config.retryDelay || 1000 // 1 second
@@ -164,21 +164,21 @@ export class ApiService {
    * Get migration status by ID
    */
   public async getMigrationStatus(migrationId: string): Promise<MigrationProgress> {
-    return this.get<MigrationProgress>(`/migrations/${migrationId}/status`);
+    return this.get<MigrationProgress>(`/dashboard/migrations/${migrationId}/status`);
   }
 
   /**
    * Get list of active migrations
    */
   public async getActiveMigrations(): Promise<PaginatedResponse<MigrationProgress>> {
-    return this.get<PaginatedResponse<MigrationProgress>>('/migrations');
+    return this.get<PaginatedResponse<MigrationProgress>>('/dashboard/migrations');
   }
 
   /**
    * Start a new migration
    */
   public async startMigration(migrationRequest: any): Promise<ApiResponse<string>> {
-    return this.post<ApiResponse<string>>('/migrations/start', migrationRequest);
+    return this.post<ApiResponse<string>>('/migrations', migrationRequest);
   }
 
   /**
@@ -208,14 +208,14 @@ export class ApiService {
    * Get system health status
    */
   public async getSystemHealth(): Promise<SystemHealthData> {
-    return this.get<SystemHealthData>('/health');
+    return this.get<SystemHealthData>('/dashboard/health');
   }
 
   /**
    * Get queue status and metrics
    */
   public async getQueueStatus(): Promise<QueueStatusData> {
-    return this.get<QueueStatusData>('/queues');
+    return this.get<QueueStatusData>('/dashboard/queues');
   }
 
   /**
@@ -227,7 +227,7 @@ export class ApiService {
       endDate: timeRange.endDate.toISOString()
     } : {};
     
-    return this.get<MigrationStatistics>('/statistics', { params });
+    return this.get<MigrationStatistics>('/dashboard/statistics', { params });
   }
 
   // Configuration and utility methods
@@ -237,7 +237,7 @@ export class ApiService {
    */
   public async testConnection(): Promise<boolean> {
     try {
-      await this.get('/health');
+      await this.get('/dashboard/health');
       return true;
     } catch (error) {
       console.error('API connection test failed:', error);

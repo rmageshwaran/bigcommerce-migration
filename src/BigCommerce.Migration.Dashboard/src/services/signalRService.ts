@@ -26,7 +26,7 @@ export class SignalRService {
   private initializeConnection(): void {
     this.connection = new signalR.HubConnectionBuilder()
       .withUrl(this.hubUrl, {
-        skipNegotiation: true,
+        skipNegotiation: false, // Azure SignalR requires negotiation
         transport: signalR.HttpTransportType.WebSockets,
         accessTokenFactory: () => {
           // Add authentication token if needed
@@ -125,6 +125,10 @@ export class SignalRService {
 
     if (this.connectionState === 'Connected') {
       return;
+    }
+
+    if (this.connectionState === 'Connecting') {
+      return; // Already connecting, don't start another connection attempt
     }
 
     try {
@@ -293,7 +297,7 @@ export const getSignalRService = (hubUrl?: string): SignalRService => {
   if (!signalRServiceInstance) {
     if (!hubUrl) {
       // Default to localhost for development
-      hubUrl = 'http://localhost:7071/api';
+      hubUrl = 'http://localhost:7071';
     }
     signalRServiceInstance = new SignalRService(hubUrl);
   }

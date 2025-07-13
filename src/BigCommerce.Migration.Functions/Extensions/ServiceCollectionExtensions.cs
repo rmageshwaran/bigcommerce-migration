@@ -3,6 +3,7 @@ using BigCommerce.Migration.Core.Models;
 using BigCommerce.Migration.Infrastructure.Services;
 using BigCommerce.Migration.Functions.Services;
 using BigCommerce.Migration.Functions.Middleware;
+using BigCommerce.Migration.Functions.Hubs;
 using BigCommerce.Migration.Orchestration.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -11,6 +12,7 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Azure.SignalR.Management;
+using Microsoft.Extensions.Azure;
 
 namespace BigCommerce.Migration.Functions.Extensions;
 
@@ -33,28 +35,28 @@ public static class ServiceCollectionExtensions
         // Validate configuration parameter
         if (configuration == null)
             throw new ArgumentNullException(nameof(configuration));
-            
+
         // Add configuration bindings
         services.AddConfiguration(configuration);
-        
+
         // Add HTTP clients
         services.AddHttpClients(configuration);
-        
+
         // Add core services
         services.AddCoreServices();
-        
+
         // Add SignalR services
         services.AddSignalRServices(configuration);
-        
+
         // Add health checks
         services.AddBigCommerceMigrationHealthChecks();
-        
+
         // Add OpenAPI documentation
         services.AddOpenApiConfiguration();
-        
+
         // Add logging
         services.AddLogging();
-        
+
         return services;
     }
 
@@ -65,30 +67,30 @@ public static class ServiceCollectionExtensions
     {
         // Validate critical configuration sections early
         ValidateConfigurationSections(configuration);
-        
+
         // Bind BigCommerce global configuration using Options pattern
         services.Configure<BigCommerceConfiguration>(configuration.GetSection("BigCommerce"));
-        
+
         // Validate BigCommerce configuration
         var bigCommerceConfig = new BigCommerceConfiguration();
         configuration.GetSection("BigCommerce").Bind(bigCommerceConfig);
-        
+
         if (!bigCommerceConfig.IsValid())
         {
             var errors = GetBigCommerceConfigurationErrors(bigCommerceConfig);
             throw new ArgumentException($"Invalid BigCommerce global configuration. Issues found:\n{string.Join("\n", errors)}");
         }
-        
+
         // Also register as singleton for backward compatibility
         services.AddSingleton(bigCommerceConfig);
-        
+
         // Bind OpenSearch configuration using Options pattern
         services.Configure<OpenSearchConfiguration>(configuration.GetSection("OpenSearch"));
-        
+
         // Validate OpenSearch configuration (only if configuration is provided)
         var openSearchConfig = new OpenSearchConfiguration();
         configuration.GetSection("OpenSearch").Bind(openSearchConfig);
-        
+
         // Only validate if OpenSearch configuration is actually provided
         var openSearchSection = configuration.GetSection("OpenSearch");
         if (openSearchSection.Exists() && !openSearchConfig.IsValidEndpoint())
@@ -96,10 +98,10 @@ public static class ServiceCollectionExtensions
             var errors = GetOpenSearchConfigurationErrors(openSearchConfig);
             throw new ArgumentException($"Invalid OpenSearch configuration. Issues found:\n{string.Join("\n", errors)}");
         }
-        
+
         // Also register as singleton for backward compatibility
         services.AddSingleton(openSearchConfig);
-        
+
         return services;
     }
 
@@ -109,10 +111,10 @@ public static class ServiceCollectionExtensions
     private static void ValidateConfigurationSections(IConfiguration configuration)
     {
         var errors = new List<string>();
-        
+
         // Check if we're in a test environment by looking for test-specific configuration
         var isTestEnvironment = IsTestEnvironment(configuration);
-        
+
         // Validate Azure Storage connection string (not required in test environment)
         var storageConnectionString = configuration.GetConnectionString("AzureWebJobsStorage");
         if (string.IsNullOrEmpty(storageConnectionString))
@@ -126,21 +128,21 @@ public static class ServiceCollectionExtensions
         {
             errors.Add("- Invalid 'AzureWebJobsStorage' connection string format. Expected format: 'DefaultEndpointsProtocol=https;AccountName=...;AccountKey=...;EndpointSuffix=...'");
         }
-        
+
         // Validate BigCommerce section exists
         var bigCommerceSection = configuration.GetSection("BigCommerce");
         if (!bigCommerceSection.Exists())
         {
             errors.Add("- Missing 'BigCommerce' configuration section. This section is required for BigCommerce API client configuration.");
         }
-        
+
         // Validate logging configuration (not required in test environment)
         var loggingSection = configuration.GetSection("Logging");
         if (!loggingSection.Exists() && !isTestEnvironment)
         {
             errors.Add("- Missing 'Logging' configuration section. Logging configuration is required for system observability.");
         }
-        
+
         if (errors.Any())
         {
             throw new ArgumentException($"Critical configuration validation failed. Please fix the following issues:\n{string.Join("\n", errors.Select(x => x))}");
@@ -158,28 +160,28 @@ public static class ServiceCollectionExtensions
         {
             return true;
         }
-        
+
         // Check for test-specific OpenSearch configuration
         var openSearchEndpoint = configuration["OpenSearch:Endpoint"];
         if (!string.IsNullOrEmpty(openSearchEndpoint) && openSearchEndpoint.Contains("localhost"))
         {
             return true;
         }
-        
+
         // Check for test-specific index names
         var defaultIndex = configuration["OpenSearch:DefaultIndex"];
         if (!string.IsNullOrEmpty(defaultIndex) && defaultIndex.Contains("test"))
         {
             return true;
         }
-        
+
         // Check if configuration has minimal set of keys (typical in unit tests)
         var allKeys = GetAllConfigurationKeys(configuration);
         if (allKeys.Count <= 10 && allKeys.Any(k => k.StartsWith("BigCommerce:")))
         {
             return true;
         }
-        
+
         // Check if we're using default values (common in unit tests)
         var baseUrl = configuration["BigCommerce:BaseUrl"];
         if (!string.IsNullOrEmpty(baseUrl) && baseUrl == "https://api.bigcommerce.com")
@@ -190,7 +192,7 @@ public static class ServiceCollectionExtensions
                 return true; // Looks like a test configuration
             }
         }
-        
+
         return false;
     }
 
@@ -212,7 +214,7 @@ public static class ServiceCollectionExtensions
         foreach (var child in configuration.GetChildren())
         {
             var key = string.IsNullOrEmpty(prefix) ? child.Key : $"{prefix}:{child.Key}";
-            
+
             if (child.GetChildren().Any())
             {
                 AddKeysRecursively(child, key, keys);
@@ -230,7 +232,7 @@ public static class ServiceCollectionExtensions
     private static List<string> GetBigCommerceConfigurationErrors(BigCommerceConfiguration config)
     {
         var errors = new List<string>();
-        
+
         if (string.IsNullOrEmpty(config.BaseUrl))
         {
             errors.Add("- BigCommerce:BaseUrl is required (e.g., 'https://api.bigcommerce.com')");
@@ -239,27 +241,27 @@ public static class ServiceCollectionExtensions
         {
             errors.Add("- BigCommerce:BaseUrl must be a valid absolute URL");
         }
-        
+
         if (config.RequestTimeout <= TimeSpan.Zero)
         {
             errors.Add("- BigCommerce:RequestTimeout must be greater than zero (recommended: 30 seconds)");
         }
-        
+
         if (config.MaxRetries < 0)
         {
             errors.Add("- BigCommerce:MaxRetries cannot be negative (recommended: 3)");
         }
-        
+
         if (config.RateLimitRequestsPerSecond <= 0 || config.RateLimitRequestsPerSecond > 50)
         {
             errors.Add("- BigCommerce:RateLimitRequestsPerSecond must be between 1 and 50 (BigCommerce limit is 12/second)");
         }
-        
+
         if (string.IsNullOrEmpty(config.UserAgent))
         {
             errors.Add("- BigCommerce:UserAgent is required (e.g., 'BigCommerce-Migration-System/1.0')");
         }
-        
+
         return errors;
     }
 
@@ -269,7 +271,7 @@ public static class ServiceCollectionExtensions
     private static List<string> GetOpenSearchConfigurationErrors(OpenSearchConfiguration config)
     {
         var errors = new List<string>();
-        
+
         if (string.IsNullOrEmpty(config.Endpoint))
         {
             errors.Add("- OpenSearch:Endpoint is required (e.g., 'https://localhost:9200')");
@@ -278,27 +280,27 @@ public static class ServiceCollectionExtensions
         {
             errors.Add("- OpenSearch:Endpoint must be a valid absolute URL");
         }
-        
+
         if (string.IsNullOrEmpty(config.DefaultIndex))
         {
             errors.Add("- OpenSearch:DefaultIndex is required (e.g., 'bigcommerce-migration')");
         }
-        
+
         if (config.ConnectionTimeout <= TimeSpan.Zero)
         {
             errors.Add("- OpenSearch:ConnectionTimeout must be greater than zero (recommended: 30 seconds)");
         }
-        
+
         if (config.RequestTimeout <= TimeSpan.Zero)
         {
             errors.Add("- OpenSearch:RequestTimeout must be greater than zero (recommended: 60 seconds)");
         }
-        
+
         if (config.MaxRetries < 0)
         {
             errors.Add("- OpenSearch:MaxRetries cannot be negative (recommended: 3)");
         }
-        
+
         return errors;
     }
 
@@ -309,21 +311,21 @@ public static class ServiceCollectionExtensions
     {
         if (string.IsNullOrEmpty(connectionString))
             return false;
-        
+
         // Check for development storage emulator
         if (connectionString.Equals("UseDevelopmentStorage=true", StringComparison.OrdinalIgnoreCase))
             return true;
-        
+
         // Check for standard Azure Storage connection string format
         var standardRequiredParts = new[] { "DefaultEndpointsProtocol", "AccountName", "AccountKey", "EndpointSuffix" };
         if (standardRequiredParts.All(part => connectionString.Contains($"{part}=", StringComparison.OrdinalIgnoreCase)))
             return true;
-        
+
         // Check for Azurite/local development storage format (with explicit endpoints)
         var azuriteRequiredParts = new[] { "DefaultEndpointsProtocol", "AccountName", "AccountKey", "BlobEndpoint", "QueueEndpoint", "TableEndpoint" };
         if (azuriteRequiredParts.All(part => connectionString.Contains($"{part}=", StringComparison.OrdinalIgnoreCase)))
             return true;
-        
+
         return false;
     }
 
@@ -335,21 +337,21 @@ public static class ServiceCollectionExtensions
         var bigCommerceSection = configuration.GetSection("BigCommerce");
         var requestTimeout = bigCommerceSection.GetValue<TimeSpan>("RequestTimeout", TimeSpan.FromSeconds(30));
         var userAgent = bigCommerceSection.GetValue<string>("UserAgent", "BigCommerce-Migration-System/1.0");
-        
+
         // Configure named HttpClient for BigCommerce API
         services.AddHttpClient("BigCommerceApiClient", httpClient =>
         {
             httpClient.Timeout = requestTimeout;
             httpClient.DefaultRequestHeaders.Add("User-Agent", userAgent);
         });
-        
+
         // Register a factory for default HttpClient for tests
         services.AddSingleton<HttpClient>(serviceProvider =>
         {
             var httpClientFactory = serviceProvider.GetRequiredService<IHttpClientFactory>();
             return httpClientFactory.CreateClient("BigCommerceApiClient");
         });
-        
+
         return services;
     }
 
@@ -360,13 +362,13 @@ public static class ServiceCollectionExtensions
     {
         // Register services as singleton for better performance and test consistency
         services.TryAddSingleton<ICategoryTreeResolver, CategoryTreeResolver>();
-        
+
         // Register OpenSearch service - use no-op implementation when disabled
         services.TryAddSingleton<IOpenSearchService>(serviceProvider =>
         {
             var openSearchConfig = serviceProvider.GetRequiredService<OpenSearchConfiguration>();
             var logger = serviceProvider.GetRequiredService<ILogger<OpenSearchService>>();
-            
+
             // Check if OpenSearch is disabled or has invalid configuration
             if (!openSearchConfig.IsValidEndpoint())
             {
@@ -374,15 +376,15 @@ public static class ServiceCollectionExtensions
                 Console.WriteLine("OpenSearch disabled or invalid endpoint - using NoOpOpenSearchService");
                 return new NoOpOpenSearchService(noOpLogger);
             }
-            
+
             return new OpenSearchService(openSearchConfig, logger);
         });
-        
+
         // Register Azure Storage services
         services.TryAddSingleton<IBlobService, BlobService>();
         services.TryAddSingleton<IQueueService, QueueService>();
         services.TryAddSingleton<IMigrationStorageService, MigrationStorageService>();
-        
+
         // Register BigCommerce API client with factory pattern (request-based)
         services.TryAddSingleton<IBigCommerceApiClient>(serviceProvider =>
         {
@@ -391,10 +393,10 @@ public static class ServiceCollectionExtensions
             var httpClient = httpClientFactory.CreateClient("BigCommerceApiClient");
             var openSearchService = serviceProvider.GetRequiredService<IOpenSearchService>();
             var logger = serviceProvider.GetRequiredService<ILogger<BigCommerceApiClient>>();
-            
+
             return new BigCommerceApiClient(globalConfig, httpClient, openSearchService, logger);
         });
-        
+
         // Register orchestration services (from gap analysis - these were missing)
         services.TryAddSingleton<IRateLimitService, RateLimitService>();
         services.TryAddSingleton<IBatchSizeCalculator, BatchSizeCalculator>();
@@ -402,17 +404,17 @@ public static class ServiceCollectionExtensions
         {
             var logger = serviceProvider.GetRequiredService<ILogger<ProgressTracker>>();
             var signalRService = serviceProvider.GetService<IMigrationSignalRService>(); // Optional dependency
-            return signalRService != null 
+            return signalRService != null
                 ? new ProgressTracker(logger, signalRService)
                 : new ProgressTracker(logger); // Use default null parameter
         });
-        
+
         // Register API authentication services
         services.TryAddSingleton<IApiKeyService, ApiKeyService>();
-        
+
         // Register API rate limiting services
         services.TryAddSingleton<IApiRateLimitService, ApiRateLimitService>();
-        
+
         return services;
     }
 
@@ -423,15 +425,41 @@ public static class ServiceCollectionExtensions
     {
         // Get SignalR connection string from configuration
         var connectionString = configuration.GetConnectionString("AzureSignalR");
-        
-        // Always register the NoOpSignalRService as fallback
-        services.TryAddSingleton<IMigrationSignalRService>(serviceProvider =>
+
+        if (!string.IsNullOrEmpty(connectionString) && IsValidAzureSignalRConnectionString(connectionString))
         {
-            var noOpLogger = serviceProvider.GetRequiredService<ILogger<NoOpSignalRService>>();
-            Console.WriteLine("WARNING: AzureSignalR connection string not configured. Real-time dashboard updates will be disabled. Using NoOpSignalRService.");
-            return new NoOpSignalRService(noOpLogger);
-        });
-        
+            // Check if this is an emulator connection string
+            var isEmulator = connectionString.Contains("Port=", StringComparison.OrdinalIgnoreCase) && 
+                            !connectionString.Contains("AccessKey=", StringComparison.OrdinalIgnoreCase);
+            
+            if (isEmulator)
+            {
+                Console.WriteLine("SignalR emulator connection string found. Using NoOp SignalR service for local development.");
+                services.TryAddSingleton<IMigrationSignalRService>(serviceProvider =>
+                {
+                    var noOpLogger = serviceProvider.GetRequiredService<ILogger<NoOpSignalRService>>();
+                    return new NoOpSignalRService(noOpLogger);
+                });
+            }
+            else
+            {
+                // Configure Azure SignalR for Azure Functions using output bindings approach
+                Console.WriteLine("Azure SignalR connection string found. Using Azure Functions SignalR service with output bindings.");
+
+                // Register Azure Functions SignalR service (doesn't use hub context)
+                services.AddSingleton<IMigrationSignalRService, AzureFunctionsSignalRService>();
+            }
+        }
+        else
+        {
+            Console.WriteLine("Azure SignalR connection string not configured. Using NoOp SignalR service.");
+            services.TryAddSingleton<IMigrationSignalRService>(serviceProvider =>
+            {
+                var noOpLogger = serviceProvider.GetRequiredService<ILogger<NoOpSignalRService>>();
+                return new NoOpSignalRService(noOpLogger);
+            });
+        }
+
         return services;
     }
 
@@ -442,10 +470,16 @@ public static class ServiceCollectionExtensions
     {
         if (string.IsNullOrEmpty(connectionString))
             return false;
-        
-        // Check for required parts in Azure SignalR connection string
-        var requiredParts = new[] { "Endpoint=", "AccessKey=" };
-        return requiredParts.All(part => connectionString.Contains(part, StringComparison.OrdinalIgnoreCase));
+
+        // Check for Azure SignalR connection string (production)
+        var azureSignalRParts = new[] { "Endpoint=", "AccessKey=" };
+        var isAzureSignalR = azureSignalRParts.All(part => connectionString.Contains(part, StringComparison.OrdinalIgnoreCase));
+
+        // Check for emulator connection string (local development)
+        var emulatorParts = new[] { "Endpoint=", "Port=" };
+        var isEmulator = emulatorParts.All(part => connectionString.Contains(part, StringComparison.OrdinalIgnoreCase));
+
+        return isAzureSignalR || isEmulator;
     }
 
     /// <summary>
@@ -455,8 +489,8 @@ public static class ServiceCollectionExtensions
     private static IServiceCollection AddBigCommerceMigrationHealthChecks(this IServiceCollection services)
     {
         services.AddHealthChecks()
-            .AddCheck<OpenSearchHealthCheck>("opensearch", 
-                HealthStatus.Degraded, 
+            .AddCheck<OpenSearchHealthCheck>("opensearch",
+                HealthStatus.Degraded,
                 tags: new[] { "opensearch", "logging" })
             .AddCheck<AzureStorageHealthCheck>("azure-storage",
                 HealthStatus.Unhealthy,
@@ -464,7 +498,7 @@ public static class ServiceCollectionExtensions
             .AddCheck<SignalRHealthCheck>("signalr",
                 HealthStatus.Degraded,
                 tags: new[] { "signalr", "realtime" });
-        
+
         return services;
     }
 }
@@ -486,8 +520,8 @@ public class OpenSearchHealthCheck : IHealthCheck
         try
         {
             var isHealthy = await _openSearchService.IsHealthyAsync(cancellationToken);
-            
-            return isHealthy 
+
+            return isHealthy
                 ? HealthCheckResult.Healthy("OpenSearch is accessible and responsive")
                 : HealthCheckResult.Unhealthy("OpenSearch is not accessible");
         }
@@ -524,11 +558,11 @@ public class AzureStorageHealthCheck : IHealthCheck
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };
-            
+
             // Create and immediately delete the test entry
             await _storageService.CreateMigrationAsync(testMigration);
             await _storageService.DeleteMigrationAsync(testMigration.Id);
-            
+
             return HealthCheckResult.Healthy("Azure Storage is accessible and responsive");
         }
         catch (Exception ex)
@@ -559,7 +593,7 @@ public class SignalRHealthCheck : IHealthCheck
             {
                 return HealthCheckResult.Degraded("SignalR is not configured - using NoOpSignalRService (real-time updates disabled)");
             }
-            
+
             // For real SignalR service, test basic connectivity
             var testProgress = new MigrationProgress
             {
@@ -580,9 +614,9 @@ public class SignalRHealthCheck : IHealthCheck
                 EntitiesPerSecond = 0.0,
                 ErrorRate = 0.0
             };
-            
+
             await _signalRService.BroadcastProgressUpdateAsync("health-check", testProgress, cancellationToken);
-            
+
             return HealthCheckResult.Healthy("SignalR is accessible and responsive");
         }
         catch (Exception ex)
@@ -590,4 +624,4 @@ public class SignalRHealthCheck : IHealthCheck
             return HealthCheckResult.Unhealthy("SignalR health check failed", ex);
         }
     }
-} 
+}

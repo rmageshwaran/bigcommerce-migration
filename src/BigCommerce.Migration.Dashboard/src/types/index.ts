@@ -36,11 +36,26 @@ export interface EntityProgress {
 }
 
 export interface MigrationRequest {
-  migrationId: string;
-  sourceStoreHash: string;
-  destinationStoreHash: string;
-  entityConfiguration: EntityConfiguration;
-  options: MigrationOptions;
+  sourceStore: {
+    storeId: string;
+    accessToken: string;
+    channelId: string;
+    baseUrl?: string;
+  };
+  destinationStore: {
+    storeId: string;
+    accessToken: string;
+    channelId: string;
+    baseUrl?: string;
+  };
+  entities: string[];
+  settings?: {
+    maxApiCallsPerSecond?: number;
+    enableAdaptiveBatching?: boolean;
+    logLevel?: string;
+    requestTimeoutSeconds?: number;
+    maxRetries?: number;
+  };
 }
 
 export interface EntityConfiguration {

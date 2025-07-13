@@ -6,6 +6,7 @@
     "WEBSITE_RUN_FROM_PACKAGE": "1",
     "FUNCTIONS_EXTENSION_VERSION": "~4",
     "ASPNETCORE_ENVIRONMENT": "Development",
+    "AzureSignalRConnectionString": "Endpoint=http://signalr-emulator:80;Port=80;",
     
     "MigrationStartQueueName": "migration-start",
     "EntityBatchQueueName": "entity-batch",

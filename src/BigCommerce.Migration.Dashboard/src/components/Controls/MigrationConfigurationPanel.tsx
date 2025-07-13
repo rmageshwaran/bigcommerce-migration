@@ -212,8 +212,9 @@ const StoreConfigurationStep: React.FC<{
           {title}
         </Typography>
 
-        <Grid container spacing={2}>
-          <Grid item xs={12} md={6}>
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+            <Box sx={{ flex: '1 1 300px' }}>
             <TextField
               fullWidth
               label="Store Hash"
@@ -222,17 +223,18 @@ const StoreConfigurationStep: React.FC<{
               placeholder="abc123def456"
               required
             />
-          </Grid>
-          <Grid item xs={12} md={6}>
-            <TextField
-              fullWidth
-              label="Store Name"
+            </Box>
+            <Box sx={{ flex: '1 1 300px' }}>
+              <TextField
+                fullWidth
+                label="Store Name"
               value={store.name}
               onChange={(e) => handleStoreUpdate(type, 'name', e.target.value)}
               placeholder="My Store"
             />
-          </Grid>
-          <Grid item xs={12}>
+            </Box>
+          </Box>
+          <Box>
             <TextField
               fullWidth
               label="Store URL"
@@ -241,28 +243,30 @@ const StoreConfigurationStep: React.FC<{
               placeholder="https://store-abc123def456.mybigcommerce.com"
               required
             />
-          </Grid>
-          <Grid item xs={12} md={6}>
-            <TextField
-              fullWidth
-              type="password"
-              label="API Key"
-              value={store.apiKey}
-              onChange={(e) => handleStoreUpdate(type, 'apiKey', e.target.value)}
-              required
-            />
-          </Grid>
-          <Grid item xs={12} md={6}>
-            <TextField
-              fullWidth
-              type="password"
-              label="API Secret"
-              value={store.apiSecret}
-              onChange={(e) => handleStoreUpdate(type, 'apiSecret', e.target.value)}
-              required
-            />
-          </Grid>
-        </Grid>
+          </Box>
+          <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+            <Box sx={{ flex: '1 1 300px' }}>
+              <TextField
+                fullWidth
+                type="password"
+                label="API Key"
+                value={store.apiKey}
+                onChange={(e) => handleStoreUpdate(type, 'apiKey', e.target.value)}
+                required
+              />
+            </Box>
+            <Box sx={{ flex: '1 1 300px' }}>
+              <TextField
+                fullWidth
+                type="password"
+                label="API Secret"
+                value={store.apiSecret}
+                onChange={(e) => handleStoreUpdate(type, 'apiSecret', e.target.value)}
+                required
+              />
+            </Box>
+          </Box>
+        </Box>
 
         <Box sx={{ mt: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
           <Button
@@ -688,46 +692,46 @@ export const MigrationConfigurationPanel: React.FC<MigrationConfigurationPanelPr
               Configuration is valid and ready to start!
             </Alert>
 
-            <Grid container spacing={2}>
-              <Grid item xs={12} md={6}>
-                <Card>
-                  <CardContent>
-                    <Typography variant="h6" gutterBottom>Source Store</Typography>
-                    <Typography variant="body2">{config.sourceStore.name || 'Unnamed Store'}</Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {config.sourceStore.storeUrl}
-                    </Typography>
-                  </CardContent>
-                </Card>
-              </Grid>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                <Box sx={{ flex: '1 1 300px' }}>
+                  <Card>
+                    <CardContent>
+                      <Typography variant="h6" gutterBottom>Source Store</Typography>
+                      <Typography variant="body2">{config.sourceStore.name || 'Unnamed Store'}</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {config.sourceStore.storeUrl}
+                      </Typography>
+                    </CardContent>
+                  </Card>
+                </Box>
+                
+                <Box sx={{ flex: '1 1 300px' }}>
+                  <Card>
+                    <CardContent>
+                      <Typography variant="h6" gutterBottom>Destination Store</Typography>
+                      <Typography variant="body2">{config.destinationStore.name || 'Unnamed Store'}</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {config.destinationStore.storeUrl}
+                      </Typography>
+                    </CardContent>
+                  </Card>
+                </Box>
+              </Box>
               
-              <Grid item xs={12} md={6}>
-                <Card>
-                  <CardContent>
-                    <Typography variant="h6" gutterBottom>Destination Store</Typography>
-                    <Typography variant="body2">{config.destinationStore.name || 'Unnamed Store'}</Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {config.destinationStore.storeUrl}
-                    </Typography>
-                  </CardContent>
-                </Card>
-              </Grid>
-              
-              <Grid item xs={12}>
-                <Card>
-                  <CardContent>
-                    <Typography variant="h6" gutterBottom>Selected Entities</Typography>
-                    <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                      {Object.entries(config.entities)
-                        .filter(([_, enabled]) => enabled)
-                        .map(([entity]) => (
-                          <Chip key={entity} label={entity} size="small" />
-                        ))}
-                    </Box>
-                  </CardContent>
-                </Card>
-              </Grid>
-            </Grid>
+              <Card>
+                <CardContent>
+                  <Typography variant="h6" gutterBottom>Selected Entities</Typography>
+                  <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                    {Object.entries(config.entities)
+                      .filter(([_, enabled]) => enabled)
+                      .map(([entity]) => (
+                        <Chip key={entity} label={entity} size="small" />
+                      ))}
+                  </Box>
+                </CardContent>
+              </Card>
+            </Box>
           </Box>
         );
       default:

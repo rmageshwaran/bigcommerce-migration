@@ -21,6 +21,7 @@ public class ProcessEntityBatchActivityTests
     private readonly Mock<IOpenSearchService> _openSearchServiceMock;
     private readonly Mock<IMigrationStorageService> _migrationStorageServiceMock;
     private readonly Mock<IBlobService> _blobServiceMock;
+    private readonly Mock<IMigrationSignalRService> _signalRServiceMock;
     private readonly ProcessEntityBatchActivity _activity;
 
     public ProcessEntityBatchActivityTests()
@@ -31,6 +32,7 @@ public class ProcessEntityBatchActivityTests
         _openSearchServiceMock = new Mock<IOpenSearchService>();
         _migrationStorageServiceMock = new Mock<IMigrationStorageService>();
         _blobServiceMock = new Mock<IBlobService>();
+        _signalRServiceMock = new Mock<IMigrationSignalRService>();
         
         _activity = new ProcessEntityBatchActivity(
             _apiClientMock.Object,
@@ -38,7 +40,8 @@ public class ProcessEntityBatchActivityTests
             _rateLimitServiceMock.Object,
             _openSearchServiceMock.Object,
             _migrationStorageServiceMock.Object,
-            _blobServiceMock.Object);
+            _blobServiceMock.Object,
+            _signalRServiceMock.Object);
     }
 
     [Fact]
@@ -539,6 +542,9 @@ public class ProcessEntityBatchActivityTests
         Assert.True(result.SuccessfulEntities >= 1); // At least one succeeded
         Assert.True(result.EntityMappings.Count >= 1); // At least one mapping created
     }
+
+    // Enhanced error broadcasting tests will be implemented separately
+    // after API interface stabilization
 
     private static BatchProcessingRequest CreateValidBatchRequest(string entityType, string[] entityIds)
     {

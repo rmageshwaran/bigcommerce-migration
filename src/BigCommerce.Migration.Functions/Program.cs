@@ -63,6 +63,13 @@ public class Program
                 services.AddApplicationInsightsTelemetryWorkerService();
                 services.ConfigureFunctionsApplicationInsights();
                 
+                // Add SignalR service configuration
+                var signalRConnectionString = context.Configuration.GetConnectionString("AzureSignalR");
+                if (!string.IsNullOrEmpty(signalRConnectionString))
+                {
+                    services.AddSignalR().AddAzureSignalR(signalRConnectionString);
+                }
+                
                 // Add BigCommerce Migration services with full dependency injection
                 services.AddBigCommerceMigrationServices(context.Configuration);
                 

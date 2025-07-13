@@ -1,418 +1,202 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Box,
-  Grid,
   Card,
   CardContent,
   Typography,
-  LinearProgress,
   Chip,
   Alert,
-  IconButton,
-  Tooltip,
-  Divider,
-  CircularProgress,
   Button,
-  Stack,
+  Stack
 } from '@mui/material';
 import {
   Refresh as RefreshIcon,
-  Warning as WarningIcon,
   Error as ErrorIcon,
-  CheckCircle as CheckCircleIcon,
-  Speed as SpeedIcon,
-  Timeline as TimelineIcon,
-  Storage as StorageIcon,
+  CheckCircle as SuccessIcon,
+  BugReport as TestIcon
 } from '@mui/icons-material';
 import { useDashboard } from '../../context/DashboardContext';
-import type { MigrationProgress, SystemStatus } from '../../types';
-import { ProgressChart } from '../Charts/ProgressChart';
-import { EntityProgressGrid } from '../Charts/EntityProgressGrid';
-import { notificationService } from '../../services/notificationService';
-import ExportButton from '../Export/ExportButton';
-
-interface MetricCardProps {
-  title: string;
-  value: string | number;
-  subtitle?: string;
-  icon: React.ReactNode;
-  color?: 'primary' | 'secondary' | 'success' | 'warning' | 'error';
-}
-
-const MetricCard: React.FC<MetricCardProps> = ({ 
-  title, 
-  value, 
-  subtitle, 
-  icon, 
-  color = 'primary' 
-}) => (
-  <Card sx={{ height: '100%' }}>
-    <CardContent>
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-        <Box sx={{ color: `${color}.main`, mr: 1 }}>
-          {icon}
-        </Box>
-        <Typography variant="h6" component="div">
-          {title}
-        </Typography>
-      </Box>
-      <Typography variant="h4" component="div" sx={{ mb: 1 }}>
-        {value}
-      </Typography>
-      {subtitle && (
-        <Typography variant="body2" color="text.secondary">
-          {subtitle}
-        </Typography>
-      )}
-    </CardContent>
-  </Card>
-);
-
-interface ProgressCardProps {
-  migration: MigrationProgress;
-}
-
-const ProgressCard: React.FC<ProgressCardProps> = ({ migration }) => {
-  const getStatusColor = (status: string): 'default' | 'primary' | 'secondary' | 'error' | 'info' | 'success' | 'warning' => {
-    switch (status) {
-      case 'completed': return 'success';
-      case 'failed': return 'error';
-      case 'cancelled': return 'warning';
-      case 'running': return 'primary';
-      default: return 'default';
-    }
-  };
-
-  const formatTime = (seconds: number): string => {
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    const secs = Math.floor(seconds % 60);
-    
-    if (hours > 0) {
-      return `${hours}h ${minutes}m ${secs}s`;
-    } else if (minutes > 0) {
-      return `${minutes}m ${secs}s`;
-    } else {
-      return `${secs}s`;
-    }
-  };
-
-  return (
-    <Card sx={{ mb: 2 }}>
-      <CardContent>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Typography variant="h6" component="div">
-            Migration {migration.migrationId.slice(-8)}
-          </Typography>
-          <Chip 
-            label={migration.status} 
-            color={getStatusColor(migration.status)}
-            size="small"
-          />
-        </Box>
-        
-        <Box sx={{ mb: 2 }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-            <Typography variant="body2">
-              Overall Progress
-            </Typography>
-            <Typography variant="body2">
-              {migration.overallProgressPercentage.toFixed(1)}%
-            </Typography>
-          </Box>
-          <LinearProgress 
-            variant="determinate" 
-            value={migration.overallProgressPercentage} 
-            sx={{ height: 8, borderRadius: 4 }}
-          />
-        </Box>
-
-        <Grid container spacing={2}>
-          <Grid item xs={6}>
-            <Typography variant="body2" color="text.secondary">
-              Processed: {migration.processedEntities.toLocaleString()} / {migration.totalEntities.toLocaleString()}
-            </Typography>
-          </Grid>
-          <Grid item xs={6}>
-            <Typography variant="body2" color="text.secondary">
-              Success Rate: {migration.processedEntities > 0 ? 
-                ((migration.successfulEntities / migration.processedEntities) * 100).toFixed(1) : 0}%
-            </Typography>
-          </Grid>
-          <Grid item xs={6}>
-            <Typography variant="body2" color="text.secondary">
-              Speed: {migration.entitiesPerSecond.toFixed(1)} entities/sec
-            </Typography>
-          </Grid>
-          <Grid item xs={6}>
-            <Typography variant="body2" color="text.secondary">
-              Elapsed: {formatTime(migration.elapsedTime)}
-            </Typography>
-          </Grid>
-        </Grid>
-
-        {migration.currentEntity && (
-          <Box sx={{ mt: 2 }}>
-            <Typography variant="body2" color="text.secondary">
-              Current: {migration.currentEntity} ({migration.currentPhase})
-            </Typography>
-          </Box>
-        )}
-      </CardContent>
-    </Card>
-  );
-};
-
-interface SystemHealthCardProps {
-  status: SystemStatus;
-  isConnected: boolean;
-}
-
-const SystemHealthCard: React.FC<SystemHealthCardProps> = ({ status, isConnected }) => {
-  const getHealthIcon = () => {
-    if (!isConnected) {
-      return <ErrorIcon color="error" />;
-    }
-    switch (status) {
-      case 'healthy': return <CheckCircleIcon color="success" />;
-      case 'warning': return <WarningIcon color="warning" />;
-      case 'error': return <ErrorIcon color="error" />;
-      default: return <WarningIcon color="warning" />;
-    }
-  };
-
-  const getHealthColor = (): 'success' | 'warning' | 'error' => {
-    if (!isConnected) return 'error';
-    switch (status) {
-      case 'healthy': return 'success';
-      case 'warning': return 'warning';
-      case 'error': return 'error';
-      default: return 'warning';
-    }
-  };
-
-  const getHealthText = () => {
-    if (!isConnected) return 'Disconnected';
-    switch (status) {
-      case 'healthy': return 'All Systems Operational';
-      case 'warning': return 'Some Issues Detected';
-      case 'error': return 'System Error';
-      default: return 'Unknown Status';
-    }
-  };
-
-  return (
-    <Card>
-      <CardContent>
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Box sx={{ display: 'flex', alignItems: 'center' }}>
-            {getHealthIcon()}
-            <Box sx={{ ml: 2 }}>
-              <Typography variant="h6">System Health</Typography>
-              <Typography variant="body2" color="text.secondary">
-                {getHealthText()}
-              </Typography>
-            </Box>
-          </Box>
-          <Chip 
-            label={isConnected ? status : 'offline'} 
-            color={getHealthColor()}
-            size="small"
-          />
-        </Box>
-      </CardContent>
-    </Card>
-  );
-};
 
 export const MigrationOverview: React.FC = () => {
-  const { state, refreshData } = useDashboard();
-  const { 
-    activeMigrations, 
-    systemHealth, 
-    signalRConnection, 
-    isLoading, 
-    errors,
-    apiConnected 
-  } = state;
+  const { state, refreshData, addError } = useDashboard();
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const migrationList = Array.from(activeMigrations.values());
-  const totalMigrations = migrationList.length;
-  const runningMigrations = migrationList.filter(m => m.status === 'running').length;
-  const totalEntitiesProcessed = migrationList.reduce((sum, m) => sum + m.processedEntities, 0);
-  const averageSpeed = migrationList.reduce((sum, m) => sum + m.entitiesPerSecond, 0) / Math.max(totalMigrations, 1);
+  // Test SignalR function
+  const testSignalR = async () => {
+    try {
+      const response = await fetch('/api/test-signalr', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (response.ok) {
+        console.log('SignalR test message sent successfully');
+        addError({
+          code: 'SIGNALR_TEST_SUCCESS',
+          message: 'SignalR test message sent successfully!',
+          details: 'Check the system health section for the test message.',
+          timestamp: new Date()
+        });
+      } else {
+        console.error('Failed to send SignalR test message');
+      }
+    } catch (error) {
+      console.error('Error testing SignalR:', error);
+      addError({
+        code: 'SIGNALR_TEST_ERROR',
+        message: 'Failed to test SignalR',
+        details: error instanceof Error ? error.message : 'Unknown error',
+        timestamp: new Date()
+      });
+    }
+  };
 
   const handleRefresh = async () => {
+    setIsRefreshing(true);
     try {
       await refreshData();
-    } catch (error) {
-      console.error('Failed to refresh data:', error);
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
-  // Notification testing functions
-  const testNotifications = {
-    success: () => {
-      notificationService.success('Migration Started', 'Products migration has started successfully');
-    },
-    error: () => {
-      notificationService.error('Migration Failed', 'Connection to BigCommerce API failed');
-    },
-    warning: () => {
-      notificationService.warning('Rate Limit Warning', 'Approaching API rate limits');
-    },
-    info: () => {
-      notificationService.info('System Update', 'Dashboard updated to version 2.1.0');
-    },
-    migrationComplete: () => {
-      notificationService.migrationCompleted('mig_12345', 'Products Migration', '2h 15m');
-    },
-    migrationFailed: () => {
-      notificationService.migrationFailed('mig_12346', 'Categories Migration', 'Invalid API credentials');
-    },
-    systemAlert: () => {
-      notificationService.systemAlert('System Maintenance', 'Scheduled maintenance in 15 minutes');
-    },
-    batchComplete: () => {
-      notificationService.batchCompleted('mig_12347', 'Products', 150, 500);
-    }
-  };
+  const {
+    activeMigrations,
+    systemHealth,
+    signalRConnection,
+    apiConnected,
+    isLoading,
+    errors
+  } = state;
+
+  const activeMigrationsArray = Array.from(activeMigrations.values());
 
   return (
-    <Box sx={{ p: 3 }}>
-      {/* Header */}
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4" component="h1">
+    <Box sx={{ flexGrow: 1, p: 3 }}>
+      {/* Header Section */}
+      <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Typography variant="h4" component="h1" gutterBottom>
           Migration Overview
         </Typography>
-        <Box sx={{ display: 'flex', gap: 1 }}>
-          <ExportButton
-            dataType="migrations"
-            title="Migration Overview Report"
-            variant="icon"
-            size="medium"
-          />
-          <Tooltip title="Refresh Data">
-            <IconButton 
-              onClick={handleRefresh} 
-              disabled={isLoading}
-              color="primary"
-            >
-              {isLoading ? <CircularProgress size={24} /> : <RefreshIcon />}
-            </IconButton>
-          </Tooltip>
-        </Box>
+        <Stack direction="row" spacing={2}>
+          <Button
+            variant="outlined"
+            startIcon={<TestIcon />}
+            onClick={testSignalR}
+            color="primary"
+          >
+            Test SignalR
+          </Button>
+          <Button
+            variant="outlined"
+            startIcon={<RefreshIcon />}
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+          >
+            {isRefreshing ? 'Refreshing...' : 'Refresh'}
+          </Button>
+        </Stack>
       </Box>
 
-      {/* Error Alerts */}
-      {errors.length > 0 && (
+      {/* Connection Status */}
+      <Box sx={{ mb: 3 }}>
+        <Card>
+          <CardContent>
+            <Typography variant="h6" gutterBottom>
+              Connection Status
+            </Typography>
+            <Stack direction="row" spacing={2}>
+              <Chip
+                icon={signalRConnection.isConnected ? <SuccessIcon /> : <ErrorIcon />}
+                label={`SignalR: ${signalRConnection.isConnected ? 'Connected' : 'Disconnected'}`}
+                color={signalRConnection.isConnected ? 'success' : 'error'}
+              />
+              <Chip
+                icon={apiConnected ? <SuccessIcon /> : <ErrorIcon />}
+                label={`API: ${apiConnected ? 'Connected' : 'Disconnected'}`}
+                color={apiConnected ? 'success' : 'error'}
+              />
+            </Stack>
+          </CardContent>
+        </Card>
+      </Box>
+
+      {/* System Health */}
+      {systemHealth && (
         <Box sx={{ mb: 3 }}>
-          {errors.slice(0, 3).map((error) => (
-            <Alert 
-              key={error.code} 
-              severity="error" 
-              sx={{ mb: 1 }}
-            >
-              {error.message}
-            </Alert>
-          ))}
-        </Box>
-      )}
-
-      {/* Key Metrics */}
-      <Grid container spacing={3} sx={{ mb: 3 }}>
-        <Grid item xs={12} sm={6} md={3}>
-          <MetricCard
-            title="Active Migrations"
-            value={runningMigrations}
-            subtitle={`${totalMigrations} total`}
-            icon={<TimelineIcon />}
-            color="primary"
-          />
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <MetricCard
-            title="Entities Processed"
-            value={totalEntitiesProcessed.toLocaleString()}
-            subtitle="All migrations"
-            icon={<StorageIcon />}
-            color="success"
-          />
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <MetricCard
-            title="Average Speed"
-            value={averageSpeed.toFixed(1)}
-            subtitle="entities/second"
-            icon={<SpeedIcon />}
-            color="info"
-          />
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <MetricCard
-            title="Connection Status"
-            value={signalRConnection.isConnected ? 'Connected' : 'Disconnected'}
-            subtitle={`API: ${apiConnected ? 'Connected' : 'Disconnected'}`}
-            icon={signalRConnection.isConnected ? <CheckCircleIcon /> : <ErrorIcon />}
-            color={signalRConnection.isConnected ? 'success' : 'error'}
-          />
-        </Grid>
-      </Grid>
-
-      <Grid container spacing={3}>
-        {/* System Health */}
-        <Grid item xs={12} md={4}>
-          <SystemHealthCard 
-            status={systemHealth?.status || 'error'} 
-            isConnected={signalRConnection.isConnected && apiConnected}
-          />
-        </Grid>
-
-        {/* Active Migrations */}
-        <Grid item xs={12} md={8}>
           <Card>
             <CardContent>
-              <Typography variant="h6" component="div" sx={{ mb: 2 }}>
-                Active Migrations
+              <Typography variant="h6" gutterBottom>
+                System Health
               </Typography>
-              <Divider sx={{ mb: 2 }} />
-              
-              {isLoading && migrationList.length === 0 ? (
-                <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
-                  <CircularProgress />
-                </Box>
-              ) : migrationList.length === 0 ? (
-                <Box sx={{ textAlign: 'center', p: 4 }}>
-                  <Typography variant="body1" color="text.secondary">
-                    No active migrations
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Start a migration to see real-time progress here
-                  </Typography>
-                </Box>
-              ) : (
-                <Box sx={{ maxHeight: 400, overflow: 'auto' }}>
-                  {migrationList.map((migration) => (
-                    <ProgressCard key={migration.migrationId} migration={migration} />
-                  ))}
-                </Box>
-              )}
+              <Typography variant="body1">
+                Status: {systemHealth.status}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Last Updated: {new Date(systemHealth.timestamp).toLocaleString()}
+              </Typography>
             </CardContent>
           </Card>
-        </Grid>
-      </Grid>
-
-      {/* Progress Analytics Charts */}
-      {migrationList.length > 0 && (
-        <Box sx={{ mt: 3 }}>
-          <ProgressChart height={400} showControls={true} />
         </Box>
       )}
 
-      {/* Entity Progress Grid */}
-      {migrationList.length > 0 && (
-        <Box sx={{ mt: 3 }}>
-          <EntityProgressGrid height={500} showPagination={true} />
+      {/* Active Migrations */}
+      <Box sx={{ mb: 3 }}>
+        <Card>
+          <CardContent>
+            <Typography variant="h6" gutterBottom>
+              Active Migrations ({activeMigrationsArray.length})
+            </Typography>
+            
+            {isLoading && activeMigrationsArray.length === 0 ? (
+              <Typography>Loading migrations...</Typography>
+            ) : activeMigrationsArray.length === 0 ? (
+              <Alert severity="info">
+                No active migrations. Click "Test SignalR" to test real-time updates.
+              </Alert>
+            ) : (
+              <Box>
+                {activeMigrationsArray.map((migration) => (
+                  <Card key={migration.migrationId} variant="outlined" sx={{ mb: 2 }}>
+                    <CardContent>
+                      <Typography variant="subtitle1" gutterBottom>
+                        Migration: {migration.migrationId}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary" gutterBottom>
+                        Status: {migration.status}
+                      </Typography>
+                      <Typography variant="caption">
+                        {migration.processedEntities} / {migration.totalEntities} entities
+                      </Typography>
+                    </CardContent>
+                  </Card>
+                ))}
+              </Box>
+            )}
+          </CardContent>
+        </Card>
+      </Box>
+
+      {/* Messages/Errors */}
+      {errors.length > 0 && (
+        <Box sx={{ mb: 3 }}>
+          <Typography variant="h6" gutterBottom>
+            Recent Messages
+          </Typography>
+          {errors.map((error, index) => (
+            <Alert 
+              key={index} 
+              severity={error.code.includes('SUCCESS') ? 'success' : 'error'} 
+              sx={{ mb: 1 }}
+            >
+              <Typography variant="subtitle2">{error.message}</Typography>
+              {error.details && (
+                <Typography variant="body2">{error.details}</Typography>
+              )}
+            </Alert>
+          ))}
         </Box>
       )}
     </Box>

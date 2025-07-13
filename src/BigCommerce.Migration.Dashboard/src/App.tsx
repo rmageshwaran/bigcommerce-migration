@@ -4,6 +4,7 @@ import { CssBaseline } from '@mui/material';
 import { DashboardLayout } from './components/Layout/DashboardLayout';
 import { DashboardProvider } from './context/DashboardContext';
 import { MigrationOverview } from './components/Dashboard/MigrationOverview';
+import { MigrationStartForm } from './components/Views/MigrationStartForm';
 import { PerformanceMetrics } from './components/Charts/PerformanceMetrics';
 import { SystemHealthPanel } from './components/Charts/SystemHealthPanel';
 import { QueueVisualization } from './components/Charts/QueueVisualization';
@@ -77,14 +78,15 @@ function App() {
       <DashboardProvider
         config={{
           signalRUrl: 'http://localhost:7071/api',
-          apiBaseUrl: '/api/dashboard',
-          autoConnect: false // Set to false for now since backend may not be running
+          apiBaseUrl: '/api',
+          autoConnect: true // Enable auto-connect now that SignalR is properly implemented
         }}
       >
         <Router>
           <DashboardLayout>
             <Routes>
               <Route path="/" element={<MigrationOverview />} />
+              <Route path="/start" element={<MigrationStartForm />} />
               <Route path="/migrations" element={<MigrationsPage />} />
               <Route path="/health" element={<HealthPage />} />
               <Route path="/queues" element={<QueuesPage />} />

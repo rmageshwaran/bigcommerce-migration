@@ -253,9 +253,9 @@ const ExportTester: React.FC = () => {
           </Typography>
         </Alert>
 
-        <Grid container spacing={3}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2, 1fr)' }, gap: 3 }}>
           {/* Migration Data Export */}
-          <Grid item xs={12} md={6}>
+          <Box>
             <Card variant="outlined">
               <CardContent>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
@@ -312,10 +312,10 @@ const ExportTester: React.FC = () => {
                 </TableContainer>
               </CardContent>
             </Card>
-          </Grid>
+          </Box>
 
           {/* Entity Progress Export */}
-          <Grid item xs={12} md={6}>
+          <Box>
             <Card variant="outlined">
               <CardContent>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
@@ -358,10 +358,10 @@ const ExportTester: React.FC = () => {
                 </Stack>
               </CardContent>
             </Card>
-          </Grid>
+          </Box>
 
           {/* Error Reports Export */}
-          <Grid item xs={12} md={6}>
+          <Box>
             <Card variant="outlined">
               <CardContent>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
@@ -408,10 +408,10 @@ const ExportTester: React.FC = () => {
                 </Stack>
               </CardContent>
             </Card>
-          </Grid>
+          </Box>
 
           {/* Performance Data Export */}
-          <Grid item xs={12} md={6}>
+          <Box>
             <Card variant="outlined">
               <CardContent>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
@@ -437,30 +437,30 @@ const ExportTester: React.FC = () => {
                   <Chip label="System metrics" size="small" color="info" />
                 </Box>
 
-                <Grid container spacing={2}>
-                  <Grid item xs={6}>
+                <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 2 }}>
+                  <Box>
                     <Typography variant="body2" color="text.secondary">Avg Speed</Typography>
                     <Typography variant="h6">1.7 entities/sec</Typography>
-                  </Grid>
-                  <Grid item xs={6}>
+                  </Box>
+                  <Box sx={{ gridColumn: 'span 4' }}>
                     <Typography variant="body2" color="text.secondary">Avg Response</Typography>
                     <Typography variant="h6">197ms</Typography>
-                  </Grid>
-                  <Grid item xs={6}>
+                  </Box>
+                  <Box>
                     <Typography variant="body2" color="text.secondary">Memory Usage</Typography>
                     <Typography variant="h6">175 MB</Typography>
-                  </Grid>
-                  <Grid item xs={6}>
+                  </Box>
+                  <Box sx={{ gridColumn: 'span 4' }}>
                     <Typography variant="body2" color="text.secondary">Error Rate</Typography>
                     <Typography variant="h6">0.7%</Typography>
-                  </Grid>
-                </Grid>
+                  </Box>
+                </Box>
               </CardContent>
             </Card>
-          </Grid>
+          </Box>
 
           {/* Chart Export */}
-          <Grid item xs={12}>
+          <Box>
             <Card variant="outlined">
               <CardContent>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
@@ -513,8 +513,8 @@ const ExportTester: React.FC = () => {
                 </Box>
               </CardContent>
             </Card>
-          </Grid>
-        </Grid>
+          </Box>
+        </Box>
 
         <Divider sx={{ my: 3 }} />
 

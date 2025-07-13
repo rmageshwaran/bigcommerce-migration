@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
+using Microsoft.Azure.Functions.Worker.Extensions.SignalRService;
 using System;
 using System.Linq;
 using System.Threading.Tasks;
@@ -81,49 +82,156 @@ namespace BigCommerce.Migration.Functions.Functions
         }
 
         /// <summary>
-        /// Test function to simulate a SignalR message (simplified for testing)
+        /// Send migration progress update via SignalR
         /// </summary>
-        [Function("test-signalr")]
-        public async Task<HttpResponseData> TestSignalR(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "test-signalr")] HttpRequestData req)
+        [Function("send-migration-progress")]
+        public async Task<MultiResponse> SendMigrationProgress(
+            [HttpTrigger(AuthorizationLevel.Function, "post", Route = "signalr/migration-progress")] HttpRequestData req)
         {
             try
             {
-                _logger.LogInformation("Test SignalR message requested");
+                var requestBody = await req.ReadAsStringAsync();
+                var progressData = System.Text.Json.JsonSerializer.Deserialize<object>(requestBody ?? "{}") ?? new { message = "Empty progress data" };
 
-                // For now, just simulate success - real SignalR integration will be added later
-                var testMessage = new
+                _logger.LogInformation("Sending migration progress SignalR message to all connected clients");
+
+                // Create HTTP response
+                var response = req.CreateResponse(System.Net.HttpStatusCode.OK);
+                response.Headers.Add("Content-Type", "application/json");
+                await response.WriteStringAsync(System.Text.Json.JsonSerializer.Serialize(new { success = true, message = "Migration progress sent via SignalR" }));
+
+                // Create SignalR message
+                var signalRMessage = new SignalRMessageAction("migrationProgress")
                 {
-                    timestamp = DateTime.UtcNow,
-                    status = "healthy",
-                    message = "Test SignalR message from Azure Functions",
-                    testData = new
-                    {
-                        functionsRunning = 5,
-                        queueDepth = 0,
-                        activeConnections = 1
-                    }
+                    Arguments = new object[] { progressData }
                 };
 
-                _logger.LogInformation("Test SignalR message simulated successfully");
+                _logger.LogInformation("Migration progress SignalR message sent successfully");
 
-                var response = req.CreateResponse(System.Net.HttpStatusCode.OK);
-                response.Headers.Add("Access-Control-Allow-Origin", "*");
-                await response.WriteAsJsonAsync(new 
-                { 
-                    success = true, 
-                    message = "Test SignalR message simulated (SignalR integration will be added)",
-                    testData = testMessage
-                });
-                return response;
+                return new MultiResponse
+                {
+                    HttpResponse = response,
+                    SignalRMessage = signalRMessage
+                };
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error simulating test SignalR message");
-                var errorResponse = req.CreateResponse(System.Net.HttpStatusCode.BadRequest);
-                errorResponse.Headers.Add("Access-Control-Allow-Origin", "*");
-                await errorResponse.WriteAsJsonAsync(new { success = false, error = ex.Message });
-                return errorResponse;
+                _logger.LogError(ex, "Error sending migration progress SignalR message");
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Send system health update via SignalR
+        /// </summary>
+        [Function("send-system-health")]
+        public async Task<SignalRMessageAction> SendSystemHealth(
+            [HttpTrigger(AuthorizationLevel.Function, "post", Route = "signalr/system-health")] HttpRequestData req)
+        {
+            try
+            {
+                var requestBody = await req.ReadAsStringAsync();
+                var healthData = System.Text.Json.JsonSerializer.Deserialize<object>(requestBody ?? "{}") ?? new { message = "Empty health data" };
+
+                _logger.LogInformation("Sending system health SignalR message to all connected clients");
+
+                // Create SignalR message
+                var signalRMessage = new SignalRMessageAction("systemHealth")
+                {
+                    Arguments = new object[] { healthData }
+                };
+
+                _logger.LogInformation("System health SignalR message sent successfully");
+
+                return signalRMessage;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error sending system health SignalR message");
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Send migration status update via SignalR (used for completed, failed, cancelled, started)
+        /// </summary>
+        [Function("send-migration-status")]
+        public async Task<MultiResponse> SendMigrationStatus(
+            [HttpTrigger(AuthorizationLevel.Anonymous, "post", "options", Route = "send-migration-status")] HttpRequestData req)
+        {
+            try
+            {
+                // Get origin from request headers
+                var origin = GetOriginFromRequest(req);
+                _logger.LogInformation("Send migration status request - Method: {Method}, Origin: {Origin}", req.Method, origin ?? "null");
+                
+                // Handle CORS preflight requests
+                if (req.Method.Equals("OPTIONS", StringComparison.OrdinalIgnoreCase))
+                {
+                    var optionsResponse = req.CreateResponse(System.Net.HttpStatusCode.OK);
+                    
+                    // Always set CORS headers for allowed origins, fallback to localhost:5173 for dev
+                    var statusOptionsCorsOrigin = origin ?? "http://localhost:5173";
+                    optionsResponse.Headers.Add("Access-Control-Allow-Origin", statusOptionsCorsOrigin);
+                    optionsResponse.Headers.Add("Access-Control-Allow-Credentials", "true");
+                    optionsResponse.Headers.Add("Access-Control-Allow-Methods", "POST, OPTIONS");
+                    optionsResponse.Headers.Add("Access-Control-Allow-Headers", "Content-Type, Authorization, x-requested-with");
+                    
+                    return new MultiResponse
+                    {
+                        HttpResponse = optionsResponse
+                    };
+                }
+
+                var requestBody = await req.ReadAsStringAsync();
+                var statusData = System.Text.Json.JsonSerializer.Deserialize<object>(requestBody ?? "{}") ?? new { message = "Empty status data" };
+
+                _logger.LogInformation("Sending migration status SignalR message to all connected clients");
+
+                // Create HTTP response
+                var response = req.CreateResponse(System.Net.HttpStatusCode.OK);
+                response.Headers.Add("Content-Type", "application/json");
+                
+                // Add CORS headers to response
+                var statusResponseCorsOrigin = origin ?? "http://localhost:5173";
+                response.Headers.Add("Access-Control-Allow-Origin", statusResponseCorsOrigin);
+                response.Headers.Add("Access-Control-Allow-Credentials", "true");
+                
+                await response.WriteStringAsync(System.Text.Json.JsonSerializer.Serialize(new { success = true, message = "Migration status sent via SignalR" }));
+
+                // Create SignalR message with "MigrationStatus" as the method name
+                var signalRMessage = new SignalRMessageAction("MigrationStatus")
+                {
+                    Arguments = new object[] { statusData }
+                };
+
+                _logger.LogInformation("Migration status SignalR message sent successfully");
+
+                return new MultiResponse
+                {
+                    HttpResponse = response,
+                    SignalRMessage = signalRMessage
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error sending migration status SignalR message");
+                
+                var errorResponse = req.CreateResponse(System.Net.HttpStatusCode.InternalServerError);
+                errorResponse.Headers.Add("Content-Type", "application/json");
+                
+                // Add CORS headers to error response too
+                var statusErrorOrigin = GetOriginFromRequest(req);
+                var statusErrorCorsOrigin = statusErrorOrigin ?? "http://localhost:5173";
+                errorResponse.Headers.Add("Access-Control-Allow-Origin", statusErrorCorsOrigin);
+                errorResponse.Headers.Add("Access-Control-Allow-Credentials", "true");
+                
+                await errorResponse.WriteStringAsync(System.Text.Json.JsonSerializer.Serialize(new { error = ex.Message }));
+                
+                return new MultiResponse
+                {
+                    HttpResponse = errorResponse
+                };
             }
         }
 
@@ -142,8 +250,9 @@ namespace BigCommerce.Migration.Functions.Functions
                     connectionState = "Available",
                     timestamp = DateTime.UtcNow,
                     negotiateEndpoint = "/api/negotiate",
-                    testEndpoint = "/api/test-signalr",
-                    note = "SignalR integration is functional for negotiate, message sending will be enhanced"
+                    progressEndpoint = "/api/signalr/migration-progress",
+                    healthEndpoint = "/api/signalr/system-health",
+                    note = "Real SignalR message broadcasting is now enabled"
                 };
 
                 var response = req.CreateResponse();
@@ -207,5 +316,16 @@ namespace BigCommerce.Migration.Functions.Functions
 
             return null;
         }
+    }
+
+    /// <summary>
+    /// Multiple response class for functions that need to return both HTTP and SignalR responses
+    /// </summary>
+    public class MultiResponse
+    {
+        public HttpResponseData? HttpResponse { get; set; }
+
+        [SignalROutput(HubName = "migration")]
+        public SignalRMessageAction? SignalRMessage { get; set; }
     }
 } 

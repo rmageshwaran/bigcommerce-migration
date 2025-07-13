@@ -89,10 +89,14 @@ export class SignalRService {
     });
 
     this.connection.on('MigrationStatus', (status: any) => {
-      this.notifyListeners('migrationStatus', status);
+      this.notifyListeners('MigrationStatus', status);
     });
 
     this.connection.on('SystemHealth', (healthData: SystemHealthData) => {
+      this.notifyListeners('systemHealth', healthData);
+    });
+
+    this.connection.on('systemHealth', (healthData: SystemHealthData) => {
       this.notifyListeners('systemHealth', healthData);
     });
 

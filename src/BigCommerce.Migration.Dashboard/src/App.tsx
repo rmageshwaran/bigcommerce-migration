@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { CssBaseline } from '@mui/material';
 import { DashboardLayout } from './components/Layout/DashboardLayout';
@@ -72,6 +72,33 @@ const SettingsPage = () => (
 );
 
 function App() {
+  useEffect(() => {
+    // Global error handler for browser extension errors
+    const handleGlobalError = (event: ErrorEvent) => {
+      // Suppress common browser extension errors that don't affect our app
+      if (event.message && (
+        event.message.includes('message channel closed') ||
+        event.message.includes('Extension context invalidated') ||
+        event.message.includes('Could not establish connection')
+      )) {
+        event.preventDefault();
+        console.warn('Browser extension error suppressed:', event.message);
+        return;
+      }
+      
+      // Log other errors for debugging
+      console.error('Global error:', event.error);
+    };
+
+    // Add global error listener
+    window.addEventListener('error', handleGlobalError);
+
+    // Cleanup
+    return () => {
+      window.removeEventListener('error', handleGlobalError);
+    };
+  }, []);
+
   return (
     <ThemeContextProvider>
       <CssBaseline />

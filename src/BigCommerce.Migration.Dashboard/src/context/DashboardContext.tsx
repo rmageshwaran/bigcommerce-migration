@@ -259,17 +259,70 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
   useEffect(() => {
     const signalRService = getSignalRService();
 
-    // Connection state changes
+    // Connection state listener
     const connectionUnsubscribe = signalRService.on('connectionStateChanged', (connectionData) => {
-      dispatch({ 
-        type: 'SET_SIGNALR_CONNECTION', 
-        payload: signalRService.getConnectionState() 
+      dispatch({
+        type: 'SET_SIGNALR_CONNECTION',
+        payload: {
+          connectionId: connectionData.connectionId || '',
+          isConnected: connectionData.state === 'Connected',
+          lastConnected: connectionData.state === 'Connected' ? new Date() : undefined,
+          connectionState: connectionData.state
+        }
       });
     });
 
     // Migration progress updates
     const progressUnsubscribe = signalRService.on('migrationProgress', (progress: MigrationProgress) => {
       dispatch({ type: 'UPDATE_MIGRATION_PROGRESS', payload: progress });
+    });
+
+    // Migration status updates (completed, failed, cancelled, etc.)
+    const statusUnsubscribe = signalRService.on('MigrationStatus', (statusData) => {
+      // Handle different types of migration status updates
+      if (statusData.Status === 'completed') {
+        addError({
+          code: 'MIGRATION_COMPLETED',
+          message: `Migration ${statusData.MigrationId} completed successfully!`,
+          details: `Completed at ${new Date(statusData.Timestamp).toLocaleString()}`,
+          timestamp: new Date()
+        });
+        
+        // Update migration progress to show completion
+        const completedProgress: MigrationProgress = {
+          migrationId: statusData.MigrationId,
+          status: 'completed',
+          totalEntities: 0,
+          processedEntities: 0,
+          successfulEntities: 0,
+          failedEntities: 0,
+          startTime: new Date(),
+          lastUpdated: new Date(),
+          entitiesPerSecond: 0,
+          estimatedTimeRemaining: 0,
+          elapsedTime: 0,
+          currentEntity: '',
+          currentPhase: 'completed',
+          overallProgressPercentage: 100,
+          entityProgress: {},
+          errorRate: 0
+        };
+        dispatch({ type: 'UPDATE_MIGRATION_PROGRESS', payload: completedProgress });
+      } else if (statusData.Status === 'failed') {
+        addError({
+          code: 'MIGRATION_FAILED',
+          message: `Migration ${statusData.MigrationId} failed`,
+          details: `Failed at ${new Date(statusData.Timestamp).toLocaleString()}`,
+          timestamp: new Date()
+        });
+      } else if (statusData.Status === 'cancelled') {
+        addError({
+          code: 'MIGRATION_CANCELLED',
+          message: `Migration ${statusData.MigrationId} was cancelled`,
+          details: `Cancelled at ${new Date(statusData.Timestamp).toLocaleString()}`,
+          timestamp: new Date()
+        });
+      }
     });
 
     // System health updates
@@ -296,6 +349,7 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
     return () => {
       connectionUnsubscribe();
       progressUnsubscribe();
+      statusUnsubscribe();
       healthUnsubscribe();
       errorUnsubscribe();
     };

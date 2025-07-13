@@ -3,6 +3,10 @@ using BigCommerce.Migration.Functions.Hubs;
 using Microsoft.Extensions.Logging;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Net.Http;
+using System;
+using System.Text;
+using System.Text.Json;
 
 namespace BigCommerce.Migration.Functions.Services
 {
@@ -12,10 +16,12 @@ namespace BigCommerce.Migration.Functions.Services
     public class AzureFunctionsSignalRService : IMigrationSignalRService
     {
         private readonly ILogger<AzureFunctionsSignalRService> _logger;
+        private readonly HttpClient _httpClient;
 
-        public AzureFunctionsSignalRService(ILogger<AzureFunctionsSignalRService> logger)
+        public AzureFunctionsSignalRService(ILogger<AzureFunctionsSignalRService> logger, HttpClient httpClient)
         {
             _logger = logger;
+            _httpClient = httpClient;
         }
 
         /// <inheritdoc />
@@ -23,16 +29,28 @@ namespace BigCommerce.Migration.Functions.Services
         {
             try
             {
-                _logger.LogDebug("Progress update queued for SignalR broadcast for migration {MigrationId}", migrationId);
+                _logger.LogDebug("Broadcasting progress update for migration {MigrationId} via SignalR", migrationId);
                 
-                // Note: For Azure Functions with SignalR output bindings, the actual broadcasting 
-                // is handled by SignalR Functions with output bindings. This service just logs
-                // the intent for now. The actual implementation will be in SignalRFunctions.cs
-                await Task.CompletedTask;
+                var progressData = new
+                {
+                    migrationId,
+                    progress = new
+                    {
+                        processedEntities = progress.ProcessedEntities,
+                        totalEntities = progress.TotalEntities,
+                        status = progress.Status,
+                        completionPercentage = (progress.TotalEntities > 0) ? (double)progress.ProcessedEntities / progress.TotalEntities * 100 : 0,
+                        entitiesPerSecond = progress.EntitiesPerSecond,
+                        currentPhase = progress.CurrentPhase,
+                        timestamp = DateTime.UtcNow
+                    }
+                };
+
+                await CallSignalREndpoint("/api/signalr/migration-progress", progressData, cancellationToken);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to queue progress update for migration {MigrationId}", migrationId);
+                _logger.LogError(ex, "Failed to broadcast progress update for migration {MigrationId}", migrationId);
                 throw;
             }
         }
@@ -42,87 +60,20 @@ namespace BigCommerce.Migration.Functions.Services
         {
             try
             {
-                _logger.LogDebug("Status update queued for SignalR broadcast for migration {MigrationId}", migrationId);
-                await Task.CompletedTask;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to queue status update for migration {MigrationId}", migrationId);
-                throw;
-            }
-        }
+                _logger.LogDebug("Broadcasting status update for migration {MigrationId} via SignalR", migrationId);
+                
+                var statusData = new
+                {
+                    migrationId,
+                    status,
+                    timestamp = DateTime.UtcNow
+                };
 
-        /// <inheritdoc />
-        public async Task BroadcastEntityStartAsync(string migrationId, string entityType, int totalCount, CancellationToken cancellationToken = default)
-        {
-            try
-            {
-                _logger.LogDebug("Entity start queued for SignalR broadcast for migration {MigrationId}, entity {EntityType}", migrationId, entityType);
-                await Task.CompletedTask;
+                await CallSignalREndpoint("/api/signalr/system-health", statusData, cancellationToken);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to queue entity start for migration {MigrationId}, entity {EntityType}", migrationId, entityType);
-                throw;
-            }
-        }
-
-        /// <inheritdoc />
-        public async Task BroadcastEntityCompletionAsync(string migrationId, string entityType, object results, CancellationToken cancellationToken = default)
-        {
-            try
-            {
-                _logger.LogDebug("Entity completion queued for SignalR broadcast for migration {MigrationId}, entity {EntityType}", migrationId, entityType);
-                await Task.CompletedTask;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to queue entity completion for migration {MigrationId}, entity {EntityType}", migrationId, entityType);
-                throw;
-            }
-        }
-
-        /// <inheritdoc />
-        public async Task BroadcastBatchCompletionAsync(string migrationId, string entityType, int batchNumber, object batchResults, CancellationToken cancellationToken = default)
-        {
-            try
-            {
-                _logger.LogDebug("Batch completion queued for SignalR broadcast for migration {MigrationId}, entity {EntityType}, batch {BatchNumber}", migrationId, entityType, batchNumber);
-                await Task.CompletedTask;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to queue batch completion for migration {MigrationId}, entity {EntityType}, batch {BatchNumber}", migrationId, entityType, batchNumber);
-                throw;
-            }
-        }
-
-        /// <inheritdoc />
-        public async Task BroadcastSystemHealthAsync(object healthData, CancellationToken cancellationToken = default)
-        {
-            try
-            {
-                _logger.LogDebug("System health queued for SignalR broadcast");
-                await Task.CompletedTask;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to queue system health broadcast");
-                throw;
-            }
-        }
-
-        /// <inheritdoc />
-        public async Task BroadcastMigrationStartedAsync(string migrationId, object migrationData, CancellationToken cancellationToken = default)
-        {
-            try
-            {
-                _logger.LogDebug("Migration started queued for SignalR broadcast for migration {MigrationId}", migrationId);
-                await Task.CompletedTask;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to queue migration started broadcast for migration {MigrationId}", migrationId);
+                _logger.LogError(ex, "Failed to broadcast status update for migration {MigrationId}", migrationId);
                 throw;
             }
         }
@@ -132,12 +83,21 @@ namespace BigCommerce.Migration.Functions.Services
         {
             try
             {
-                _logger.LogDebug("Migration completed queued for SignalR broadcast for migration {MigrationId}", migrationId);
-                await Task.CompletedTask;
+                _logger.LogDebug("Broadcasting migration completed for migration {MigrationId} via SignalR", migrationId);
+                
+                var statusMessage = new
+                {
+                    MigrationId = migrationId,
+                    Status = "completed",
+                    Data = completionData,
+                    Timestamp = DateTime.UtcNow
+                };
+
+                await CallSignalREndpoint("/api/send-migration-status", statusMessage, cancellationToken);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to queue migration completed broadcast for migration {MigrationId}", migrationId);
+                _logger.LogError(ex, "Failed to broadcast migration completed for migration {MigrationId}", migrationId);
                 throw;
             }
         }
@@ -147,12 +107,21 @@ namespace BigCommerce.Migration.Functions.Services
         {
             try
             {
-                _logger.LogDebug("Migration failed queued for SignalR broadcast for migration {MigrationId}", migrationId);
-                await Task.CompletedTask;
+                _logger.LogDebug("Broadcasting migration failed for migration {MigrationId} via SignalR", migrationId);
+                
+                var statusMessage = new
+                {
+                    MigrationId = migrationId,
+                    Status = "failed",
+                    Error = errorData,
+                    Timestamp = DateTime.UtcNow
+                };
+
+                await CallSignalREndpoint("/api/send-migration-status", statusMessage, cancellationToken);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to queue migration failed broadcast for migration {MigrationId}", migrationId);
+                _logger.LogError(ex, "Failed to broadcast migration failed for migration {MigrationId}", migrationId);
                 throw;
             }
         }
@@ -162,12 +131,105 @@ namespace BigCommerce.Migration.Functions.Services
         {
             try
             {
-                _logger.LogDebug("Migration cancelled queued for SignalR broadcast for migration {MigrationId}", migrationId);
+                _logger.LogDebug("Broadcasting migration cancelled for migration {MigrationId} via SignalR", migrationId);
+                
+                var statusMessage = new
+                {
+                    MigrationId = migrationId,
+                    Status = "cancelled",
+                    Data = cancellationData,
+                    Timestamp = DateTime.UtcNow
+                };
+
+                await CallSignalREndpoint("/api/send-migration-status", statusMessage, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to broadcast migration cancelled for migration {MigrationId}", migrationId);
+                throw;
+            }
+        }
+
+        /// <inheritdoc />
+        public async Task BroadcastEntityStartAsync(string migrationId, string entityType, int totalCount, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                _logger.LogDebug("Broadcasting entity start for migration {MigrationId}, entity {EntityType} via SignalR", migrationId, entityType);
                 await Task.CompletedTask;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to queue migration cancelled broadcast for migration {MigrationId}", migrationId);
+                _logger.LogError(ex, "Failed to broadcast entity start for migration {MigrationId}, entity {EntityType}", migrationId, entityType);
+                throw;
+            }
+        }
+
+        /// <inheritdoc />
+        public async Task BroadcastEntityCompletionAsync(string migrationId, string entityType, object results, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                _logger.LogDebug("Broadcasting entity completion for migration {MigrationId}, entity {EntityType} via SignalR", migrationId, entityType);
+                await Task.CompletedTask;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to broadcast entity completion for migration {MigrationId}, entity {EntityType}", migrationId, entityType);
+                throw;
+            }
+        }
+
+        /// <inheritdoc />
+        public async Task BroadcastBatchCompletionAsync(string migrationId, string entityType, int batchNumber, object batchResults, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                _logger.LogDebug("Broadcasting batch completion for migration {MigrationId}, entity {EntityType}, batch {BatchNumber} via SignalR", migrationId, entityType, batchNumber);
+                await Task.CompletedTask;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to broadcast batch completion for migration {MigrationId}, entity {EntityType}, batch {BatchNumber}", migrationId, entityType, batchNumber);
+                throw;
+            }
+        }
+
+        /// <inheritdoc />
+        public async Task BroadcastSystemHealthAsync(object healthData, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                _logger.LogDebug("Broadcasting system health via SignalR");
+                await CallSignalREndpoint("/api/signalr/system-health", healthData, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to broadcast system health");
+                throw;
+            }
+        }
+
+        /// <inheritdoc />
+        public async Task BroadcastMigrationStartedAsync(string migrationId, object migrationData, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                _logger.LogDebug("Broadcasting migration started for migration {MigrationId} via SignalR", migrationId);
+                
+                var statusMessage = new
+                {
+                    MigrationId = migrationId,
+                    Status = "started",
+                    Data = migrationData,
+                    Timestamp = DateTime.UtcNow
+                };
+
+                await CallSignalREndpoint("/api/send-migration-status", statusMessage, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to broadcast migration started for migration {MigrationId}", migrationId);
                 throw;
             }
         }
@@ -177,12 +239,12 @@ namespace BigCommerce.Migration.Functions.Services
         {
             try
             {
-                _logger.LogDebug("Entity phase start queued for SignalR broadcast for migration {MigrationId}, entity {EntityType}", migrationId, entityType);
+                _logger.LogDebug("Broadcasting entity phase start for migration {MigrationId}, entity {EntityType} via SignalR", migrationId, entityType);
                 await Task.CompletedTask;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to queue entity phase start broadcast for migration {MigrationId}, entity {EntityType}", migrationId, entityType);
+                _logger.LogError(ex, "Failed to broadcast entity phase start for migration {MigrationId}, entity {EntityType}", migrationId, entityType);
                 throw;
             }
         }
@@ -192,12 +254,12 @@ namespace BigCommerce.Migration.Functions.Services
         {
             try
             {
-                _logger.LogDebug("Entity phase completed queued for SignalR broadcast for migration {MigrationId}, entity {EntityType}", migrationId, entityType);
+                _logger.LogDebug("Broadcasting entity phase completed for migration {MigrationId}, entity {EntityType} via SignalR", migrationId, entityType);
                 await Task.CompletedTask;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to queue entity phase completed broadcast for migration {MigrationId}, entity {EntityType}", migrationId, entityType);
+                _logger.LogError(ex, "Failed to broadcast entity phase completed for migration {MigrationId}, entity {EntityType}", migrationId, entityType);
                 throw;
             }
         }
@@ -207,12 +269,12 @@ namespace BigCommerce.Migration.Functions.Services
         {
             try
             {
-                _logger.LogDebug("Error notification queued for SignalR broadcast for migration {MigrationId}", migrationId);
+                _logger.LogDebug("Broadcasting error notification for migration {MigrationId} via SignalR", migrationId);
                 await Task.CompletedTask;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to queue error notification broadcast for migration {MigrationId}", migrationId);
+                _logger.LogError(ex, "Failed to broadcast error notification for migration {MigrationId}", migrationId);
                 throw;
             }
         }
@@ -222,13 +284,41 @@ namespace BigCommerce.Migration.Functions.Services
         {
             try
             {
-                _logger.LogDebug("System alert queued for SignalR broadcast, type {AlertType}", alertType);
+                _logger.LogDebug("Broadcasting system alert type {AlertType} via SignalR", alertType);
                 await Task.CompletedTask;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to queue system alert broadcast for type {AlertType}", alertType);
+                _logger.LogError(ex, "Failed to broadcast system alert for type {AlertType}", alertType);
                 throw;
+            }
+        }
+
+        /// <summary>
+        /// Helper method to call SignalR endpoints
+        /// </summary>
+        private async Task CallSignalREndpoint(string endpoint, object data, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                var json = System.Text.Json.JsonSerializer.Serialize(data);
+                var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+                
+                var response = await _httpClient.PostAsync($"http://localhost:7071{endpoint}", content, cancellationToken);
+                
+                if (response.IsSuccessStatusCode)
+                {
+                    _logger.LogDebug("Successfully called SignalR endpoint {Endpoint}", endpoint);
+                }
+                else
+                {
+                    _logger.LogWarning("SignalR endpoint {Endpoint} returned status {StatusCode}", endpoint, response.StatusCode);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to call SignalR endpoint {Endpoint}", endpoint);
+                // Don't rethrow to avoid breaking the migration flow
             }
         }
     }

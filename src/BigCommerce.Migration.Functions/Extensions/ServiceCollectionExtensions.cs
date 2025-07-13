@@ -447,7 +447,12 @@ public static class ServiceCollectionExtensions
                 Console.WriteLine("Azure SignalR connection string found. Using Azure Functions SignalR service with output bindings.");
 
                 // Register Azure Functions SignalR service (doesn't use hub context)
-                services.AddSingleton<IMigrationSignalRService, AzureFunctionsSignalRService>();
+                services.AddSingleton<IMigrationSignalRService>(serviceProvider =>
+                {
+                    var logger = serviceProvider.GetRequiredService<ILogger<AzureFunctionsSignalRService>>();
+                    var httpClient = serviceProvider.GetRequiredService<HttpClient>();
+                    return new AzureFunctionsSignalRService(logger, httpClient);
+                });
             }
         }
         else

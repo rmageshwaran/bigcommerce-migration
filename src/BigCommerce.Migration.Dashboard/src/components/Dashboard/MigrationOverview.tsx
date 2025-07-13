@@ -21,42 +21,17 @@ export const MigrationOverview: React.FC = () => {
   const { state, refreshData, addError } = useDashboard();
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Test SignalR function
-  const testSignalR = async () => {
-    try {
-      const response = await fetch('/api/test-signalr', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      if (response.ok) {
-        console.log('SignalR test message sent successfully');
-        addError({
-          code: 'SIGNALR_TEST_SUCCESS',
-          message: 'SignalR test message sent successfully!',
-          details: 'Check the system health section for the test message.',
-          timestamp: new Date()
-        });
-      } else {
-        console.error('Failed to send SignalR test message');
-      }
-    } catch (error) {
-      console.error('Error testing SignalR:', error);
-      addError({
-        code: 'SIGNALR_TEST_ERROR',
-        message: 'Failed to test SignalR',
-        details: error instanceof Error ? error.message : 'Unknown error',
-        timestamp: new Date()
-      });
-    }
-  };
-
   const handleRefresh = async () => {
     setIsRefreshing(true);
     try {
       await refreshData();
+    } catch (error) {
+      addError({
+        code: 'REFRESH_ERROR',
+        message: 'Failed to refresh data',
+        details: error instanceof Error ? error.message : 'Unknown error',
+        timestamp: new Date()
+      });
     } finally {
       setIsRefreshing(false);
     }
@@ -81,14 +56,6 @@ export const MigrationOverview: React.FC = () => {
           Migration Overview
         </Typography>
         <Stack direction="row" spacing={2}>
-          <Button
-            variant="outlined"
-            startIcon={<TestIcon />}
-            onClick={testSignalR}
-            color="primary"
-          >
-            Test SignalR
-          </Button>
           <Button
             variant="outlined"
             startIcon={<RefreshIcon />}

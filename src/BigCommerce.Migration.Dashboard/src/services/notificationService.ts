@@ -234,6 +234,25 @@ class NotificationService {
     });
   }
 
+  public migrationCancelled(migrationId: string, migrationName: string): void {
+    this.addNotification({
+      type: NotificationType.WARNING,
+      priority: NotificationPriority.MEDIUM,
+      title: 'Migration Cancelled',
+      message: `Migration "${migrationName}" was cancelled by user request`,
+      migrationId,
+      persistent: true,
+      soundEnabled: true,
+      actions: [
+        {
+          label: 'View Details',
+          action: () => this.navigateToMigration(migrationId),
+          style: 'primary'
+        }
+      ]
+    });
+  }
+
   public batchCompleted(migrationId: string, entityType: string, completed: number, total: number): void {
     this.addNotification({
       type: NotificationType.BATCH_COMPLETE,

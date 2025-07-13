@@ -13,7 +13,6 @@ import {
   Refresh as RefreshIcon,
   Error as ErrorIcon,
   CheckCircle as SuccessIcon,
-  BugReport as TestIcon
 } from '@mui/icons-material';
 import { useDashboard } from '../../context/DashboardContext';
 

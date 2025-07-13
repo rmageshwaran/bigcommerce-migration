@@ -8,6 +8,7 @@ import type {
 } from '../types';
 import { getSignalRService } from '../services/signalRService';
 import { getApiService } from '../services/apiService';
+import { notificationService } from '../services/notificationService';
 
 // Dashboard State Interface
 interface DashboardState {
@@ -281,12 +282,15 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
     const statusUnsubscribe = signalRService.on('MigrationStatus', (statusData) => {
       // Handle different types of migration status updates
       if (statusData.Status === 'completed') {
-        addError({
-          code: 'MIGRATION_COMPLETED',
-          message: `Migration ${statusData.MigrationId} completed successfully!`,
-          details: `Completed at ${new Date(statusData.Timestamp).toLocaleString()}`,
-          timestamp: new Date()
-        });
+        // Calculate duration if possible (fallback to "just now" if no duration data)
+        const duration = statusData.Data?.duration || 'just now';
+        const migrationName = statusData.Data?.name || `Migration ${statusData.MigrationId}`;
+        
+        notificationService.migrationCompleted(
+          statusData.MigrationId,
+          migrationName,
+          duration
+        );
         
         // Update migration progress to show completion
         const completedProgress: MigrationProgress = {
@@ -309,19 +313,28 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
         };
         dispatch({ type: 'UPDATE_MIGRATION_PROGRESS', payload: completedProgress });
       } else if (statusData.Status === 'failed') {
-        addError({
-          code: 'MIGRATION_FAILED',
-          message: `Migration ${statusData.MigrationId} failed`,
-          details: `Failed at ${new Date(statusData.Timestamp).toLocaleString()}`,
-          timestamp: new Date()
-        });
+        const migrationName = statusData.Data?.name || `Migration ${statusData.MigrationId}`;
+        const errorMessage = statusData.Error?.message || statusData.Data?.error || 'Unknown error occurred';
+        
+        notificationService.migrationFailed(
+          statusData.MigrationId,
+          migrationName,
+          errorMessage
+        );
       } else if (statusData.Status === 'cancelled') {
-        addError({
-          code: 'MIGRATION_CANCELLED',
-          message: `Migration ${statusData.MigrationId} was cancelled`,
-          details: `Cancelled at ${new Date(statusData.Timestamp).toLocaleString()}`,
-          timestamp: new Date()
-        });
+        const migrationName = statusData.Data?.name || `Migration ${statusData.MigrationId}`;
+        
+        notificationService.migrationCancelled(
+          statusData.MigrationId,
+          migrationName
+        );
+      } else if (statusData.Status === 'started') {
+        const migrationName = statusData.Data?.name || `Migration ${statusData.MigrationId}`;
+        
+        notificationService.migrationStarted(
+          statusData.MigrationId,
+          migrationName
+        );
       }
     });
 
@@ -332,12 +345,10 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
 
     // Error handling
     const errorUnsubscribe = signalRService.on('error', (errorData) => {
-      addError({
-        code: 'SIGNALR_ERROR',
-        message: 'SignalR error',
-        details: errorData.message,
-        timestamp: new Date()
-      });
+      notificationService.error(
+        'SignalR Connection Error',
+        errorData.message || 'An error occurred with the real-time connection'
+      );
     });
 
     // Auto-connect on mount

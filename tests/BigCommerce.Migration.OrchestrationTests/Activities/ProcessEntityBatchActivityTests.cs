@@ -124,11 +124,16 @@ public class ProcessEntityBatchActivityTests
             new Dictionary<string, object> { { "id", 11 }, { "name", "Category 2" }, { "parent_id", 10 } }
         };
 
-        _apiClientMock.Setup(x => x.GetCategoriesAsync(
+        _apiClientMock.Setup(x => x.GetPaginatedEntitiesAsync(
                 It.Is<StoreConfiguration>(s => s.StoreId == "source-store"),
-                "1",
+                "categories",
+                It.IsAny<BigCommercePaginationRequest>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(sourceCategories);
+            .ReturnsAsync(new BigCommercePaginatedResponse<Dictionary<string, object>>
+            {
+                Data = sourceCategories,
+                ApiVersion = BigCommerceApiVersion.V3
+            });
 
         _apiClientMock.Setup(x => x.CreateCategoriesAsync(
                 It.Is<StoreConfiguration>(s => s.StoreId == "dest-store"),
@@ -438,13 +443,13 @@ public class ProcessEntityBatchActivityTests
         Assert.NotNull(result);
         Assert.Equal(1, result.SuccessfulEntities);
         
-        // Verify entity mappings were stored
+        // Verify entity mappings were stored (once individually for hierarchy + once as fallback batch)
         _migrationStorageServiceMock.Verify(x => x.StoreEntityMappingsAsync(
             It.Is<List<EntityMapping>>(mappings => 
                 mappings.Count == 1 && 
                 mappings[0].SourceId == "100" && 
                 mappings[0].DestinationId == "200")),
-            Times.Once);
+            Times.Exactly(2));
     }
 
     [Fact]

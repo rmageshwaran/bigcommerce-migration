@@ -216,7 +216,7 @@ public class BigCommerceApiClientTests : IDisposable
             Times.Once(),
             ItExpr.Is<HttpRequestMessage>(req =>
                 req.Method == HttpMethod.Post &&
-                req.RequestUri!.ToString().Contains($"stores/{_testStoreConfig.StoreId}/v3/catalog/trees/{categoryTreeId}/categories")),
+                req.RequestUri!.ToString().Contains($"stores/{_testStoreConfig.StoreId}/v3/catalog/trees/categories")),
             ItExpr.IsAny<CancellationToken>());
     }
 

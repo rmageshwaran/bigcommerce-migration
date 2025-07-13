@@ -5,6 +5,7 @@ using BigCommerce.Migration.Core.Models;
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Orchestration.Models;
 using BigCommerce.Migration.Orchestration.Activities;
+using System.Linq;
 
 namespace BigCommerce.Migration.Functions.Orchestrators;
 
@@ -78,7 +79,8 @@ public static class EntityMigrationDurableOrchestrator
                 MigrationId = migrationId,
                 EntityType = entityType,
                 SourceStore = input.SourceStore ?? new StoreConfiguration(),
-                EntityConfig = new EntityConfiguration()
+                EntityConfig = new EntityConfiguration(),
+                CategoryTreeContext = input.CategoryTreeContext
             };
 
             var discoverResult = await context.CallActivityAsync<EntityDiscoveryResult>(
@@ -120,9 +122,12 @@ public static class EntityMigrationDurableOrchestrator
                 });
 
             // Step 5: Process entities in batches
-            var totalBatches = CalculateBatchCount(discoverResult.TotalCount, 10); // Default batch size of 10
-            logger.LogInformation("Processing {EntityType} entities in {BatchCount} batches for MigrationId: {MigrationId}", 
-                entityType, totalBatches, migrationId);
+            const int batchSize = 10; // Default batch size of 10
+            var entityIds = discoverResult.EntityIds;
+            var totalBatches = CalculateBatchCount(discoverResult.TotalCount, batchSize);
+            
+            logger.LogInformation("Processing {EntityCount} {EntityType} entities in {BatchCount} batches for MigrationId: {MigrationId}", 
+                entityIds.Count, entityType, totalBatches, migrationId);
 
             for (int batchNumber = 1; batchNumber <= totalBatches; batchNumber++)
             {
@@ -148,8 +153,13 @@ public static class EntityMigrationDurableOrchestrator
                         EntityType = entityType
                     });
 
-                logger.LogInformation("Processing {EntityType} batch {BatchNumber}/{TotalBatches} for MigrationId: {MigrationId}", 
-                    entityType, batchNumber, totalBatches, migrationId);
+                // Calculate entity IDs for this batch
+                var startIndex = (batchNumber - 1) * batchSize;
+                var endIndex = Math.Min(startIndex + batchSize, entityIds.Count);
+                var batchEntityIds = entityIds.Skip(startIndex).Take(endIndex - startIndex).ToList();
+
+                logger.LogInformation("Processing {EntityType} batch {BatchNumber}/{TotalBatches} ({EntityCount} entities) for MigrationId: {MigrationId}", 
+                    entityType, batchNumber, totalBatches, batchEntityIds.Count, migrationId);
 
                 try
                 {
@@ -159,6 +169,8 @@ public static class EntityMigrationDurableOrchestrator
                         MigrationId = migrationId,
                         EntityType = entityType,
                         BatchNumber = batchNumber,
+                        TotalBatches = totalBatches,
+                        EntityIds = batchEntityIds,
                         SourceStore = input.SourceStore ?? new StoreConfiguration(),
                         DestinationStore = input.DestinationStore ?? new StoreConfiguration(),
                         CategoryTreeContext = input.CategoryTreeContext ?? new CategoryTreeContext()
@@ -300,57 +312,4 @@ public static class EntityMigrationDurableOrchestrator
     }
 }
 
-/// <summary>
-/// Request model for entity migration
-/// </summary>
-public class EntityMigrationRequest
-{
-    public string MigrationId { get; set; } = string.Empty;
-    public string EntityType { get; set; } = string.Empty;
-    public StoreConfiguration? SourceStore { get; set; }
-    public StoreConfiguration? DestinationStore { get; set; }
-    public CategoryTreeContext? CategoryTreeContext { get; set; }
-    public MigrationSettings? Settings { get; set; }
-}
-
-/// <summary>
-/// Result model for entity migration
-/// </summary>
-public class EntityMigrationResult
-{
-    public string EntityType { get; set; } = string.Empty;
-    public bool IsSuccess { get; set; }
-    public string? ErrorMessage { get; set; }
-    public DateTime StartTime { get; set; }
-    public DateTime? EndTime { get; set; }
-    public TimeSpan Duration { get; set; }
-    public int ProcessedEntities { get; set; }
-    public int SuccessfulEntities { get; set; }
-    public int FailedEntities { get; set; }
-    public List<BatchProcessingResult> BatchResults { get; set; } = new();
-}
-
-/// <summary>
-/// Request model for checking rate limits
-/// </summary>
-public class CheckRateLimitRequest
-{
-    public string StoreId { get; set; } = string.Empty;
-    public string EntityType { get; set; } = string.Empty;
-}
-
-/// <summary>
-/// Request model for updating entity progress
-/// </summary>
-public class UpdateEntityProgressRequest
-{
-    public string MigrationId { get; set; } = string.Empty;
-    public string EntityType { get; set; } = string.Empty;
-    public string Phase { get; set; } = string.Empty;
-    public int TotalEntities { get; set; }
-    public int ProcessedEntities { get; set; }
-    public int SuccessfulEntities { get; set; }
-    public int FailedEntities { get; set; }
-    public int CurrentBatch { get; set; }
-    public int TotalBatches { get; set; }
-} 
+ 

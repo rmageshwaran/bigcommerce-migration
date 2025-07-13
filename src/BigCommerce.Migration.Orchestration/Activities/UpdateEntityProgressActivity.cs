@@ -1,6 +1,7 @@
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Logging;
 using BigCommerce.Migration.Core.Interfaces;
+using BigCommerce.Migration.Orchestration.Models;
 
 namespace BigCommerce.Migration.Orchestration.Activities;
 
@@ -25,15 +26,15 @@ public class UpdateEntityProgressActivity
     /// </summary>
     /// <param name="progressUpdate">Progress update data</param>
     /// <param name="cancellationToken">Cancellation token</param>
-    [Function("UpdateEntityProgress")]
-    public async Task UpdateEntityProgressAsync([ActivityTrigger] dynamic progressUpdate, CancellationToken cancellationToken = default)
+    [Function("UpdateEntityProgressActivity")]
+    public async Task UpdateEntityProgressAsync([ActivityTrigger] UpdateEntityProgressRequest progressUpdate, CancellationToken cancellationToken = default)
     {
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
             
-            var migrationId = (string)progressUpdate.MigrationId;
-            var entityType = (string)progressUpdate.EntityType;
+            var migrationId = progressUpdate.MigrationId;
+            var entityType = progressUpdate.EntityType;
             
             _logger.LogDebug("Updating progress for {EntityType} in migration {MigrationId}", entityType, migrationId);
 

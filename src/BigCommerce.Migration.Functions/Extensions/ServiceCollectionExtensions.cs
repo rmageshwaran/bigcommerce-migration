@@ -10,6 +10,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.Azure.SignalR.Management;
 
 namespace BigCommerce.Migration.Functions.Extensions;
 
@@ -423,28 +424,13 @@ public static class ServiceCollectionExtensions
         // Get SignalR connection string from configuration
         var connectionString = configuration.GetConnectionString("AzureSignalR");
         
-        if (!string.IsNullOrEmpty(connectionString))
+        // Always register the NoOpSignalRService as fallback
+        services.TryAddSingleton<IMigrationSignalRService>(serviceProvider =>
         {
-            // Validate SignalR connection string format
-            if (!IsValidAzureSignalRConnectionString(connectionString))
-            {
-                throw new ArgumentException("Invalid AzureSignalR connection string format. Expected format: 'Endpoint=https://...;AccessKey=...;Version=1.0;'");
-            }
-            
-            // Add Azure SignalR Service
-            services.AddSignalR().AddAzureSignalR(connectionString);
-            
-            // Register SignalR service implementation
-            services.TryAddSingleton<IMigrationSignalRService, MigrationSignalRService>();
-        }
-        else
-        {
-            // Log warning when SignalR is not configured (not an error since it's optional)
+            var noOpLogger = serviceProvider.GetRequiredService<ILogger<NoOpSignalRService>>();
             Console.WriteLine("WARNING: AzureSignalR connection string not configured. Real-time dashboard updates will be disabled. Using NoOpSignalRService.");
-            
-            // Register a no-op implementation when SignalR is not configured
-            services.TryAddSingleton<IMigrationSignalRService, NoOpSignalRService>();
-        }
+            return new NoOpSignalRService(noOpLogger);
+        });
         
         return services;
     }

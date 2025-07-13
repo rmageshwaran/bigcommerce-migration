@@ -91,7 +91,7 @@ public class EntityMigrationOrchestrator
             result.TotalEntities = discoveryResult.TotalCount;
             
             // Step 3: Create batches for processing
-            var batches = CreateBatches(discoveryResult.EntityIds, request);
+            var batches = CreateBatches(discoveryResult.EntityIds, request, discoveryResult);
             context.SetCustomStatus($"Created {batches.Count} batches for {request.EntityType} migration");
 
             // Step 4: Process batches with rate limiting and progress tracking
@@ -154,8 +154,9 @@ public class EntityMigrationOrchestrator
     /// </summary>
     /// <param name="entityIds">List of entity IDs to batch</param>
     /// <param name="request">Entity migration request</param>
+    /// <param name="discoveryResult">Discovery result containing cached entity data</param>
     /// <returns>List of batch processing requests</returns>
-    private List<BatchProcessingRequest> CreateBatches(List<string> entityIds, EntityMigrationRequest request)
+    private List<BatchProcessingRequest> CreateBatches(List<string> entityIds, EntityMigrationRequest request, EntityDiscoveryResult discoveryResult)
     {
         // Determine effective batch size (EntityConfig override takes priority)
         int batchSize = request.EntityConfig.BatchSizeOverride ?? request.BatchSize;
@@ -185,7 +186,8 @@ public class EntityMigrationOrchestrator
                 EntityIds = batchEntityIds,
                 SourceStore = request.SourceStore,
                 DestinationStore = request.DestinationStore,
-                CategoryTreeContext = request.CategoryTreeContext
+                CategoryTreeContext = request.CategoryTreeContext,
+                CachedEntityData = discoveryResult.HasEntityData ? discoveryResult.EntityData : null
             };
 
             batches.Add(batchRequest);

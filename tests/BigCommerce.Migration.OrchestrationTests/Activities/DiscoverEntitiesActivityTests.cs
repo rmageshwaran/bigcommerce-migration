@@ -61,6 +61,11 @@ public class DiscoverEntitiesActivityTests
             IsLastPage = true
         };
 
+        _apiClientMock.Setup(x => x.DetectApiVersionAsync(
+                It.IsAny<StoreConfiguration>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BigCommerceApiVersion.V3);
+
         _apiClientMock.Setup(x => x.GetPaginatedEntitiesAsync(
                 It.IsAny<StoreConfiguration>(),
                 It.IsAny<string>(),
@@ -80,6 +85,9 @@ public class DiscoverEntitiesActivityTests
         Assert.Contains("2", result.EntityIds);
         Assert.Empty(result.Errors);
         Assert.NotNull(result.PaginationMetadata);
+        Assert.Equal(BigCommerceApiVersion.V3, result.ApiVersion);
+        Assert.Equal(2, result.EntityData.Count);
+        Assert.False(result.SkipDiscovery);
     }
 
     [Fact]
@@ -140,6 +148,11 @@ public class DiscoverEntitiesActivityTests
             IsLastPage = true
         };
 
+        _apiClientMock.Setup(x => x.DetectApiVersionAsync(
+                It.IsAny<StoreConfiguration>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BigCommerceApiVersion.V3);
+
         _apiClientMock.Setup(x => x.GetPaginatedEntitiesAsync(
                 It.IsAny<StoreConfiguration>(),
                 It.IsAny<string>(),
@@ -159,6 +172,9 @@ public class DiscoverEntitiesActivityTests
         Assert.Contains("2", result.EntityIds);
         Assert.Empty(result.Errors);
         Assert.NotNull(result.PaginationMetadata);
+        Assert.Equal(BigCommerceApiVersion.V3, result.ApiVersion);
+        Assert.Equal(2, result.EntityData.Count);
+        Assert.False(result.SkipDiscovery);
     }
 
     [Fact]
@@ -179,6 +195,11 @@ public class DiscoverEntitiesActivityTests
                 EntityType = "products"
             }
         };
+
+        _apiClientMock.Setup(x => x.DetectApiVersionAsync(
+                It.IsAny<StoreConfiguration>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BigCommerceApiVersion.V3);
 
         _apiClientMock.Setup(x => x.GetPaginatedEntitiesAsync(
                 It.IsAny<StoreConfiguration>(),
@@ -217,6 +238,11 @@ public class DiscoverEntitiesActivityTests
                 EntityType = "unsupported"
             }
         };
+
+        _apiClientMock.Setup(x => x.DetectApiVersionAsync(
+                It.IsAny<StoreConfiguration>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BigCommerceApiVersion.V3);
 
         _apiClientMock.Setup(x => x.GetPaginatedEntitiesAsync(
                 It.IsAny<StoreConfiguration>(),

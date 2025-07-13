@@ -5,6 +5,7 @@ using BigCommerce.Migration.Core.Models;
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Orchestration.Models;
 using BigCommerce.Migration.Orchestration.Activities;
+using System.Linq;
 
 namespace BigCommerce.Migration.Functions.Orchestrators;
 
@@ -78,7 +79,22 @@ public static class MigrationDurableOrchestrator
                 return result;
             }
 
-            // Step 3: Check for cancellation before starting entity processing
+            // Step 3: Resolve Category Tree IDs
+            logger.LogInformation("Step 3: Resolving category tree IDs for MigrationId: {MigrationId}", migrationId);
+            var resolvedCategoryTreeContext = await context.CallActivityAsync<CategoryTreeContext>(
+                "ResolveCategoryTreeIds",
+                new ResolveCategoryTreeIdsRequest
+                {
+                    MigrationId = migrationId,
+                    SourceStore = input.MigrationRequest.SourceStore ?? new StoreConfiguration(),
+                    DestinationStore = input.MigrationRequest.DestinationStore ?? new StoreConfiguration(),
+                    CategoryTreeContext = input.CategoryTreeContext
+                });
+
+            // Update the input context with resolved tree IDs
+            input.CategoryTreeContext = resolvedCategoryTreeContext;
+
+            // Step 4: Check for cancellation before starting entity processing
             var cancellationCheck = await context.CallActivityAsync<CheckCancellationResult>(
                 "CheckMigrationCancellation",
                 migrationId);
@@ -91,9 +107,9 @@ public static class MigrationDurableOrchestrator
                 return result;
             }
 
-            // Step 4: Process entities in dependency order
+            // Step 5: Process entities in dependency order
             var entityOrder = GetEntityDependencyOrder(input.MigrationRequest.Entities);
-            logger.LogInformation("Step 4: Processing {EntityCount} entity types in dependency order for MigrationId: {MigrationId}", 
+            logger.LogInformation("Step 5: Processing {EntityCount} entity types in dependency order for MigrationId: {MigrationId}", 
                 entityOrder.Count, migrationId);
 
             foreach (var entityType in entityOrder)
@@ -119,10 +135,10 @@ public static class MigrationDurableOrchestrator
                 {
                     MigrationId = migrationId,
                     EntityType = entityType,
-                    SourceStore = input.MigrationRequest.SourceStore ?? new StoreConfiguration(),
-                    DestinationStore = input.MigrationRequest.DestinationStore ?? new StoreConfiguration(),
-                    CategoryTreeContext = input.CategoryTreeContext,
-                    Settings = input.MigrationRequest.Settings
+                    SourceStore = input.MigrationRequest?.SourceStore ?? new StoreConfiguration(),
+                    DestinationStore = input.MigrationRequest?.DestinationStore ?? new StoreConfiguration(),
+                    CategoryTreeContext = input.CategoryTreeContext ?? new CategoryTreeContext(),
+                    Settings = input.MigrationRequest?.Settings
                 };
 
                 try
@@ -169,7 +185,7 @@ public static class MigrationDurableOrchestrator
                 }
             }
 
-            // Step 5: Calculate final results
+            // Step 6: Calculate final results
             var totalProcessed = result.EntityResults.Values.Sum(r => r.ProcessedEntities);
             var totalSuccessful = result.EntityResults.Values.Sum(r => r.SuccessfulEntities);
             var totalFailed = result.EntityResults.Values.Sum(r => r.FailedEntities);

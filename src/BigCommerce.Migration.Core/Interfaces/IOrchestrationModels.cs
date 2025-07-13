@@ -4,6 +4,7 @@ namespace BigCommerce.Migration.Core.Interfaces;
 
 /// <summary>
 /// Result model for entity discovery activities
+/// Enhanced to support both V2 and V3 API optimization strategies
 /// </summary>
 public class EntityDiscoveryResult
 {
@@ -32,6 +33,38 @@ public class EntityDiscoveryResult
     /// Contains information about API version, total pages, etc.
     /// </summary>
     public Dictionary<string, object> PaginationMetadata { get; set; } = new();
+    
+    /// <summary>
+    /// API version detected for this entity type
+    /// </summary>
+    public BigCommerceApiVersion ApiVersion { get; set; } = BigCommerceApiVersion.V3;
+    
+    /// <summary>
+    /// For V3 APIs: Store actual entity data to avoid duplicate API calls
+    /// For V2 APIs: This will be empty as we skip discovery phase
+    /// </summary>
+    public List<Dictionary<string, object>> EntityData { get; set; } = new();
+    
+    /// <summary>
+    /// Indicates if discovery phase should be skipped for this entity type
+    /// True for V2 APIs, False for V3 APIs
+    /// </summary>
+    public bool SkipDiscovery { get; set; } = false;
+    
+    /// <summary>
+    /// For V3 APIs: Rich pagination metadata from API response
+    /// </summary>
+    public BigCommerceV3Pagination? V3PaginationMetadata { get; set; }
+    
+    /// <summary>
+    /// Indicates if entity data is available (for V3 APIs)
+    /// </summary>
+    public bool HasEntityData => EntityData.Count > 0;
+    
+    /// <summary>
+    /// Indicates if this is a successful discovery with data
+    /// </summary>
+    public bool IsSuccessful => Errors.Count == 0 && (HasEntityData || SkipDiscovery);
 }
 
 /// <summary>

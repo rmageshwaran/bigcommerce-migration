@@ -1,5 +1,6 @@
 using Azure;
 using Azure.Data.Tables;
+using Azure.Data.Tables.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
@@ -382,11 +383,31 @@ public class MigrationStorageService : IMigrationStorageService
                     transaction.Add(new TableTransactionAction(TableTransactionActionType.Add, tableEntity));
                 }
 
-                await tableClient.SubmitTransactionAsync(transaction);
-                createdMappings.AddRange(batch);
+                try
+                {
+                    await tableClient.SubmitTransactionAsync(transaction);
+                    createdMappings.AddRange(batch);
+                }
+                catch (TableTransactionFailedException ex) when (ex.ErrorCode == "EntityAlreadyExists")
+                {
+                    // This is expected behavior in our dual storage approach:
+                    // 1. Individual storage succeeds immediately after entity creation  
+                    // 2. Batch storage at end fails with EntityAlreadyExists (gracefully handled here)
+                    _logger.LogDebug("Entity mappings already exist for batch (expected from dual storage approach). Batch size: {BatchSize}, Error: {ErrorCode}", 
+                        batch.Count, ex.ErrorCode);
+                    
+                    // Still count these as "created" since they exist from individual storage
+                    createdMappings.AddRange(batch);
+                }
+                catch (RequestFailedException ex) when (ex.Status == 409)
+                {
+                    // Handle general 409 Conflict errors (backup case)
+                    _logger.LogDebug("Conflict detected during entity mapping batch creation (expected from dual storage). Batch size: {BatchSize}", batch.Count);
+                    createdMappings.AddRange(batch);
+                }
             }
 
-            _logger.LogInformation("Successfully created {Count} entity mappings", createdMappings.Count);
+            _logger.LogInformation("Successfully processed {Count} entity mappings batch (includes existing from dual storage)", createdMappings.Count);
             return createdMappings;
         }
         catch (Exception ex)

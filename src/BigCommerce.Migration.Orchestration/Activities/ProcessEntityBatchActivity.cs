@@ -44,7 +44,7 @@ public class ProcessEntityBatchActivity
     /// </summary>
     /// <param name="request">Batch processing request</param>
     /// <returns>Batch processing result</returns>
-    [Function("ProcessEntityBatch")]
+    [Function("ProcessEntityBatchActivity")]
     public async Task<BatchProcessingResult> ProcessEntityBatchAsync([ActivityTrigger] BatchProcessingRequest request, CancellationToken cancellationToken = default)
     {
         var stopwatch = Stopwatch.StartNew();
@@ -125,10 +125,26 @@ public class ProcessEntityBatchActivity
             // Step 5: Process entities individually (continue on failures as per user requirement)
             await ProcessEntitiesIndividuallyAsync(request, sourceEntities, result, cancellationToken);
 
-            // Step 6: Store entity mappings if any were created
+            // Step 6: Store any entity mappings that failed during individual processing (fallback)
+            // NOTE: Most mappings should already be stored individually for hierarchy relationships
+            _logger.LogDebug("Creating entity mappings batch: {MappingCount} mappings", result.EntityMappings.Count);
             if (result.EntityMappings.Any())
             {
-                await _migrationStorageService.StoreEntityMappingsAsync(result.EntityMappings);
+                try
+                {
+                    await _migrationStorageService.StoreEntityMappingsAsync(result.EntityMappings);
+                    _logger.LogInformation("Successfully created {MappingCount} entity mappings", result.EntityMappings.Count);
+                }
+                catch (Azure.Data.Tables.TableTransactionFailedException ex) when (ex.ErrorCode == "EntityAlreadyExists")
+                {
+                    // Mappings already exist from individual storage - this is expected and not an error
+                    _logger.LogDebug("Entity mappings already exist from individual storage (expected behavior). Mappings: {MappingCount}", result.EntityMappings.Count);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to store {MappingCount} entity mappings as fallback", result.EntityMappings.Count);
+                    // Don't fail the entire batch for mapping storage issues
+                }
             }
 
             // Step 7: Log batch completion to OpenSearch
@@ -213,7 +229,7 @@ public class ProcessEntityBatchActivity
     }
 
     /// <summary>
-    /// Fetches categories from source store with enhanced validation and error handling
+    /// Fetches categories from source store
     /// </summary>
     private async Task<List<Dictionary<string, object>>> FetchCategoriesAsync(BatchProcessingRequest request, CancellationToken cancellationToken)
     {
@@ -240,26 +256,108 @@ public class ProcessEntityBatchActivity
             _logger.LogDebug("Fetching categories from source store {SourceStore} tree {SourceTreeId} for migration {MigrationId}",
                 request.SourceStore.StoreId, sourceTreeId, request.MigrationId);
 
-            var categories = await _apiClient.GetCategoriesAsync(request.SourceStore, sourceTreeId, cancellationToken);
-
-            _logger.LogInformation("Successfully fetched {CategoryCount} categories from source store {SourceStore} for migration {MigrationId}",
-                categories.Count, request.SourceStore.StoreId, request.MigrationId);
-
-            // Filter categories to only those in the requested EntityIds if specified
-            if (request.EntityIds != null && request.EntityIds.Any())
+            // OPTIMIZATION: Check if we have cached entity data from discovery phase
+            if (request.CachedEntityData != null && request.CachedEntityData.Any())
             {
-                var filteredCategories = categories.Where(c => 
+                _logger.LogInformation("Using cached entity data from V3 discovery phase for categories batch {BatchNumber} in migration {MigrationId}",
+                    request.BatchNumber, request.MigrationId);
+
+                // Filter cached data to only the entities in this batch
+                var filteredCategories = request.CachedEntityData.Where(c => 
                     c.TryGetValue("id", out var id) && 
                     id != null &&
                     request.EntityIds.Contains(id.ToString()!)).ToList();
 
-                _logger.LogDebug("Filtered categories from {TotalCount} to {FilteredCount} based on EntityIds for migration {MigrationId}",
-                    categories.Count, filteredCategories.Count, request.MigrationId);
+                _logger.LogDebug("Filtered cached categories from {TotalCount} to {FilteredCount} based on EntityIds for batch {BatchNumber}",
+                    request.CachedEntityData.Count, filteredCategories.Count, request.BatchNumber);
 
                 return filteredCategories;
             }
 
-            return categories;
+            // FALLBACK: Direct pagination for V2 APIs or when cached data is not available
+            _logger.LogInformation("Using direct pagination for categories (V2 API or no cached data) in migration {MigrationId}",
+                request.MigrationId);
+
+            var paginationRequest = new BigCommercePaginationRequest
+            {
+                Page = 1,
+                Limit = 250, // Use large limit to minimize pagination
+                IncludeDeleted = false,
+                CategoryTreeId = sourceTreeId,
+                SortBy = "id",
+                SortDirection = "asc"
+            };
+
+            var allCategories = new List<Dictionary<string, object>>();
+            var currentPage = 1;
+            int totalPages = 1; // Initialize with default
+            int totalFromApi = 0; // Track total from API response
+
+            // Use the same pagination logic as discovery phase
+            do
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                
+                paginationRequest.Page = currentPage;
+                var response = await _apiClient.GetPaginatedEntitiesAsync(
+                    request.SourceStore,
+                    "categories",
+                    paginationRequest,
+                    cancellationToken);
+
+                if (response.Data != null && response.Data.Any())
+                {
+                    allCategories.AddRange(response.Data);
+                    _logger.LogDebug("Added {PageEntities} categories from page {Page} for batch processing", response.Data.Count, currentPage);
+                }
+
+                // Track pagination metadata
+                totalPages = response.TotalPages ?? 1;
+                totalFromApi = response.TotalItems ?? 0;
+                currentPage++;
+
+                _logger.LogDebug("Fetched page {Page}/{TotalPages} for category batch processing in migration {MigrationId}. Page entities: {PageEntities}, Total so far: {TotalSoFar}",
+                    currentPage - 1, totalPages, request.MigrationId, response.Data?.Count ?? 0, allCategories.Count);
+
+                // For V2 APIs: Break if no more data (more efficient than checking total pages)
+                if (response.Data == null || response.Data.Count == 0)
+                {
+                    _logger.LogDebug("No more data available, breaking pagination loop for V2 API");
+                    break;
+                }
+
+                // Safety check: prevent infinite loops
+                if (currentPage > 50) // Max 50 pages (12,500 categories at 250 per page)
+                {
+                    _logger.LogWarning("Breaking pagination loop after 50 pages to prevent infinite loop. Current total: {Total}", allCategories.Count);
+                    break;
+                }
+
+            } while (currentPage <= totalPages);
+
+            _logger.LogInformation("Pagination completed for category batch processing: Fetched {ActualCount} categories (API reported {ApiTotal}) across {PagesProcessed} pages in migration {MigrationId}",
+                allCategories.Count, totalFromApi, currentPage - 1, request.MigrationId);
+
+            // Filter categories to only those in the requested EntityIds if specified
+            if (request.EntityIds != null && request.EntityIds.Any())
+            {
+                var filteredCategories = allCategories.Where(c => 
+                    c.TryGetValue("id", out var id) && 
+                    id != null &&
+                    request.EntityIds.Contains(id.ToString()!)).ToList();
+
+                _logger.LogDebug("Filtered categories from {TotalCount} to {FilteredCount} based on EntityIds for batch {BatchNumber} in migration {MigrationId}",
+                    allCategories.Count, filteredCategories.Count, request.BatchNumber, request.MigrationId);
+
+                allCategories = filteredCategories;
+            }
+
+            // NOTE: Categories are already sorted hierarchically in the discovery phase
+            // No need to sort again - just maintain the order from the pre-sorted EntityIds
+            _logger.LogInformation("Processing {CategoryCount} categories (already hierarchically sorted) for migration {MigrationId}",
+                allCategories.Count, request.MigrationId);
+
+            return allCategories;
         }
         catch (Exception ex)
         {
@@ -454,6 +552,20 @@ public class ProcessEntityBatchActivity
                     var mapping = CreateEntityMapping(entity, createdEntity, request);
                     result.EntityMappings.Add(mapping);
 
+                    // CRITICAL FIX: Store mapping immediately for hierarchy relationships
+                    // This ensures parent mappings are available for subsequent child entities
+                    try
+                    {
+                        await _migrationStorageService.StoreEntityMappingsAsync(new List<EntityMapping> { mapping });
+                        _logger.LogDebug("Stored entity mapping for {EntityType} {SourceId} -> {DestinationId} in migration {MigrationId}",
+                            request.EntityType, mapping.SourceId, mapping.DestinationId, request.MigrationId);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to store entity mapping for {EntityType} {SourceId} in migration {MigrationId}. Will retry at batch end.",
+                            request.EntityType, mapping.SourceId, request.MigrationId);
+                    }
+
                     _logger.LogDebug("Successfully processed {EntityType} {EntityId} in migration {MigrationId}",
                         request.EntityType, entity["id"], request.MigrationId);
                         
@@ -518,7 +630,7 @@ public class ProcessEntityBatchActivity
     }
 
     /// <summary>
-    /// Transforms category for destination store with enhanced hierarchical support
+    /// Transforms category for destination store with BigCommerce API v3 format compliance
     /// </summary>
     private async Task TransformCategoryAsync(Dictionary<string, object> category, BatchProcessingRequest request)
     {
@@ -543,21 +655,32 @@ public class ProcessEntityBatchActivity
                 // Parent not found - this could be a hierarchy ordering issue
                 _logger.LogWarning("Parent category {ParentId} not found in mappings for category {CategoryName}. Setting as root category.",
                     parentId, category.TryGetValue("name", out var name) ? name : "unknown");
-                category["parent_id"] = null; // Make it a root category
+                category["parent_id"] = 0; // Make it a root category - BigCommerce expects 0, not null
             }
         }
         else
         {
-            // Root category or invalid parent_id
-            category["parent_id"] = null;
+            // Root category or invalid parent_id - BigCommerce expects 0 for root categories
+            category["parent_id"] = 0;
         }
 
-        // Step 2: Clean up BigCommerce-specific fields that shouldn't be migrated
+        // Step 2: Add required tree_id field for BigCommerce API
+        var destinationTreeId = request.CategoryTreeContext?.DestinationCategoryTreeId;
+        if (!string.IsNullOrEmpty(destinationTreeId) && int.TryParse(destinationTreeId, out var treeId))
+        {
+            category["tree_id"] = treeId;
+        }
+        else
+        {
+            throw new InvalidOperationException($"Valid DestinationCategoryTreeId is required for category creation. Current value: {destinationTreeId}");
+        }
+
+        // Step 3: Clean up BigCommerce-specific fields that shouldn't be migrated
         var fieldsToRemove = new[] 
         {
             "id", "date_created", "date_modified", "children", "category_id", 
-            "is_visible_in_menu", "depth", "path", "url", "has_children",
-            "product_count", "default_product_sort", "category_tree_id"
+            "is_visible_in_menu", "depth", "path", "has_children",
+            "product_count", "category_tree_id", "migration_id", "migrated_from_store", "migrated_at", "metadata"
         };
         
         foreach (var field in fieldsToRemove)
@@ -565,57 +688,166 @@ public class ProcessEntityBatchActivity
             category.Remove(field);
         }
 
-        // Step 3: Ensure required fields have valid values
+        // Step 4: Ensure required fields have valid values and correct types
         if (!category.ContainsKey("name") || string.IsNullOrWhiteSpace(category["name"]?.ToString()))
         {
             throw new InvalidOperationException("Category name is required and cannot be empty");
         }
 
-        // Step 4: Set default values for optional fields if not present
-        if (!category.ContainsKey("sort_order"))
+        // Step 5: Transform URL field to proper BigCommerce format
+        var categoryName = category["name"].ToString()!;
+        var urlPath = GenerateUrlPath(categoryName);
+        category["url"] = new Dictionary<string, object>
+        {
+            ["path"] = urlPath,
+            ["is_customized"] = false
+        };
+
+        // Step 6: Set default values for optional fields with correct types
+        if (!category.ContainsKey("sort_order") || !int.TryParse(category["sort_order"]?.ToString(), out _))
         {
             category["sort_order"] = 0;
+        }
+        else
+        {
+            category["sort_order"] = int.Parse(category["sort_order"].ToString()!);
         }
 
         if (!category.ContainsKey("is_visible"))
         {
             category["is_visible"] = true;
         }
-
-        // Step 5: Transform BigCommerce V2 fields to V3 format if needed
-        if (category.TryGetValue("description", out var description) && description is string descText)
+        else if (category["is_visible"] is string visibleStr)
         {
-            // Remove HTML tags for better compatibility (optional enhancement)
-            if (descText.Contains("<") && descText.Contains(">"))
+            category["is_visible"] = visibleStr.ToLowerInvariant() == "true" || visibleStr == "1";
+        }
+
+        // Step 7: Handle page_title (use name if not provided)
+        if (!category.ContainsKey("page_title") || string.IsNullOrWhiteSpace(category["page_title"]?.ToString()))
+        {
+            category["page_title"] = categoryName;
+        }
+
+        // Step 8: Transform meta_keywords to array format if it exists
+        if (category.TryGetValue("meta_keywords", out var metaKeywords))
+        {
+            if (metaKeywords is string keywordsStr && !string.IsNullOrWhiteSpace(keywordsStr))
             {
-                // Basic HTML tag removal (in a real implementation, you might use a proper HTML parser)
-                var plainText = System.Text.RegularExpressions.Regex.Replace(descText, "<.*?>", string.Empty);
-                category["description"] = plainText.Trim();
+                // Split by comma and clean up
+                var keywordsArray = keywordsStr.Split(',')
+                    .Select(k => k.Trim())
+                    .Where(k => !string.IsNullOrEmpty(k))
+                    .ToArray();
+                category["meta_keywords"] = keywordsArray;
+            }
+            else if (metaKeywords is not string[] && metaKeywords is not List<string>)
+            {
+                // Remove invalid format
+                category.Remove("meta_keywords");
             }
         }
 
-        // Step 6: Handle image URLs - ensure they're valid for destination store
-        if (category.TryGetValue("image_url", out var imageUrl) && !string.IsNullOrWhiteSpace(imageUrl?.ToString()))
+        // Step 9: Ensure description is properly formatted (keep HTML if present)
+        if (category.TryGetValue("description", out var description))
         {
-            var imageUrlString = imageUrl.ToString()!;
+            if (string.IsNullOrWhiteSpace(description?.ToString()))
+            {
+                category.Remove("description");
+            }
+            else
+            {
+                category["description"] = description.ToString()!.Trim();
+            }
+        }
+
+        // Step 10: Handle image_url validation
+        if (category.TryGetValue("image_url", out var imageUrl))
+        {
+            var imageUrlString = imageUrl?.ToString();
+            if (string.IsNullOrWhiteSpace(imageUrlString))
+            {
+                category.Remove("image_url");
+            }
+            else
+            {
+                // Ensure it's a full URL
+                if (!imageUrlString.StartsWith("http://") && !imageUrlString.StartsWith("https://"))
+                {
+                    _logger.LogDebug("Relative image URL detected for category {CategoryName}: {ImageUrl}. Removing from payload.",
+                        categoryName, imageUrlString);
+                    category.Remove("image_url");
+                }
+            }
+        }
+
+        // Step 11: Handle optional numeric fields
+        if (category.TryGetValue("views", out var views))
+        {
+            if (int.TryParse(views?.ToString(), out var viewsInt))
+            {
+                category["views"] = viewsInt;
+            }
+            else
+            {
+                category.Remove("views");
+            }
+        }
+
+        // Step 12: Set default values for other optional fields
+        if (!category.ContainsKey("default_product_sort"))
+        {
+            category["default_product_sort"] = "use_store_settings";
+        }
+
+        // Step 13: Clean up any remaining null or empty values
+        var keysToRemove = category.Where(kvp => kvp.Value == null || 
+            (kvp.Value is string str && string.IsNullOrWhiteSpace(str)))
+            .Select(kvp => kvp.Key)
+            .ToList();
             
-            // If it's a relative URL, we might need to convert it or handle it differently
-            if (imageUrlString.StartsWith("/") || (!imageUrlString.StartsWith("http://") && !imageUrlString.StartsWith("https://")))
-            {
-                _logger.LogDebug("Found relative image URL for category {CategoryName}: {ImageUrl}. " +
-                    "This may need manual handling for proper migration.", 
-                    category.TryGetValue("name", out var name) ? name : "unknown", imageUrlString);
-                // For now, keep the URL as-is, but log it for manual review
-            }
+        foreach (var key in keysToRemove)
+        {
+            category.Remove(key);
         }
 
-        // Step 7: Add migration metadata for tracking
-        category["migrated_from_store"] = request.SourceStore.StoreId;
-        category["migration_id"] = request.MigrationId;
-        category["migrated_at"] = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+        _logger.LogDebug("Successfully transformed category {CategoryName} for migration {MigrationId}. " +
+            "Final structure: parent_id={ParentId}, tree_id={TreeId}, url_path={UrlPath}",
+            categoryName, 
+            request.MigrationId,
+            category.TryGetValue("parent_id", out var finalParentId) ? finalParentId : "unknown",
+            category.TryGetValue("tree_id", out var finalTreeId) ? finalTreeId : "unknown",
+            category.TryGetValue("url", out var urlObj) && urlObj is Dictionary<string, object> urlDict ? 
+                urlDict.TryGetValue("path", out var pathVal) ? pathVal : "unknown" : "unknown");
+    }
 
-        _logger.LogDebug("Successfully transformed category {CategoryName} for migration {MigrationId}",
-            category.TryGetValue("name", out var categoryName) ? categoryName : "unknown", request.MigrationId);
+    /// <summary>
+    /// Generates a URL path from category name following BigCommerce conventions
+    /// </summary>
+    private static string GenerateUrlPath(string categoryName)
+    {
+        if (string.IsNullOrWhiteSpace(categoryName))
+        {
+            return "/";
+        }
+
+        // Convert to lowercase, replace spaces with hyphens, remove special characters
+        var path = categoryName.ToLowerInvariant()
+            .Replace(" ", "-")
+            .Replace("&", "and")
+            .Replace("'", "")
+            .Replace("\"", "");
+
+        // Remove any characters that aren't alphanumeric, hyphens, or underscores
+        path = System.Text.RegularExpressions.Regex.Replace(path, @"[^a-z0-9\-_]", "");
+        
+        // Remove multiple consecutive hyphens
+        path = System.Text.RegularExpressions.Regex.Replace(path, @"-+", "-");
+        
+        // Remove leading/trailing hyphens
+        path = path.Trim('-');
+
+        // Ensure it starts and ends with forward slashes
+        return $"/{path}/";
     }
 
     /// <summary>
@@ -840,12 +1072,37 @@ public class ProcessEntityBatchActivity
         Dictionary<string, object> destinationEntity, 
         BatchProcessingRequest request)
     {
+        // Get source ID safely
+        if (!sourceEntity.TryGetValue("id", out var sourceId) || sourceId == null)
+        {
+            throw new InvalidOperationException($"Source entity is missing required 'id' field. Available keys: {string.Join(", ", sourceEntity.Keys)}");
+        }
+
+        // Get destination ID safely - BigCommerce API might return different field names
+        object? destinationId = null;
+        var possibleIdFields = new[] { "id", "category_id", "product_id", "brand_id" };
+        
+        foreach (var idField in possibleIdFields)
+        {
+            if (destinationEntity.TryGetValue(idField, out destinationId) && destinationId != null)
+            {
+                break;
+            }
+        }
+
+        if (destinationId == null)
+        {
+            throw new InvalidOperationException($"Destination entity is missing ID field. " +
+                $"Available keys: {string.Join(", ", destinationEntity.Keys)}. " +
+                $"Expected one of: {string.Join(", ", possibleIdFields)}");
+        }
+
         return new EntityMapping
         {
             MigrationId = request.MigrationId,
             EntityType = request.EntityType,
-            SourceId = sourceEntity["id"].ToString()!,
-            DestinationId = destinationEntity["id"].ToString()!,
+            SourceId = sourceId.ToString()!,
+            DestinationId = destinationId.ToString()!,
             SourceStoreId = request.SourceStore.StoreId!,
             DestinationStoreId = request.DestinationStore.StoreId!,
             Status = "completed",

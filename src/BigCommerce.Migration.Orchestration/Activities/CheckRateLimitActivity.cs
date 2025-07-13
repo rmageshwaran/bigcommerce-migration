@@ -1,6 +1,7 @@
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Logging;
 using BigCommerce.Migration.Core.Interfaces;
+using BigCommerce.Migration.Orchestration.Models;
 
 namespace BigCommerce.Migration.Orchestration.Activities;
 
@@ -25,14 +26,14 @@ public class CheckRateLimitActivity
     /// </summary>
     /// <param name="request">Rate limit check request</param>
     /// <param name="cancellationToken">Cancellation token</param>
-    [Function("CheckRateLimit")]
-    public async Task<RateLimitResult> CheckRateLimitAsync([ActivityTrigger] dynamic request, CancellationToken cancellationToken = default)
+    [Function("CheckRateLimitActivity")]
+    public async Task<RateLimitResult> CheckRateLimitAsync([ActivityTrigger] CheckRateLimitRequest request, CancellationToken cancellationToken = default)
     {
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
             
-            var storeId = (string)request.StoreId;
+            var storeId = request.StoreId;
             
             _logger.LogDebug("Checking rate limit for store {StoreId}", storeId);
 

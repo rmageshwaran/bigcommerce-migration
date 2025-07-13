@@ -3,6 +3,7 @@ using Moq;
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
 using BigCommerce.Migration.Orchestration.Activities;
+using BigCommerce.Migration.Orchestration.Models;
 using Xunit;
 
 namespace BigCommerce.Migration.OrchestrationTests.Activities;
@@ -70,7 +71,7 @@ public class CancellationSupportTests
         var result = await activity.CheckMigrationCancellationAsync(migrationId);
 
         // Assert
-        Assert.True(result);
+        Assert.True(result.IsCancelled);
     }
 
     [Fact]
@@ -87,7 +88,7 @@ public class CancellationSupportTests
         var result = await activity.CheckMigrationCancellationAsync(migrationId);
 
         // Assert
-        Assert.False(result);
+        Assert.False(result.IsCancelled);
     }
 
     [Fact]
@@ -95,9 +96,8 @@ public class CancellationSupportTests
     {
         // Arrange
         var activity = new ValidateMigrationStoresActivity(_apiClientMock.Object, new Mock<ILogger<ValidateMigrationStoresActivity>>().Object);
-        var request = new
+        var request = new ValidateStoresRequest
         {
-            MigrationId = "test-migration",
             SourceStore = new StoreConfiguration { StoreId = "source", AccessToken = "token" },
             DestinationStore = new StoreConfiguration { StoreId = "dest", AccessToken = "token" }
         };
@@ -117,7 +117,7 @@ public class CancellationSupportTests
     {
         // Arrange
         var activity = new CheckRateLimitActivity(_rateLimitMock.Object, new Mock<ILogger<CheckRateLimitActivity>>().Object);
-        var request = new { StoreId = "test-store" };
+        var request = new CheckRateLimitRequest { StoreId = "test-store", EntityType = "products" };
         var cancellationToken = new CancellationToken(true);
 
         // Act
@@ -133,10 +133,13 @@ public class CancellationSupportTests
     {
         // Arrange
         var activity = new InitializeMigrationActivity(_storageMock.Object, new Mock<ILogger<InitializeMigrationActivity>>().Object);
-        var request = new
+        var request = new InitializeMigrationRequest
         {
-            MigrationId = "test-migration",
-            CorrelationId = Guid.NewGuid()
+            MigrationRequest = new MigrationRequest
+            {
+                SourceStore = new StoreConfiguration { StoreId = "test", AccessToken = "token" },
+                DestinationStore = new StoreConfiguration { StoreId = "test", AccessToken = "token" }
+            }
         };
         var cancellationToken = new CancellationToken(true);
 
@@ -151,10 +154,15 @@ public class CancellationSupportTests
         // Arrange
         var progressTrackerMock = new Mock<IProgressTracker>();
         var activity = new UpdateEntityProgressActivity(progressTrackerMock.Object, new Mock<ILogger<UpdateEntityProgressActivity>>().Object);
-        var progressUpdate = new
+        var progressUpdate = new UpdateEntityProgressRequest
         {
             MigrationId = "test-migration",
-            EntityType = "products"
+            EntityType = "products",
+            Phase = "Processing",
+            TotalEntities = 10,
+            ProcessedEntities = 5,
+            SuccessfulEntities = 4,
+            FailedEntities = 1
         };
         var cancellationToken = new CancellationToken(true);
 

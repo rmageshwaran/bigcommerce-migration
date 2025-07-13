@@ -113,39 +113,11 @@ public class MigrationHttpFunctions
                 return await CreateErrorResponse(req, HttpStatusCode.BadRequest, "Invalid migration request", migrationId);
             }
 
-            // Validate store configurations
-            var validationResult = await ValidateMigrationRequest(migrationRequest, migrationId);
+            // Basic validation only - keep API response fast
+            var validationResult = BasicValidateMigrationRequest(migrationRequest);
             if (!validationResult.IsValid)
             {
                 return await CreateErrorResponse(req, HttpStatusCode.BadRequest, validationResult.ErrorMessage, migrationId);
-            }
-
-            // Resolve category tree IDs if categories are being migrated
-            CategoryTreeContext? categoryTreeContext = null;
-            if (migrationRequest.Entities.Contains("categories", StringComparer.OrdinalIgnoreCase))
-            {
-                _logger.LogInformation("Resolving category tree IDs for migration. MigrationId: {MigrationId}", migrationId);
-                
-                try
-                {
-                    categoryTreeContext = await _categoryTreeResolver.ResolveCategoryTreeAsync(migrationRequest);
-                    
-                    if (categoryTreeContext != null)
-                    {
-                        _logger.LogInformation("Successfully resolved category tree IDs. Source: {SourceTreeId}, Destination: {DestinationTreeId}, MigrationId: {MigrationId}", 
-                            categoryTreeContext.SourceCategoryTreeId, categoryTreeContext.DestinationCategoryTreeId, migrationId);
-                    }
-                    else
-                    {
-                        _logger.LogWarning("Failed to resolve category tree IDs - null context returned. MigrationId: {MigrationId}", migrationId);
-                        return await CreateErrorResponse(req, HttpStatusCode.BadRequest, "Failed to resolve category tree IDs for the specified channels", migrationId);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to resolve category tree IDs. MigrationId: {MigrationId}", migrationId);
-                    return await CreateErrorResponse(req, HttpStatusCode.BadRequest, "Failed to resolve category tree IDs: " + ex.Message, migrationId);
-                }
             }
 
             // Create migration entry for Azure Storage
@@ -162,23 +134,12 @@ public class MigrationHttpFunctions
                 UpdatedAt = DateTime.UtcNow
             };
 
-            // Create migration start message for queue
-            var migrationStartMessage = new
-            {
-                MigrationId = migrationId,
-                MigrationRequest = migrationRequest,
-                MigrationEntry = migrationEntry,
-                CategoryTreeContext = categoryTreeContext,
-                MessageType = "MigrationStart",
-                CreatedAt = DateTime.UtcNow
-            };
-
             // Store migration entry in Azure Table Storage
             await _migrationStorageService.CreateMigrationAsync(migrationEntry);
             _logger.LogInformation("Migration entry stored successfully. MigrationId: {MigrationId}", migrationId);
 
-            // Send migration start message to queue for processing
-            await _queueService.SendMigrationStartMessageAsync(migrationId, migrationRequest, categoryTreeContext);
+            // Send migration start message to queue for processing (no category tree context - resolved later)
+            await _queueService.SendMigrationStartMessageAsync(migrationId, migrationRequest, null);
             _logger.LogInformation("Migration start message sent to queue for processing. MigrationId: {MigrationId}", migrationId);
 
             // Log migration start event to OpenSearch
@@ -468,6 +429,47 @@ public class MigrationHttpFunctions
     }
 
     /// <summary>
+    /// Basic validation of migration request (lightweight, no API calls)
+    /// </summary>
+    /// <param name="migrationRequest">Migration request to validate</param>
+    /// <returns>Validation result</returns>
+    private ValidationResult BasicValidateMigrationRequest(MigrationRequest migrationRequest)
+    {
+        // Validate source store configuration (basic field validation only)
+        if (migrationRequest.SourceStore == null || 
+            string.IsNullOrWhiteSpace(migrationRequest.SourceStore.StoreId) ||
+            string.IsNullOrWhiteSpace(migrationRequest.SourceStore.AccessToken))
+        {
+            return new ValidationResult { IsValid = false, ErrorMessage = "Source store configuration is required (storeId and accessToken)" };
+        }
+
+        // Validate destination store configuration (basic field validation only)
+        if (migrationRequest.DestinationStore == null || 
+            string.IsNullOrWhiteSpace(migrationRequest.DestinationStore.StoreId) ||
+            string.IsNullOrWhiteSpace(migrationRequest.DestinationStore.AccessToken))
+        {
+            return new ValidationResult { IsValid = false, ErrorMessage = "Destination store configuration is required (storeId and accessToken)" };
+        }
+
+        // Validate entities list
+        if (!migrationRequest.Entities.Any())
+        {
+            return new ValidationResult { IsValid = false, ErrorMessage = "At least one entity type must be specified" };
+        }
+
+        // Validate entity types
+        var validEntityTypes = new[] { "categories", "products", "brands", "variants", "modifiers" };
+        var invalidEntities = migrationRequest.Entities.Where(e => !validEntityTypes.Contains(e.ToLower())).ToList();
+        if (invalidEntities.Any())
+        {
+            return new ValidationResult { IsValid = false, ErrorMessage = $"Invalid entity types: {string.Join(", ", invalidEntities)}" };
+        }
+
+        return new ValidationResult { IsValid = true };
+    }
+
+    /// <summary>
+    /// DEPRECATED: Full validation with store connectivity testing (moved to orchestrator)
     /// Validates the migration request and store configurations
     /// </summary>
     /// <param name="migrationRequest">Migration request to validate</param>

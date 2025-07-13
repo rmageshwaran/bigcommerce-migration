@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Linq;
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
 using Microsoft.Extensions.Logging;
@@ -117,14 +118,18 @@ public class BigCommerceApiClient : IBigCommerceApiClient
     }
 
     /// <summary>
-    /// Creates categories in a specific category tree
+    /// Creates categories using the correct BigCommerce API endpoint
     /// </summary>
     public async Task<List<Dictionary<string, object>>> CreateCategoriesAsync(StoreConfiguration storeConfig, string categoryTreeId, List<Dictionary<string, object>> categories, CancellationToken cancellationToken = default)
     {
         ValidateStoreConfiguration(storeConfig);
 
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-        var url = $"{storeConfig.GetApiBaseUrl()}/catalog/trees/{categoryTreeId}/categories";
+        
+        // Use the correct BigCommerce API endpoint for creating categories
+        var url = $"{storeConfig.GetApiBaseUrl()}/catalog/trees/categories";
+        
+        // Categories are already properly formatted by the transformation layer
         var jsonContent = JsonSerializer.Serialize(categories);
 
         try
@@ -705,8 +710,29 @@ public class BigCommerceApiClient : IBigCommerceApiClient
             $"limit={request.Limit}"
         };
         
-        if (storeConfig.ChannelId != null)
-            queryParams.Add($"channel_id={storeConfig.ChannelId}");
+        // Add entity-specific parameters based on BigCommerce API documentation
+        switch (entityType.ToLowerInvariant())
+        {
+            case "products":
+                // Products API supports channel_id parameter
+                if (storeConfig.ChannelId != null)
+                {
+                    queryParams.Add($"channel_id={storeConfig.ChannelId}");
+                }
+                break;
+                
+            case "categories":
+                // Categories API uses tree_id:in= parameter for category tree filtering
+                if (!string.IsNullOrEmpty(request.CategoryTreeId))
+                {
+                    queryParams.Add($"tree_id:in={request.CategoryTreeId}");
+                }
+                break;
+                
+            case "brands":
+                // Brands API doesn't support channel_id or tree_id parameters
+                break;
+        }
         
         return $"{baseUrl}/{endpoint}?{string.Join("&", queryParams)}";
     }

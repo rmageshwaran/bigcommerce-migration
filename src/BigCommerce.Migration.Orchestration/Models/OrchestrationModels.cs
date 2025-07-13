@@ -1,6 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.Text.Json.Serialization;
 using BigCommerce.Migration.Core.Models;
+using BigCommerce.Migration.Core.Interfaces;
 
 namespace BigCommerce.Migration.Orchestration.Models;
 
@@ -191,6 +192,11 @@ public class EntityMigrationRequest
     /// </summary>
     public int MaxRetries { get; set; } = 3;
     
+    /// <summary>
+    /// Migration settings (optional)
+    /// </summary>
+    public MigrationSettings? Settings { get; set; }
+    
     private static readonly string[] ValidEntityTypes = 
     {
         "categories", "products", "brands", "variants", "images", "modifiers"
@@ -276,6 +282,12 @@ public class BatchProcessingRequest
     /// Category tree context for channel-specific operations
     /// </summary>
     public CategoryTreeContext CategoryTreeContext { get; set; } = new();
+    
+    /// <summary>
+    /// Cached entity data from V3 discovery phase to avoid duplicate API calls
+    /// For V2 APIs, this will be null and processing will use direct pagination
+    /// </summary>
+    public List<Dictionary<string, object>>? CachedEntityData { get; set; }
     
     /// <summary>
     /// Validates the batch processing request
@@ -402,6 +414,31 @@ public class EntityMigrationResult
     public string EntityType { get; set; } = string.Empty;
     
     /// <summary>
+    /// Whether the entity migration was successful
+    /// </summary>
+    public bool IsSuccess { get; set; }
+    
+    /// <summary>
+    /// Error message if the migration failed
+    /// </summary>
+    public string? ErrorMessage { get; set; }
+    
+    /// <summary>
+    /// Migration start time
+    /// </summary>
+    public DateTime StartTime { get; set; }
+    
+    /// <summary>
+    /// Migration end time
+    /// </summary>
+    public DateTime? EndTime { get; set; }
+    
+    /// <summary>
+    /// Total migration duration
+    /// </summary>
+    public TimeSpan Duration { get; set; }
+    
+    /// <summary>
     /// Total number of entities discovered
     /// </summary>
     public int TotalEntities { get; set; }
@@ -422,6 +459,11 @@ public class EntityMigrationResult
     public int FailedEntities { get; set; }
     
     /// <summary>
+    /// Results from individual batch operations
+    /// </summary>
+    public List<BatchProcessingResult> BatchResults { get; set; } = new();
+    
+    /// <summary>
     /// Entity mappings (source ID -> destination ID)
     /// </summary>
     public List<EntityMapping> Mappings { get; set; } = new();
@@ -432,7 +474,7 @@ public class EntityMigrationResult
     public List<string> Errors { get; set; } = new();
     
     /// <summary>
-    /// Time taken to process this entity type
+    /// Time taken to process this entity type (alias for Duration)
     /// </summary>
     public TimeSpan ProcessingTime { get; set; }
     
@@ -504,4 +546,72 @@ public class MigrationStatisticsSummary
     /// Overall success rate as percentage
     /// </summary>
     public double SuccessRate { get; set; }
+}
+
+
+/// <summary>
+/// Request model for checking rate limits
+/// </summary>
+public class CheckRateLimitRequest
+{
+    /// <summary>
+    /// Store ID to check rate limits for
+    /// </summary>
+    public string StoreId { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// Entity type being processed (for context)
+    /// </summary>
+    public string EntityType { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Request model for updating entity progress
+/// </summary>
+public class UpdateEntityProgressRequest
+{
+    /// <summary>
+    /// Migration ID
+    /// </summary>
+    public string MigrationId { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// Entity type being processed
+    /// </summary>
+    public string EntityType { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// Current phase of processing
+    /// </summary>
+    public string Phase { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// Total number of entities to process
+    /// </summary>
+    public int TotalEntities { get; set; }
+    
+    /// <summary>
+    /// Number of entities processed so far
+    /// </summary>
+    public int ProcessedEntities { get; set; }
+    
+    /// <summary>
+    /// Number of entities successfully processed
+    /// </summary>
+    public int SuccessfulEntities { get; set; }
+    
+    /// <summary>
+    /// Number of entities that failed processing
+    /// </summary>
+    public int FailedEntities { get; set; }
+    
+    /// <summary>
+    /// Current batch number (optional)
+    /// </summary>
+    public int CurrentBatch { get; set; }
+    
+    /// <summary>
+    /// Total number of batches (optional)
+    /// </summary>
+    public int TotalBatches { get; set; }
 } 

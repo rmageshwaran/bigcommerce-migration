@@ -17,10 +17,10 @@ namespace BigCommerce.Migration.Functions.Hubs
         private readonly ServiceHubContext _hubContext;
         private static readonly ConcurrentDictionary<string, UserConnection> _connections = new();
 
-        public MigrationHub(ILogger<MigrationHub> logger, ServiceHubContext hubContext)
+        public MigrationHub(ILogger<MigrationHub> logger, ServiceHubContext? hubContext)
         {
             _logger = logger;
-            _hubContext = hubContext;
+            _hubContext = hubContext!; // We'll handle null checks in methods
         }
 
         /// <summary>

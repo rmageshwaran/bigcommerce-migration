@@ -284,4 +284,9 @@ public class EntityDiscoveryRequest
     /// Entity-specific configuration
     /// </summary>
     public EntityConfiguration EntityConfig { get; set; } = new();
+    
+    /// <summary>
+    /// Category tree context for category-related operations
+    /// </summary>
+    public CategoryTreeContext? CategoryTreeContext { get; set; }
 } 

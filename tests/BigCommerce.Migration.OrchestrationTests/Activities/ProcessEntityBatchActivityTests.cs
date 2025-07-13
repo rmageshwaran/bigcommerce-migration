@@ -20,6 +20,7 @@ public class ProcessEntityBatchActivityTests
     private readonly Mock<IRateLimitService> _rateLimitServiceMock;
     private readonly Mock<IOpenSearchService> _openSearchServiceMock;
     private readonly Mock<IMigrationStorageService> _migrationStorageServiceMock;
+    private readonly Mock<IBlobService> _blobServiceMock;
     private readonly ProcessEntityBatchActivity _activity;
 
     public ProcessEntityBatchActivityTests()
@@ -29,13 +30,15 @@ public class ProcessEntityBatchActivityTests
         _rateLimitServiceMock = new Mock<IRateLimitService>();
         _openSearchServiceMock = new Mock<IOpenSearchService>();
         _migrationStorageServiceMock = new Mock<IMigrationStorageService>();
+        _blobServiceMock = new Mock<IBlobService>();
         
         _activity = new ProcessEntityBatchActivity(
             _apiClientMock.Object,
             _loggerMock.Object,
             _rateLimitServiceMock.Object,
             _openSearchServiceMock.Object,
-            _migrationStorageServiceMock.Object);
+            _migrationStorageServiceMock.Object,
+            _blobServiceMock.Object);
     }
 
     [Fact]

@@ -20,15 +20,18 @@ public class LoggingMonitoringFunctions
     private readonly ILogger<LoggingMonitoringFunctions> _logger;
     private readonly IOpenSearchService _openSearchService;
     private readonly IMigrationStorageService _storageService;
+    private readonly IBlobService _blobService;
 
     public LoggingMonitoringFunctions(
         ILogger<LoggingMonitoringFunctions> logger,
         IOpenSearchService openSearchService,
-        IMigrationStorageService storageService)
+        IMigrationStorageService storageService,
+        IBlobService blobService)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _openSearchService = openSearchService ?? throw new ArgumentNullException(nameof(openSearchService));
         _storageService = storageService ?? throw new ArgumentNullException(nameof(storageService));
+        _blobService = blobService ?? throw new ArgumentNullException(nameof(blobService));
     }
 
     /// <summary>
@@ -358,34 +361,236 @@ public class LoggingMonitoringFunctions
         }
     }
 
+    /// <summary>
+    /// Get error payload from blob storage
+    /// </summary>
+    [Function("GetErrorPayload")]
+    [OpenApiOperation(operationId: "GetErrorPayload", tags: new[] { "Logging" },
+        Summary = "Get error payload from blob storage",
+        Description = "Retrieves the full error payload (request or response) from blob storage.")]
+    [OpenApiSecurity("ApiKeyAuth", SecuritySchemeType.ApiKey, Name = "X-API-Key", In = OpenApiSecurityLocationType.Header)]
+    [OpenApiParameter(name: "migrationId", In = ParameterLocation.Path, Required = true, Type = typeof(string),
+        Description = "Migration ID")]
+    [OpenApiParameter(name: "requestId", In = ParameterLocation.Path, Required = true, Type = typeof(string),
+        Description = "Request ID")]
+    [OpenApiParameter(name: "payloadType", In = ParameterLocation.Path, Required = true, Type = typeof(string),
+        Description = "Payload type (request or response)")]
+    [OpenApiParameter(name: "entityName", In = ParameterLocation.Path, Required = true, Type = typeof(string),
+        Description = "Entity name")]
+    [OpenApiResponseWithBody(statusCode: HttpStatusCode.OK, contentType: "application/json", bodyType: typeof(object),
+        Summary = "Error payload retrieved successfully")]
+    [OpenApiResponseWithBody(statusCode: HttpStatusCode.Unauthorized, contentType: "application/json", bodyType: typeof(object),
+        Summary = "Authentication required")]
+    [OpenApiResponseWithBody(statusCode: HttpStatusCode.NotFound, contentType: "application/json", bodyType: typeof(object),
+        Summary = "Payload not found")]
+    public async Task<HttpResponseData> GetErrorPayloadAsync(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "logs/payload/{migrationId}/{requestId}/{payloadType}/{entityName}")] HttpRequestData req,
+        string migrationId, string requestId, string payloadType, string entityName)
+    {
+        var response = req.CreateResponse(HttpStatusCode.OK);
+        response.Headers.Add("Content-Type", "application/json");
+
+        try
+        {
+            // Check authentication
+            var context = req.FunctionContext;
+            var isAuthenticated = context.Items.TryGetValue("IsAuthenticated", out var isAuthenticatedValue) && 
+                                 isAuthenticatedValue is bool authenticated && authenticated;
+
+            if (!isAuthenticated)
+            {
+                response.StatusCode = HttpStatusCode.Unauthorized;
+                await response.WriteStringAsync(JsonSerializer.Serialize(new
+                {
+                    error = new
+                    {
+                        code = "UNAUTHORIZED",
+                        message = "Authentication required to access error payloads"
+                    }
+                }));
+                return response;
+            }
+
+            // Validate parameters
+            if (string.IsNullOrWhiteSpace(migrationId) || string.IsNullOrWhiteSpace(requestId) ||
+                string.IsNullOrWhiteSpace(payloadType) || string.IsNullOrWhiteSpace(entityName))
+            {
+                response.StatusCode = HttpStatusCode.BadRequest;
+                await response.WriteStringAsync(JsonSerializer.Serialize(new
+                {
+                    error = new
+                    {
+                        code = "INVALID_PARAMETERS",
+                        message = "Migration ID, Request ID, Payload Type, and Entity Name are required"
+                    }
+                }));
+                return response;
+            }
+
+            // Validate payload type
+            if (payloadType != "request" && payloadType != "response")
+            {
+                response.StatusCode = HttpStatusCode.BadRequest;
+                await response.WriteStringAsync(JsonSerializer.Serialize(new
+                {
+                    error = new
+                    {
+                        code = "INVALID_PAYLOAD_TYPE",
+                        message = "Payload type must be 'request' or 'response'"
+                    }
+                }));
+                return response;
+            }
+
+            // TODO: Implement blob storage retrieval
+            // For now, return a placeholder response indicating the feature is under development
+            response.StatusCode = HttpStatusCode.NotImplemented;
+            await response.WriteStringAsync(JsonSerializer.Serialize(new
+            {
+                error = new
+                {
+                    code = "FEATURE_NOT_IMPLEMENTED",
+                    message = "Blob payload retrieval is currently under development. Please use the blob URLs from the error logs to access payloads directly."
+                },
+                info = new
+                {
+                    migrationId = migrationId,
+                    requestId = requestId,
+                    payloadType = payloadType,
+                    entityName = entityName,
+                    expectedBlobPath = $"migration-payloads/{migrationId}/{requestId}_{payloadType}_{entityName}.gz"
+                }
+            }));
+            return response;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving error payload for migration {MigrationId}, request {RequestId}, type {PayloadType}, entity {EntityName}", 
+                migrationId, requestId, payloadType, entityName);
+            response.StatusCode = HttpStatusCode.InternalServerError;
+            await response.WriteStringAsync(JsonSerializer.Serialize(new
+            {
+                error = new
+                {
+                    code = "PAYLOAD_RETRIEVAL_ERROR",
+                    message = "An error occurred while retrieving the error payload"
+                }
+            }));
+            return response;
+        }
+    }
+
     // Helper methods for data retrieval
 
-    private Task<(List<object> Entries, int TotalCount)> GetLogEntriesAsync(
+    private async Task<(List<object> Entries, int TotalCount)> GetLogEntriesAsync(
         string? level, DateTime from, DateTime to, string? search, int page, int pageSize)
     {
-        // In a real implementation, this would query OpenSearch
-        // For now, return placeholder data
-        var entries = new List<object>();
-        var random = new Random();
-        
-        for (int i = 0; i < Math.Min(pageSize, 10); i++)
+        try
         {
-            entries.Add(new
+            // Build OpenSearch query
+            var searchQuery = BuildLogSearchQuery(level, search);
+            
+            _logger.LogDebug("Searching logs with query: {Query}, from: {From}, to: {To}, page: {Page}, pageSize: {PageSize}", 
+                searchQuery, from, to, page, pageSize);
+            
+            // Query OpenSearch for real logs
+            var searchResults = await _openSearchService.SearchLogsAsync(searchQuery, from, to);
+            
+            // Convert to list and apply pagination
+            var allEntries = searchResults.ToList();
+            var totalCount = allEntries.Count;
+            
+            // Apply pagination
+            var skip = (page - 1) * pageSize;
+            var pagedEntries = allEntries.Skip(skip).Take(pageSize).ToList();
+            
+            _logger.LogDebug("Retrieved {TotalCount} total logs, returning {PagedCount} for page {Page}", 
+                totalCount, pagedEntries.Count, page);
+            
+            return (pagedEntries, totalCount);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving logs from OpenSearch. Using fallback data.");
+            
+            // Fallback to basic data if OpenSearch is unavailable
+            return await GetFallbackLogEntriesAsync(level, from, to, search, page, pageSize);
+        }
+    }
+
+    /// <summary>
+    /// Builds OpenSearch query based on filters
+    /// </summary>
+    private string BuildLogSearchQuery(string? level, string? search)
+    {
+        var queryParts = new List<string>();
+        
+        // Add level filter - handle different field names and log types
+        if (!string.IsNullOrWhiteSpace(level))
+        {
+            if (level.Equals("Error", StringComparison.OrdinalIgnoreCase))
             {
-                timestamp = from.AddMinutes(random.Next(0, (int)(to - from).TotalMinutes)),
-                level = level ?? (new[] { "Information", "Warning", "Error" })[random.Next(3)],
-                message = $"Sample log message {i + 1}",
-                source = "BigCommerce.Migration",
+                // For Error level, search both individual error logs and any batch logs with errors
+                queryParts.Add($"(Level:Error OR level:Error OR logType:MigrationError OR category:Error OR additionalData.logType:MigrationError OR additionalData.Level:Error OR (category:BatchProcessing AND errors:*))");
+            }
+            else
+            {
+                // For other levels, search with both casing variations
+                queryParts.Add($"(Level:{level} OR level:{level} OR category:{level} OR additionalData.Level:{level})");
+            }
+        }
+        
+        // Add search filter (could be migration ID, message content, etc.)
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            // Check if search looks like a GUID (migration ID)
+            if (Guid.TryParse(search, out _))
+            {
+                queryParts.Add($"(migrationId:{search} OR requestId:{search} OR entityId:{search} OR MigrationId:{search} OR additionalData.migrationId:{search} OR additionalData.MigrationId:{search})");
+            }
+            else
+            {
+                // General text search across message and other fields
+                queryParts.Add($"(message:*{search}* OR context:*{search}* OR eventType:*{search}* OR errorMessage:*{search}* OR searchableContent:*{search}* OR additionalData.errorMessage:*{search}* OR additionalData.searchableContent:*{search}*)");
+            }
+        }
+        
+        // Default to all migration-related logs if no specific filters
+        if (queryParts.Count == 0)
+        {
+            queryParts.Add("(source:BigCommerce.Migration OR migrationId:* OR MigrationId:* OR additionalData.migrationId:*)");
+        }
+        
+        return string.Join(" AND ", queryParts);
+    }
+
+    /// <summary>
+    /// Fallback method when OpenSearch is unavailable
+    /// </summary>
+    private Task<(List<object> Entries, int TotalCount)> GetFallbackLogEntriesAsync(
+        string? level, DateTime from, DateTime to, string? search, int page, int pageSize)
+    {
+        _logger.LogWarning("Using fallback log data - OpenSearch service unavailable");
+        
+        var entries = new List<object>
+        {
+            new
+            {
+                timestamp = DateTime.UtcNow.AddMinutes(-30),
+                level = "Warning",
+                message = "OpenSearch service is currently unavailable. Showing fallback data.",
+                source = "BigCommerce.Migration.Logs",
                 requestId = Guid.NewGuid().ToString(),
                 properties = new
                 {
                     machineId = Environment.MachineName,
-                    processId = Environment.ProcessId
+                    processId = Environment.ProcessId,
+                    fallback = true
                 }
-            });
-        }
+            }
+        };
 
-        return Task.FromResult((entries, entries.Count));
+        return Task.FromResult((entries, 1));
     }
 
     private Task<object> GetLogStatisticsAsync(int hours)

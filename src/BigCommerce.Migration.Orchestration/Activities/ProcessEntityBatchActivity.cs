@@ -4,6 +4,7 @@ using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
 using BigCommerce.Migration.Orchestration.Models;
 using System.Diagnostics;
+using System.Text.Json;
 
 namespace BigCommerce.Migration.Orchestration.Activities;
 
@@ -18,6 +19,7 @@ public class ProcessEntityBatchActivity
     private readonly IRateLimitService _rateLimitService;
     private readonly IOpenSearchService _openSearchService;
     private readonly IMigrationStorageService _migrationStorageService;
+    private readonly IBlobService _blobService;
 
     // Supported entity types for validation
     private static readonly string[] SupportedEntityTypes = new[]
@@ -30,13 +32,15 @@ public class ProcessEntityBatchActivity
         ILogger<ProcessEntityBatchActivity> logger,
         IRateLimitService rateLimitService,
         IOpenSearchService openSearchService,
-        IMigrationStorageService migrationStorageService)
+        IMigrationStorageService migrationStorageService,
+        IBlobService blobService)
     {
         _apiClient = apiClient ?? throw new ArgumentNullException(nameof(apiClient));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _rateLimitService = rateLimitService ?? throw new ArgumentNullException(nameof(rateLimitService));
         _openSearchService = openSearchService ?? throw new ArgumentNullException(nameof(openSearchService));
         _migrationStorageService = migrationStorageService ?? throw new ArgumentNullException(nameof(migrationStorageService));
+        _blobService = blobService ?? throw new ArgumentNullException(nameof(blobService));
     }
 
     /// <summary>
@@ -774,6 +778,16 @@ public class ProcessEntityBatchActivity
                 
                 _logger.LogWarning(ex, "Failed to process {EntityType} {EntityId} in migration {MigrationId}",
                     request.EntityType, entityId, request.MigrationId);
+
+                // ENHANCED: Log individual entity failure as structured error for API visibility
+                try
+                {
+                    await LogStructuredMigrationErrorAsync(ex, new List<Dictionary<string, object>> { entity }, request, "individual_entity_creation_failed");
+                }
+                catch (Exception logEx)
+                {
+                    _logger.LogWarning(logEx, "Failed to log structured error for entity {EntityId} in migration {MigrationId}", entityId, request.MigrationId);
+                }
             }
         }
     }
@@ -1097,7 +1111,7 @@ public class ProcessEntityBatchActivity
     }
 
     /// <summary>
-    /// Creates categories in destination store with enhanced error handling and logging
+    /// Creates categories in destination store with duplicate detection and structured logging
     /// </summary>
     private async Task<List<Dictionary<string, object>>?> CreateCategoriesAsync(
         List<Dictionary<string, object>> categories, 
@@ -1151,26 +1165,22 @@ public class ProcessEntityBatchActivity
                     _logger.LogDebug("Created category mapping: '{CategoryName}' -> ID {CreatedId} in migration {MigrationId}",
                         sourceName, createdId, request.MigrationId);
                 }
+
+                return createdCategories;
             }
             else
             {
                 _logger.LogWarning("Category creation returned no results for migration {MigrationId}", request.MigrationId);
+                return new List<Dictionary<string, object>>();
             }
-
-            return createdCategories;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to create {CategoryCount} categories in destination store {DestinationStore} tree {DestinationTreeId} for migration {MigrationId}",
                 categories.Count, request.DestinationStore.StoreId, destinationTreeId, request.MigrationId);
 
-            // Log individual category details for troubleshooting
-            foreach (var category in categories)
-            {
-                var categoryName = category.TryGetValue("name", out var name) ? name.ToString() : "unknown";
-                _logger.LogError("Failed category: Name='{CategoryName}', Data={CategoryData}", 
-                    categoryName, System.Text.Json.JsonSerializer.Serialize(category));
-            }
+            // ENHANCED: Log structured error with payload to OpenSearch for API visibility
+            await LogStructuredMigrationErrorAsync(ex, categories, request, "category_creation_failed");
 
             throw;
         }
@@ -1349,5 +1359,261 @@ public class ProcessEntityBatchActivity
             _logger.LogWarning(ex, "Failed to log batch processing to OpenSearch for migration {MigrationId}",
                 request.MigrationId);
         }
+    }
+
+    /// <summary>
+    /// Logs structured migration errors with all payloads stored in blob storage for optimal cost and performance
+    /// </summary>
+    private async Task LogStructuredMigrationErrorAsync(
+        Exception exception, 
+        List<Dictionary<string, object>> entities, 
+        BatchProcessingRequest request, 
+        string errorType)
+    {
+        try
+        {
+            foreach (var entity in entities)
+            {
+                var entityName = entity.TryGetValue("name", out var name) ? name?.ToString() : "unknown";
+                var entityId = entity.TryGetValue("id", out var id) ? id?.ToString() : "unknown";
+                var parentId = entity.TryGetValue("parent_id", out var parent) ? parent?.ToString() : "null";
+                var requestId = Guid.NewGuid().ToString();
+
+                // Serialize payloads for size analysis
+                var requestPayload = JsonSerializer.Serialize(entity, new JsonSerializerOptions { WriteIndented = true });
+                var responsePayload = ExtractResponsePayloadFromException(exception);
+
+                // BLOB STORAGE: Store all payloads in blob storage for optimal cost and performance
+                var (requestPayloadRef, responsePayloadRef) = await StorePayloadsAsync(
+                    request.MigrationId, 
+                    requestId, 
+                    requestPayload, 
+                    responsePayload, 
+                    entityName);
+
+                // Create lean structured error log for OpenSearch (with blob references for all payloads)
+                var errorLog = new
+                {
+                    // Migration Context
+                    MigrationId = request.MigrationId,
+                    EntityType = request.EntityType,
+                    BatchNumber = request.BatchNumber,
+                    ErrorType = errorType,
+                    RequestId = requestId,
+                    Timestamp = DateTime.UtcNow,
+                    Level = "Error",
+                    LogType = "MigrationError", // Added for API compatibility
+
+                    // Entity Context
+                    EntityId = entityId,
+                    EntityName = entityName,
+                    EntityParentId = parentId,
+
+                    // Store Context
+                    SourceStore = request.SourceStore.StoreId,
+                    DestinationStore = request.DestinationStore.StoreId,
+                    CategoryTreeId = request.CategoryTreeContext?.DestinationCategoryTreeId,
+
+                    // Error Details
+                    ErrorMessage = exception.Message,
+                    ErrorSource = exception.Source,
+                    ExceptionType = exception.GetType().Name,
+                    StackTrace = GetTruncatedStackTrace(exception.StackTrace),
+
+                    // Payload References (all payloads stored in blob storage with URLs)
+                    RequestPayload = requestPayloadRef.PayloadData,
+                    RequestPayloadBlobUrl = requestPayloadRef.BlobUrl,
+                    RequestPayloadSize = requestPayloadRef.Size,
+                    ResponsePayload = responsePayloadRef.PayloadData,
+                    ResponsePayloadBlobUrl = responsePayloadRef.BlobUrl,
+                    ResponsePayloadSize = responsePayloadRef.Size,
+
+                    // Additional Context
+                    ProcessingPhase = "entity_creation",
+                    HttpStatusCode = ExtractHttpStatusFromException(exception),
+                    ApiEndpoint = $"/stores/{request.DestinationStore.StoreId}/v3/catalog/trees/categories",
+
+                    // Searchable fields
+                    SearchableContent = $"{request.MigrationId} {entityName} {exception.Message}",
+                    Tags = new[] { "migration", "error", request.EntityType, errorType },
+
+                    // API Response Format
+                    Category = "MigrationError"
+                };
+
+                // Log to OpenSearch for API visibility
+                await _openSearchService.LogErrorAsync(
+                    $"Migration error: {errorType} for {request.EntityType} '{entityName}' in migration {request.MigrationId}",
+                    exception,
+                    errorLog);
+
+                _logger.LogDebug("Structured error logged to OpenSearch for entity '{EntityName}' (RequestId: {RequestId}) in migration {MigrationId}. All payloads stored in blob storage: Request={RequestBlobUrl}, Response={ResponseBlobUrl}",
+                    entityName, requestId, request.MigrationId, 
+                    requestPayloadRef.BlobUrl ?? "none",
+                    responsePayloadRef.BlobUrl ?? "none");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to log structured migration error for migration {MigrationId}",
+                request.MigrationId);
+        }
+    }
+
+    /// <summary>
+    /// Extracts response payload from HttpRequestException if available
+    /// </summary>
+    private static string? ExtractResponsePayloadFromException(Exception exception)
+    {
+        // For HttpRequestException, try to extract the response content from the message
+        if (exception is HttpRequestException httpException)
+        {
+            var message = httpException.Message;
+            
+            // Look for JSON content in the exception message
+            var jsonStart = message.IndexOf('{');
+            var jsonEnd = message.LastIndexOf('}');
+            
+            if (jsonStart >= 0 && jsonEnd > jsonStart)
+            {
+                return message.Substring(jsonStart, jsonEnd - jsonStart + 1);
+            }
+        }
+        
+        return exception.Message;
+    }
+
+    /// <summary>
+    /// Extracts HTTP status code from exception if available
+    /// </summary>
+    private static int? ExtractHttpStatusFromException(Exception exception)
+    {
+        if (exception is HttpRequestException httpException)
+        {
+            // Try to extract status code from exception message
+            var message = httpException.Message;
+            if (message.Contains("UnprocessableEntity"))
+                return 422;
+            if (message.Contains("BadRequest"))
+                return 400;
+            if (message.Contains("Unauthorized"))
+                return 401;
+            if (message.Contains("Forbidden"))
+                return 403;
+            if (message.Contains("NotFound"))
+                return 404;
+            if (message.Contains("Conflict"))
+                return 409;
+        }
+        
+        return null;
+    }
+
+    /// <summary>
+    /// Performs duplicate detection for categories before creation
+    /// </summary>
+
+
+    /// <summary>
+    /// Payload reference for blob storage (all payloads stored in blob storage for optimal cost/performance)
+    /// </summary>
+    private record PayloadReference(string? PayloadData, string? BlobUrl, int Size);
+
+    /// <summary>
+    /// Stores all error payloads in blob storage for optimal cost and performance
+    /// </summary>
+    private async Task<(PayloadReference requestPayloadRef, PayloadReference responsePayloadRef)> StorePayloadsAsync(
+        string migrationId, 
+        string requestId, 
+        string requestPayload, 
+        string? responsePayload, 
+        string entityName)
+    {
+        try
+        {
+            // Always store request payload in blob storage
+            var requestPayloadRef = await StorePayloadInBlobAsync(
+                migrationId, 
+                requestId, 
+                requestPayload, 
+                "request", 
+                entityName);
+
+            // Always store response payload in blob storage (if exists)
+            var responsePayloadRef = !string.IsNullOrEmpty(responsePayload)
+                ? await StorePayloadInBlobAsync(migrationId, requestId, responsePayload, "response", entityName)
+                : new PayloadReference(null, null, 0);
+
+            return (requestPayloadRef, responsePayloadRef);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to store payloads in blob storage for migration {MigrationId}, request {RequestId}. Using truncated inline fallback.",
+                migrationId, requestId);
+
+            // Fallback: store truncated inline (emergency only)
+            const int FALLBACK_MAX_SIZE = 1024; // 1KB emergency fallback
+            
+            var truncatedRequest = requestPayload.Length > FALLBACK_MAX_SIZE 
+                ? requestPayload.Substring(0, FALLBACK_MAX_SIZE) + "... [BLOB STORAGE FAILED - TRUNCATED]"
+                : requestPayload;
+            
+            var truncatedResponse = (responsePayload?.Length ?? 0) > FALLBACK_MAX_SIZE 
+                ? responsePayload!.Substring(0, FALLBACK_MAX_SIZE) + "... [BLOB STORAGE FAILED - TRUNCATED]"
+                : responsePayload ?? "";
+
+            return (
+                new PayloadReference(truncatedRequest, null, requestPayload.Length),
+                new PayloadReference(truncatedResponse, null, responsePayload?.Length ?? 0)
+            );
+        }
+    }
+
+    /// <summary>
+    /// Stores payload in blob storage with compression for optimal cost and performance
+    /// </summary>
+    private async Task<PayloadReference> StorePayloadInBlobAsync(
+        string migrationId, 
+        string requestId, 
+        string payload, 
+        string payloadType, 
+        string entityName)
+    {
+        if (string.IsNullOrEmpty(payload))
+        {
+            return new PayloadReference(null, null, 0);
+        }
+
+        var payloadSizeBytes = System.Text.Encoding.UTF8.GetByteCount(payload);
+
+        // Always store in blob storage with compression
+        var blobUrl = await _blobService.StoreCompressedPayloadAsync(
+            migrationId, 
+            $"{requestId}_{payloadType}_{entityName.Replace(" ", "_")}", 
+            payload, 
+            "gzip");
+
+        _logger.LogDebug("Stored {PayloadType} payload ({PayloadSize} bytes) in blob storage for entity '{EntityName}', request {RequestId}",
+            payloadType, payloadSizeBytes, entityName, requestId);
+
+        // Return reference with blob URL (no inline data for consistent storage)
+        return new PayloadReference(null, blobUrl, payloadSizeBytes);
+    }
+
+    /// <summary>
+    /// Truncates stack trace to prevent OpenSearch document bloat
+    /// </summary>
+    private static string? GetTruncatedStackTrace(string? stackTrace)
+    {
+        if (string.IsNullOrEmpty(stackTrace))
+            return null;
+
+        const int MAX_STACK_TRACE_LENGTH = 2000; // Limit to 2KB
+
+        if (stackTrace.Length <= MAX_STACK_TRACE_LENGTH)
+            return stackTrace;
+
+        // Take first part and add truncation notice
+        return stackTrace.Substring(0, MAX_STACK_TRACE_LENGTH) + "\n... [STACK TRACE TRUNCATED]";
     }
 } 

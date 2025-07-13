@@ -1,3 +1,30 @@
+### API Key Authentication Bypass in Development Environment
+### 
+### ✅ DEVELOPMENT MODE: API key authentication is bypassed for ALL routes
+### When ASPNETCORE_ENVIRONMENT=Development (as in local docker setup)
+### 
+### You can now test ALL endpoints without providing API keys:
+
+### 1. Test Logs API (previously required API key)
+GET http://localhost:7071/api/logs
+# No X-API-Key header needed in dev environment
+
+### 2. Test Migration Status API
+GET http://localhost:7071/api/migrations/status
+# No X-API-Key header needed in dev environment
+
+### 3. Test Health Check (always open)
+GET http://localhost:7071/api/health
+# Always available regardless of environment
+
+### 4. Test Debug Endpoints (always open)
+GET http://localhost:7071/api/debug/info
+# Always available regardless of environment
+
+### ====================================
+### ORIGINAL MIGRATION CANCELLATION TEST
+### ====================================
+
 ### Test Migration Cancellation Flow
 ### This file demonstrates how to test the migration cancellation functionality
 
@@ -26,30 +53,37 @@ Content-Type: application/json
 ### 2. Get Migration Status (use the migrationId from step 1)
 GET http://localhost:7071/api/migrations/{{migrationId}}/status
 
-### 3. Cancel the Migration (while it's running)
+### 3. Cancel Migration (use the migrationId from step 1)
 POST http://localhost:7071/api/migrations/{{migrationId}}/cancel
-Content-Type: application/json
 
-### 4. Verify Cancellation Status
+### 4. Verify Cancellation - Check Status Again
 GET http://localhost:7071/api/migrations/{{migrationId}}/status
 
-### 5. Check Migration Details
+### 5. Get Migration Logs (now works without API key in dev)
+GET http://localhost:7071/api/logs?migrationId={{migrationId}}
+
+### 6. Get All Migrations
+GET http://localhost:7071/api/migrations
+
+### 7. Get Migration History
+GET http://localhost:7071/api/migrations/{{migrationId}}/history
+
+### 8. Test with Real Migration ID
+### Replace with actual migration ID from your system
+@migrationId = 7a06c5b7-64c9-4c78-b687-f327b8ddc0d5
+
+### Get specific migration details
 GET http://localhost:7071/api/migrations/{{migrationId}}
 
-### Expected Results:
-# Step 1: Should return migrationId and status "Queued" or "InProgress"
-# Step 2: Should show migration status as "InProgress" 
-# Step 3: Should return status "cancelled" with cancellation timestamp
-# Step 4: Should show migration status as "Cancelled"
-# Step 5: Should show full migration details with cancellation info
+### Cancel specific migration
+POST http://localhost:7071/api/migrations/{{migrationId}}/cancel
 
-### Test Edge Cases:
+### Get logs for specific migration
+GET http://localhost:7071/api/logs?migrationId={{migrationId}}&level=info&limit=50
 
-### Try to cancel a non-existent migration
-POST http://localhost:7071/api/migrations/non-existent-id/cancel
-
-### Try to cancel an already completed migration
-POST http://localhost:7071/api/migrations/completed-migration-id/cancel
-
-### Try to cancel an already cancelled migration  
-POST http://localhost:7071/api/migrations/cancelled-migration-id/cancel 
+### Expected Behavior:
+### 1. Migration should start successfully
+### 2. Status should show "InProgress" 
+### 3. After cancellation, status should show "Cancelled"
+### 4. Logs should show cancellation messages
+### 5. No API key required for any endpoint in Development environment 

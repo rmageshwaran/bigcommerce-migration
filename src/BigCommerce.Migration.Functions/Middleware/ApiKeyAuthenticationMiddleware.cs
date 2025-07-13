@@ -4,6 +4,7 @@ using Microsoft.Azure.Functions.Worker.Middleware;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Primitives;
 using Microsoft.AspNetCore.WebUtilities;
+using Microsoft.Extensions.Configuration;
 using System.Net;
 using System.Text.Json;
 
@@ -17,13 +18,16 @@ public class ApiKeyAuthenticationMiddleware : IFunctionsWorkerMiddleware
 {
     private readonly ILogger<ApiKeyAuthenticationMiddleware> _logger;
     private readonly IApiKeyService _apiKeyService;
+    private readonly IConfiguration _configuration;
 
     public ApiKeyAuthenticationMiddleware(
         ILogger<ApiKeyAuthenticationMiddleware> logger,
-        IApiKeyService apiKeyService)
+        IApiKeyService apiKeyService,
+        IConfiguration configuration)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _apiKeyService = apiKeyService ?? throw new ArgumentNullException(nameof(apiKeyService));
+        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
     }
 
     public async Task Invoke(FunctionContext context, FunctionExecutionDelegate next)
@@ -37,9 +41,21 @@ public class ApiKeyAuthenticationMiddleware : IFunctionsWorkerMiddleware
             return;
         }
 
-        // Skip authentication for certain endpoints
+        // Skip authentication for certain endpoints or in development environment
         if (ShouldSkipAuthentication(httpRequestData))
         {
+            // Set authenticated context for development environment
+            var environment = _configuration["ASPNETCORE_ENVIRONMENT"] ?? 
+                             _configuration["AZURE_FUNCTIONS_ENVIRONMENT"] ?? 
+                             _configuration["Environment"] ?? 
+                             "Production";
+            
+            if (environment.Equals("Development", StringComparison.OrdinalIgnoreCase))
+            {
+                // Set development user context
+                SetDevelopmentUserContext(context);
+            }
+            
             await next(context);
             return;
         }
@@ -85,22 +101,40 @@ public class ApiKeyAuthenticationMiddleware : IFunctionsWorkerMiddleware
     /// <summary>
     /// Determines if authentication should be skipped for this request
     /// </summary>
-    private static bool ShouldSkipAuthentication(HttpRequestData request)
+    private bool ShouldSkipAuthentication(HttpRequestData request)
     {
         var path = request.Url.AbsolutePath.ToLowerInvariant();
         
-        // Skip authentication for health checks and documentation
+        // Check if we're in development environment
+        var environment = _configuration["ASPNETCORE_ENVIRONMENT"] ?? 
+                         _configuration["AZURE_FUNCTIONS_ENVIRONMENT"] ?? 
+                         _configuration["Environment"] ?? 
+                         "Production";
+        
+        if (environment.Equals("Development", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogDebug("Skipping API key authentication for {Path} - Development environment detected", path);
+            return true;
+        }
+        
+        // Skip authentication for health checks and documentation in all environments
         var skipPaths = new[]
         {
             "/api/health",
             "/api/docs",
             "/api/swagger",
             "/api/openapi",
-            "/api/migrations",  // Skip for local development testing
             "/api/debug"        // Skip for debug endpoints
         };
 
-        return skipPaths.Any(skipPath => path.StartsWith(skipPath));
+        var shouldSkip = skipPaths.Any(skipPath => path.StartsWith(skipPath));
+        
+        if (shouldSkip)
+        {
+            _logger.LogDebug("Skipping API key authentication for {Path} - Path is in skip list", path);
+        }
+        
+        return shouldSkip;
     }
 
     /// <summary>
@@ -147,6 +181,18 @@ public class ApiKeyAuthenticationMiddleware : IFunctionsWorkerMiddleware
         context.Items["UserRole"] = validationResult.Role;
         context.Items["ApiKeyId"] = validationResult.ApiKeyId;
         context.Items["RateLimit"] = validationResult.RateLimit;
+        context.Items["IsAuthenticated"] = true;
+    }
+
+    /// <summary>
+    /// Sets development user context for development environment
+    /// </summary>
+    private static void SetDevelopmentUserContext(FunctionContext context)
+    {
+        context.Items["UserId"] = "dev-user";
+        context.Items["UserRole"] = ApiKeyRole.Admin;
+        context.Items["ApiKeyId"] = "dev-api-key";
+        context.Items["RateLimit"] = 1000;
         context.Items["IsAuthenticated"] = true;
     }
 

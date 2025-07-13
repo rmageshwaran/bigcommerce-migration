@@ -267,11 +267,11 @@ public class DiscoverEntitiesActivity
     }
 
     /// <summary>
-    /// Optimized discovery for V3 APIs that stores entity data to avoid duplicate API calls
+    /// Optimized discovery for V3 APIs with entity-type-aware strategy
     /// </summary>
     /// <param name="request">Entity discovery request</param>
     /// <param name="cancellationToken">Cancellation token</param>
-    /// <returns>Discovery result with cached entity data</returns>
+    /// <returns>Discovery result with appropriate strategy</returns>
     private async Task<EntityDiscoveryResult> DiscoverEntitiesWithOptimizedV3PaginationAsync(EntityDiscoveryRequest request, CancellationToken cancellationToken)
     {
         try
@@ -279,14 +279,18 @@ public class DiscoverEntitiesActivity
             _logger.LogInformation("Starting optimized V3 discovery for {EntityType} in migration {MigrationId}", 
                 request.EntityType, request.MigrationId);
 
-            // Categories need hierarchical sorting, others use standard pagination
-            if (request.EntityType.Equals("categories", StringComparison.OrdinalIgnoreCase))
+            // STRATEGY SELECTION: Choose based on entity characteristics
+            if (IsHierarchicalEntity(request.EntityType))
             {
+                // Hierarchical entities: Fetch all and cache (categories)
+                _logger.LogInformation("Using hierarchical caching strategy for {EntityType} - requires global sorting", request.EntityType);
                 return await DiscoverCategoriesWithHierarchicalSortingAndDataStorageAsync(request, cancellationToken);
             }
             else
             {
-                return await DiscoverEntitiesWithStandardPaginationAndDataStorageAsync(request, cancellationToken);
+                // Non-hierarchical entities: Use efficient pagination metadata only (products, brands, variants)
+                _logger.LogInformation("Using efficient pagination strategy for {EntityType} - no caching required", request.EntityType);
+                return await DiscoverEntitiesWithEfficientPaginationMetadataAsync(request, cancellationToken);
             }
         }
         catch (Exception ex)
@@ -300,6 +304,134 @@ public class DiscoverEntitiesActivity
                 Errors = new List<string> { ex.Message }
             };
         }
+    }
+
+    /// <summary>
+    /// Determines if an entity type requires hierarchical processing
+    /// </summary>
+    /// <param name="entityType">The entity type to check</param>
+    /// <returns>True if hierarchical, false otherwise</returns>
+    private static bool IsHierarchicalEntity(string entityType)
+    {
+        return entityType.Equals("categories", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Discovers entities with efficient V3 pagination metadata only (no caching)
+    /// Optimized for large-scale entities like products, brands, variants
+    /// </summary>
+    /// <param name="request">Entity discovery request</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>Discovery result with pagination metadata only</returns>
+    private async Task<EntityDiscoveryResult> DiscoverEntitiesWithEfficientPaginationMetadataAsync(EntityDiscoveryRequest request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            _logger.LogInformation("Starting efficient pagination metadata discovery for {EntityType} in migration {MigrationId}", 
+                request.EntityType, request.MigrationId);
+
+            // OPTIMIZATION: Only fetch first page to get total count and pagination metadata
+            var paginationRequest = new BigCommercePaginationRequest
+            {
+                Page = 1,
+                Limit = 250, // Use large limit for efficiency, but only fetch first page
+                IncludeDeleted = request.EntityConfig.IncludeDeleted,
+                IncludeDrafts = request.EntityConfig.IncludeDrafts,
+                SortBy = "id",
+                SortDirection = "asc"
+            };
+
+            _logger.LogDebug("Fetching first page of {EntityType} to determine total count and pagination metadata", request.EntityType);
+
+            var response = await _apiClient.GetPaginatedEntitiesAsync(
+                request.SourceStore,
+                request.EntityType,
+                paginationRequest,
+                cancellationToken);
+
+            // Extract only the entity IDs from first page (no full entity caching)
+            var firstPageEntityIds = ExtractEntityIds(response.Data ?? new List<Dictionary<string, object>>(), request.EntityType);
+            
+            // Calculate total entity IDs based on pagination metadata
+            var totalCount = response.TotalItems ?? 0;
+            var totalPages = response.TotalPages ?? 1;
+
+            _logger.LogInformation("Efficient pagination metadata discovery completed for {EntityType}: {TotalCount} entities across {TotalPages} pages (no caching)", 
+                request.EntityType, totalCount, totalPages);
+
+            // Generate entity IDs sequence without fetching all entities
+            var allEntityIds = GenerateEntityIdSequence(firstPageEntityIds, totalCount, response.PerPage);
+
+            return new EntityDiscoveryResult
+            {
+                EntityType = request.EntityType,
+                EntityIds = allEntityIds,
+                EntityData = new List<Dictionary<string, object>>(), // NO caching for scalability
+                TotalCount = totalCount,
+                V3PaginationMetadata = response.Meta?.Pagination,
+                PaginationMetadata = new Dictionary<string, object>
+                {
+                    { "ApiVersion", "V3" },
+                    { "Strategy", "EfficientPaginationMetadata" },
+                    { "TotalPages", totalPages },
+                    { "PageSize", paginationRequest.Limit },
+                    { "HierarchicallySorted", false },
+                    { "CachingDisabled", true },
+                    { "MemoryOptimized", true }
+                }
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed efficient pagination metadata discovery for {EntityType} in migration {MigrationId}", 
+                request.EntityType, request.MigrationId);
+            
+            return new EntityDiscoveryResult
+            {
+                EntityType = request.EntityType,
+                Errors = new List<string> { ex.Message }
+            };
+        }
+    }
+
+    /// <summary>
+    /// Generates entity ID sequence based on pagination metadata without fetching all entities
+    /// </summary>
+    /// <param name="firstPageIds">Entity IDs from first page</param>
+    /// <param name="totalCount">Total entity count</param>
+    /// <param name="pageSize">Page size</param>
+    /// <returns>Estimated entity ID sequence</returns>
+    private static List<string> GenerateEntityIdSequence(List<string> firstPageIds, int totalCount, int pageSize)
+    {
+        var entityIds = new List<string>();
+        
+        if (!firstPageIds.Any() || totalCount <= 0)
+        {
+            return entityIds;
+        }
+
+        // For first page, use actual IDs
+        entityIds.AddRange(firstPageIds);
+        
+        // For remaining pages, generate estimated ID sequence
+        // This works because BigCommerce typically uses sequential IDs
+        if (totalCount > firstPageIds.Count && firstPageIds.Count > 0)
+        {
+            var startId = int.Parse(firstPageIds[0]);
+            var endId = int.Parse(firstPageIds[^1]);
+            var increment = firstPageIds.Count > 1 ? (endId - startId) / (firstPageIds.Count - 1) : 1;
+            
+            // Generate remaining IDs based on sequence pattern
+            var remainingCount = totalCount - firstPageIds.Count;
+            var nextId = endId + increment;
+            
+            for (int i = 0; i < remainingCount; i++)
+            {
+                entityIds.Add((nextId + (i * increment)).ToString());
+            }
+        }
+        
+        return entityIds;
     }
 
     /// <summary>

@@ -93,7 +93,27 @@ public class ProcessEntityBatchActivity
                 return result;
             }
 
-            // Step 4: Fetch source entities
+            // Step 4: Check for migration-specific cancellation before fetching
+            try
+            {
+                var migrationCancellationToken = await _migrationStorageService.GetCancellationTokenAsync(request.MigrationId);
+                if (migrationCancellationToken != null && !migrationCancellationToken.IsProcessed)
+                {
+                    _logger.LogInformation("Migration {MigrationId} was cancelled before fetching entities for batch {BatchNumber}",
+                        request.MigrationId, request.BatchNumber);
+                    result.Errors.Add("Migration was cancelled before fetching entities");
+                    stopwatch.Stop();
+                    result.ProcessingTime = stopwatch.Elapsed;
+                    return result;
+                }
+            }
+            catch (Exception ex)
+            {
+                // Log error but continue - cancellation check failure shouldn't break migration
+                _logger.LogError(ex, "Failed to check migration cancellation status for {MigrationId} before fetching entities", request.MigrationId);
+            }
+
+            // Step 5: Fetch source entities
             List<Dictionary<string, object>> sourceEntities;
             try
             {
@@ -122,7 +142,7 @@ public class ProcessEntityBatchActivity
                 return result;
             }
 
-            // Step 5: Process entities individually (continue on failures as per user requirement)
+            // Step 6: Process entities individually (continue on failures as per user requirement)
             await ProcessEntitiesIndividuallyAsync(request, sourceEntities, result, cancellationToken);
 
             // Step 6: Store any entity mappings that failed during individual processing (fallback)
@@ -368,7 +388,7 @@ public class ProcessEntityBatchActivity
     }
 
     /// <summary>
-    /// Fetches products from source store
+    /// Fetches products from source store with memory-efficient batch processing
     /// </summary>
     private async Task<List<Dictionary<string, object>>> FetchProductsAsync(BatchProcessingRequest request, CancellationToken cancellationToken)
     {
@@ -377,49 +397,195 @@ public class ProcessEntityBatchActivity
             return new List<Dictionary<string, object>>();
         }
 
+        // OPTIMIZATION: Check if we have cached entity data from discovery phase
+        if (request.CachedEntityData != null && request.CachedEntityData.Any())
+        {
+            _logger.LogInformation("Using cached entity data from V3 discovery phase for products batch {BatchNumber} in migration {MigrationId}",
+                request.BatchNumber, request.MigrationId);
+
+            // Filter cached data to only the entities in this batch
+            var filteredProducts = request.CachedEntityData.Where(p => 
+                p.TryGetValue("id", out var id) && 
+                id != null &&
+                request.EntityIds.Contains(id.ToString()!)).ToList();
+
+            _logger.LogDebug("Filtered cached products from {TotalCount} to {FilteredCount} based on EntityIds for batch {BatchNumber}",
+                request.CachedEntityData.Count, filteredProducts.Count, request.BatchNumber);
+
+            return filteredProducts;
+        }
+
+        // MEMORY-EFFICIENT: Direct fetch for this batch only (no full caching)
+        _logger.LogInformation("Using memory-efficient direct fetch for products batch {BatchNumber} in migration {MigrationId}",
+            request.BatchNumber, request.MigrationId);
+
         var paginationRequest = new BigCommercePaginationRequest
         {
             Page = 1,
-            Limit = request.EntityIds.Count,
+            Limit = Math.Min(250, request.EntityIds.Count * 2), // Fetch slightly more than batch size for efficiency
             IncludeDeleted = false,
-            IncludeDrafts = true
+            IncludeDrafts = true,
+            SortBy = "id",
+            SortDirection = "asc"
         };
 
-        var response = await _apiClient.GetPaginatedEntitiesAsync(
-            request.SourceStore, 
-            "products", 
-            paginationRequest, 
-            cancellationToken);
+        var allProducts = new List<Dictionary<string, object>>();
+        var currentPage = 1;
+        var foundCount = 0;
+        var targetIds = request.EntityIds.ToHashSet(); // For faster lookup
+        BigCommercePaginatedResponse<Dictionary<string, object>>? lastResponse = null;
 
-        // Filter to only the requested entity IDs
-        return response.Data?.Where(p => 
-            p.TryGetValue("id", out var id) && 
-            id != null &&
-            request.EntityIds.Contains(id.ToString()!)).ToList() ?? new List<Dictionary<string, object>>();
+        // Fetch pages until we find all required products or exhaust reasonable search
+        do
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            
+            paginationRequest.Page = currentPage;
+            var response = await _apiClient.GetPaginatedEntitiesAsync(
+                request.SourceStore, 
+                "products", 
+                paginationRequest, 
+                cancellationToken);
+
+            lastResponse = response;
+
+            if (response.Data != null && response.Data.Any())
+            {
+                // Filter to only the products we need for this batch
+                var relevantProducts = response.Data.Where(p => 
+                    p.TryGetValue("id", out var id) && 
+                    id != null &&
+                    targetIds.Contains(id.ToString()!)).ToList();
+
+                allProducts.AddRange(relevantProducts);
+                foundCount += relevantProducts.Count;
+
+                _logger.LogDebug("Found {RelevantCount} relevant products out of {PageCount} on page {Page} for batch {BatchNumber}",
+                    relevantProducts.Count, response.Data.Count, currentPage, request.BatchNumber);
+
+                // Early exit if we found all required products
+                if (foundCount >= request.EntityIds.Count)
+                {
+                    _logger.LogDebug("Found all {RequiredCount} products for batch {BatchNumber}, stopping search",
+                        request.EntityIds.Count, request.BatchNumber);
+                    break;
+                }
+            }
+
+            // For V2 APIs: Break if no more data
+            if (response.Data == null || response.Data.Count == 0)
+            {
+                _logger.LogDebug("No more data available, breaking pagination loop for products");
+                break;
+            }
+
+            currentPage++;
+
+            // Safety check: prevent excessive searching
+            if (currentPage > 20) // Max 20 pages for batch search
+            {
+                _logger.LogWarning("Breaking product search after 20 pages to prevent excessive API calls. Found {FoundCount}/{RequiredCount} products",
+                    foundCount, request.EntityIds.Count);
+                break;
+            }
+
+        } while (currentPage <= (lastResponse?.TotalPages ?? int.MaxValue));
+
+        _logger.LogInformation("Memory-efficient product fetch completed for batch {BatchNumber}: Found {FoundCount}/{RequiredCount} products across {PagesSearched} pages",
+            request.BatchNumber, allProducts.Count, request.EntityIds.Count, currentPage - 1);
+
+        return allProducts;
     }
 
     /// <summary>
-    /// Fetches brands from source store
+    /// Fetches brands from source store with memory-efficient batch processing
     /// </summary>
     private async Task<List<Dictionary<string, object>>> FetchBrandsAsync(BatchProcessingRequest request, CancellationToken cancellationToken)
     {
-        var paginationRequest = new BigCommercePaginationRequest
+        if (request.EntityIds == null || !request.EntityIds.Any())
         {
-            Page = 1,
-            Limit = request.EntityIds.Count,
-            IncludeDeleted = false
-        };
+            return new List<Dictionary<string, object>>();
+        }
 
-        var response = await _apiClient.GetPaginatedEntitiesAsync(
-            request.SourceStore,
-            "brands",
-            paginationRequest,
-            cancellationToken);
+        // OPTIMIZATION: Check if we have cached entity data from discovery phase
+        if (request.CachedEntityData != null && request.CachedEntityData.Any())
+        {
+            _logger.LogInformation("Using cached entity data from V3 discovery phase for brands batch {BatchNumber}",
+                request.BatchNumber);
 
-        return response.Data.Where(b => 
-            b.TryGetValue("id", out var id) && 
-            id != null &&
-            request.EntityIds.Contains(id.ToString()!)).ToList();
+            var filteredBrands = request.CachedEntityData.Where(b => 
+                b.TryGetValue("id", out var id) && 
+                id != null &&
+                request.EntityIds.Contains(id.ToString()!)).ToList();
+
+            return filteredBrands;
+        }
+
+        // MEMORY-EFFICIENT: Direct fetch for this batch only
+        _logger.LogInformation("Using memory-efficient direct fetch for brands batch {BatchNumber}",
+            request.BatchNumber);
+
+        var allBrands = new List<Dictionary<string, object>>();
+        var targetIds = request.EntityIds.ToHashSet();
+        var currentPage = 1;
+        var foundCount = 0;
+
+        BigCommercePaginatedResponse<Dictionary<string, object>>? lastResponse = null;
+
+        do
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var paginationRequest = new BigCommercePaginationRequest
+            {
+                Page = currentPage,
+                Limit = 250,
+                IncludeDeleted = false,
+                SortBy = "id",
+                SortDirection = "asc"
+            };
+
+            var response = await _apiClient.GetPaginatedEntitiesAsync(
+                request.SourceStore,
+                "brands",
+                paginationRequest,
+                cancellationToken);
+
+            lastResponse = response;
+
+            if (response.Data != null && response.Data.Any())
+            {
+                var relevantBrands = response.Data.Where(b => 
+                    b.TryGetValue("id", out var id) && 
+                    id != null &&
+                    targetIds.Contains(id.ToString()!)).ToList();
+
+                allBrands.AddRange(relevantBrands);
+                foundCount += relevantBrands.Count;
+
+                if (foundCount >= request.EntityIds.Count)
+                {
+                    break;
+                }
+            }
+
+            if (response.Data == null || response.Data.Count == 0)
+            {
+                break;
+            }
+
+            currentPage++;
+
+            if (currentPage > 20)
+            {
+                _logger.LogWarning("Breaking brand search after 20 pages. Found {FoundCount}/{RequiredCount}",
+                    foundCount, request.EntityIds.Count);
+                break;
+            }
+
+        } while (currentPage <= (lastResponse?.TotalPages ?? int.MaxValue));
+
+        return allBrands;
     }
 
     /// <summary>
@@ -512,8 +678,27 @@ public class ProcessEntityBatchActivity
 
         for (int i = 0; i < sourceEntities.Count; i++)
         {
-            // Check for cancellation before processing each entity
+            // Check for standard .NET cancellation token
             cancellationToken.ThrowIfCancellationRequested();
+            
+            // Check for migration-specific cancellation from database
+            try
+            {
+                var migrationCancellationToken = await _migrationStorageService.GetCancellationTokenAsync(request.MigrationId);
+                if (migrationCancellationToken != null && !migrationCancellationToken.IsProcessed)
+                {
+                    _logger.LogInformation("Migration {MigrationId} was cancelled during batch processing - stopping at entity {EntityIndex}/{TotalEntities}", 
+                        request.MigrationId, i + 1, sourceEntities.Count);
+                    
+                    result.Errors.Add($"Migration was cancelled during batch processing at entity {i + 1}/{sourceEntities.Count}");
+                    return; // Stop processing remaining entities in this batch
+                }
+            }
+            catch (Exception ex)
+            {
+                // Log error but don't stop processing - cancellation check failure shouldn't break migration
+                _logger.LogError(ex, "Failed to check migration cancellation status for {MigrationId} - continuing with batch processing", request.MigrationId);
+            }
             
             var entity = sourceEntities[i];
             result.TotalProcessed++;

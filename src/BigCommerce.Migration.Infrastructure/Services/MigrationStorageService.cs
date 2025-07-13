@@ -689,14 +689,14 @@ public class MigrationStorageService : IMigrationStorageService
     {
         try
         {
-            _logger.LogInformation("Getting cancellation token: {MigrationId}", migrationId);
+            _logger.LogDebug("Checking for cancellation token: {MigrationId}", migrationId);
 
             var tableClient = await GetTableClientAsync(CancellationTokensTableName);
             var response = await tableClient.GetEntityIfExistsAsync<TableEntity>("cancellation", migrationId);
 
             if (!response.HasValue)
             {
-                _logger.LogWarning("Cancellation token not found: {MigrationId}", migrationId);
+                _logger.LogDebug("No cancellation token found for migration {MigrationId} - migration is not cancelled", migrationId);
                 return null;
             }
 

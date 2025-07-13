@@ -86,8 +86,10 @@ public class DiscoverEntitiesActivityTests
         Assert.Empty(result.Errors);
         Assert.NotNull(result.PaginationMetadata);
         Assert.Equal(BigCommerceApiVersion.V3, result.ApiVersion);
-        Assert.Equal(2, result.EntityData.Count);
+        Assert.Equal(0, result.EntityData.Count); // No caching for non-hierarchical entities
         Assert.False(result.SkipDiscovery);
+        Assert.True(result.PaginationMetadata.ContainsKey("MemoryOptimized"));
+        Assert.True(result.PaginationMetadata.ContainsKey("CachingDisabled"));
     }
 
     [Fact]
@@ -173,8 +175,10 @@ public class DiscoverEntitiesActivityTests
         Assert.Empty(result.Errors);
         Assert.NotNull(result.PaginationMetadata);
         Assert.Equal(BigCommerceApiVersion.V3, result.ApiVersion);
-        Assert.Equal(2, result.EntityData.Count);
+        Assert.Equal(0, result.EntityData.Count); // No caching for non-hierarchical entities
         Assert.False(result.SkipDiscovery);
+        Assert.True(result.PaginationMetadata.ContainsKey("MemoryOptimized"));
+        Assert.True(result.PaginationMetadata.ContainsKey("CachingDisabled"));
     }
 
     [Fact]

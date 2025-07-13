@@ -1,0 +1,55 @@
+### Test Migration Cancellation Flow
+### This file demonstrates how to test the migration cancellation functionality
+
+### 1. Start a Migration (replace with your actual migration request)
+POST http://localhost:7071/api/migrations/start
+Content-Type: application/json
+
+{
+  "sourceStore": {
+    "storeId": "test-store",
+    "apiUrl": "https://api.bigcommerce.com/stores/test-store/v3",
+    "apiKey": "your-api-key"
+  },
+  "destinationStore": {
+    "storeId": "dest-store", 
+    "apiUrl": "https://api.bigcommerce.com/stores/dest-store/v3",
+    "apiKey": "your-dest-api-key"
+  },
+  "entities": ["categories", "products"],
+  "settings": {
+    "batchSize": 10,
+    "enableLogging": true
+  }
+}
+
+### 2. Get Migration Status (use the migrationId from step 1)
+GET http://localhost:7071/api/migrations/{{migrationId}}/status
+
+### 3. Cancel the Migration (while it's running)
+POST http://localhost:7071/api/migrations/{{migrationId}}/cancel
+Content-Type: application/json
+
+### 4. Verify Cancellation Status
+GET http://localhost:7071/api/migrations/{{migrationId}}/status
+
+### 5. Check Migration Details
+GET http://localhost:7071/api/migrations/{{migrationId}}
+
+### Expected Results:
+# Step 1: Should return migrationId and status "Queued" or "InProgress"
+# Step 2: Should show migration status as "InProgress" 
+# Step 3: Should return status "cancelled" with cancellation timestamp
+# Step 4: Should show migration status as "Cancelled"
+# Step 5: Should show full migration details with cancellation info
+
+### Test Edge Cases:
+
+### Try to cancel a non-existent migration
+POST http://localhost:7071/api/migrations/non-existent-id/cancel
+
+### Try to cancel an already completed migration
+POST http://localhost:7071/api/migrations/completed-migration-id/cancel
+
+### Try to cancel an already cancelled migration  
+POST http://localhost:7071/api/migrations/cancelled-migration-id/cancel 

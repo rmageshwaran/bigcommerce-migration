@@ -1,0 +1,35 @@
+repos:
+  - repo: local
+    hooks:
+      - id: durable-function-analyzer
+        name: Azure Durable Functions Deterministic Analyzer
+        entry: scripts/check-orchestrator-determinism.ps1
+        language: system
+        files: '.*Orchestrator.*\.cs$'
+        pass_filenames: true
+        
+      - id: dotnet-build
+        name: .NET Build Check
+        entry: dotnet build --no-restore --configuration Release
+        language: system
+        files: '\.cs$'
+        pass_filenames: false
+        
+      - id: dotnet-test
+        name: .NET Test Check
+        entry: dotnet test --no-build --configuration Release --verbosity quiet
+        language: system
+        files: '\.cs$'
+        pass_filenames: false
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-xml
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+        args: ['--fix=crlf'] 

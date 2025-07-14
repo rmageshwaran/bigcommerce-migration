@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <IsPackable>false</IsPackable>
+    <PackageId>BigCommerce.Migration.CodeAnalysis</PackageId>
+    <PackageVersion>1.0.0</PackageVersion>
+    <Authors>BigCommerce Migration Team</Authors>
+    <Description>Roslyn analyzer for Azure Durable Functions deterministic behavior in BigCommerce Migration project</Description>
+    <DevelopmentDependency>true</DevelopmentDependency>
+    <NoPackageAnalysis>true</NoPackageAnalysis>
+    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+    <TargetsForTfmSpecificBuildOutput>$(TargetsForTfmSpecificBuildOutput);CopyProjectReferencesToPackage</TargetsForTfmSpecificBuildOutput>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.5.0" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.3.4" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Analyzer Include="DurableFunctionAnalyzer.cs" />
+  </ItemGroup>
+
+
+
+  <Target Name="CopyProjectReferencesToPackage" DependsOnTargets="BuildOnlySettings;ResolveReferences">
+    <ItemGroup>
+      <BuildOutputInPackage Include="$(OutputPath)$(AssemblyName).dll" />
+    </ItemGroup>
+  </Target>
+
+</Project> 

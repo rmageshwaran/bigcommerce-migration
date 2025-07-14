@@ -80,7 +80,7 @@ public class DurableTaskClientWrapper : IDurableTaskClient
         CancellationToken cancellationToken = default)
     {
         return await _client.ScheduleNewOrchestrationInstanceAsync(
-            orchestratorName, input, options, cancellationToken);
+            orchestratorName, input, options, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -93,7 +93,7 @@ public class DurableTaskClientWrapper : IDurableTaskClient
         string instanceId,
         CancellationToken cancellationToken = default)
     {
-        return await _client.GetInstanceAsync(instanceId, cancellationToken);
+        return await _client.GetInstanceAsync(instanceId, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -108,7 +108,7 @@ public class DurableTaskClientWrapper : IDurableTaskClient
         string reason,
         CancellationToken cancellationToken = default)
     {
-        await _client.TerminateInstanceAsync(instanceId, reason, cancellationToken);
+        await _client.TerminateInstanceAsync(instanceId, reason, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -125,7 +125,7 @@ public class DurableTaskClientWrapper : IDurableTaskClient
         object? eventData = null,
         CancellationToken cancellationToken = default)
     {
-        await _client.RaiseEventAsync(instanceId, eventName, eventData, cancellationToken);
+        await _client.RaiseEventAsync(instanceId, eventName, eventData, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -138,6 +138,6 @@ public class DurableTaskClientWrapper : IDurableTaskClient
         string instanceId,
         CancellationToken cancellationToken = default)
     {
-        return await _client.WaitForInstanceCompletionAsync(instanceId, cancellationToken);
+        return await _client.WaitForInstanceCompletionAsync(instanceId, cancellationToken).ConfigureAwait(false);
     }
 } 

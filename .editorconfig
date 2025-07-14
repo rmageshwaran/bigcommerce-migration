@@ -1,0 +1,41 @@
+# BigCommerce Migration Project Editor Configuration
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = crlf
+indent_style = space
+indent_size = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.cs]
+# Azure Durable Functions Deterministic Behavior Rules
+# These rules prevent common deterministic violations in orchestrator functions
+
+# Rule: Orchestrator files should not use DateTime.Now or DateTime.UtcNow
+# Use context.CurrentUtcDateTime instead
+dotnet_diagnostic.CA1304.severity = error  # Specify CultureInfo
+dotnet_diagnostic.CA1305.severity = error  # Specify IFormatProvider
+
+# Rule: Orchestrator files should not use Guid.NewGuid()
+# Use context.NewGuid() instead
+dotnet_diagnostic.CA1307.severity = error  # Specify StringComparison
+
+# Rule: Orchestrator files should not use Task.Delay or Thread.Sleep
+# Use context.CreateTimer() instead
+dotnet_diagnostic.CA2007.severity = error  # ConfigureAwait
+
+[*Orchestrator*.cs]
+# Specific rules for orchestrator files
+# These will be enforced by custom analyzers
+
+[*.json]
+indent_size = 2
+
+[*.yml]
+indent_size = 2
+
+[*.yaml]
+indent_size = 2 

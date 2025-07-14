@@ -294,6 +294,32 @@ public static class MigrationDurableOrchestrator
                                     "Processed: {ProcessedCount}, Successful: {SuccessfulCount}", 
                     migrationId, totalProcessed, totalSuccessful);
                 
+                // Complete migration - update storage service for HTTP API
+                await context.CallActivityAsync("CompleteMigration", new
+                {
+                    MigrationId = migrationId,
+                    Result = new MigrationResult
+                    {
+                        MigrationId = migrationId,
+                        Status = MigrationStatus.Completed,
+                        StartTime = result.StartTime,
+                        EndTime = result.EndTime ?? context.CurrentUtcDateTime,
+                        Duration = result.Duration,
+                        EntityResults = result.EntityResults,
+                        Errors = new List<string>(),
+                        Statistics = new MigrationStatistics
+                        {
+                            TotalDuration = result.Duration,
+                            TotalApiCalls = 0,
+                            SuccessfulApiCalls = 0,
+                            FailedApiCalls = 0,
+                            AverageResponseTimeMs = 0,
+                            PeakApiCallsPerMinute = 0,
+                            TotalBytesTransferred = 0
+                        }
+                    }
+                });
+                
                 // Broadcast migration completed event
                 await context.CallActivityAsync<bool>(
                     "BroadcastMigrationCompleted",
@@ -319,6 +345,32 @@ public static class MigrationDurableOrchestrator
                 logger.LogWarning("Migration completed with errors for MigrationId: {MigrationId}. " +
                                 "Processed: {ProcessedCount}, Successful: {SuccessfulCount}, Failed: {FailedCount}", 
                     migrationId, totalProcessed, totalSuccessful, totalFailed);
+                
+                // Complete migration - update storage service for HTTP API
+                await context.CallActivityAsync("CompleteMigration", new
+                {
+                    MigrationId = migrationId,
+                    Result = new MigrationResult
+                    {
+                        MigrationId = migrationId,
+                        Status = MigrationStatus.Completed,
+                        StartTime = result.StartTime,
+                        EndTime = result.EndTime ?? context.CurrentUtcDateTime,
+                        Duration = result.Duration,
+                        EntityResults = result.EntityResults,
+                        Errors = new List<string> { result.ErrorMessage },
+                        Statistics = new MigrationStatistics
+                        {
+                            TotalDuration = result.Duration,
+                            TotalApiCalls = 0,
+                            SuccessfulApiCalls = 0,
+                            FailedApiCalls = 0,
+                            AverageResponseTimeMs = 0,
+                            PeakApiCallsPerMinute = 0,
+                            TotalBytesTransferred = 0
+                        }
+                    }
+                });
                 
                 // Broadcast migration completed with errors event
                 await context.CallActivityAsync<bool>(

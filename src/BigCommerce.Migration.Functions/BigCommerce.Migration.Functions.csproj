@@ -46,6 +46,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\BigCommerce.Migration.CodeAnalysis\BigCommerce.Migration.CodeAnalysis.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Update="host.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

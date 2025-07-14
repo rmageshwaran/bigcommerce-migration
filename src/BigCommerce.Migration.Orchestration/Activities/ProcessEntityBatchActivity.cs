@@ -368,20 +368,36 @@ public class ProcessEntityBatchActivity
             // Filter categories to only those in the requested EntityIds if specified
             if (request.EntityIds != null && request.EntityIds.Any())
             {
-                var filteredCategories = allCategories.Where(c => 
-                    c.TryGetValue("id", out var id) && 
-                    id != null &&
-                    request.EntityIds.Contains(id.ToString()!)).ToList();
+                // CRITICAL: Preserve the hierarchical order from EntityIds (parents first)
+                // The API response may return categories in random order, but EntityIds are hierarchically sorted
+                var categoryLookup = allCategories.ToDictionary(
+                    c => c.TryGetValue("id", out var id) ? id.ToString()! : string.Empty,
+                    c => c
+                );
+                
+                // Process EntityIds in their hierarchical order to maintain parent-child relationships
+                var filteredCategories = request.EntityIds
+                    .Where(id => categoryLookup.ContainsKey(id))
+                    .Select(id => categoryLookup[id])
+                    .ToList();
 
                 _logger.LogDebug("Filtered categories from {TotalCount} to {FilteredCount} based on EntityIds for batch {BatchNumber} in migration {MigrationId}",
                     allCategories.Count, filteredCategories.Count, request.BatchNumber, request.MigrationId);
 
+                // Log the processing order to verify hierarchy is preserved
+                var categoryOrder = string.Join(", ", filteredCategories.Select(c => 
+                {
+                    var name = c.TryGetValue("name", out var nameVal) ? nameVal.ToString() : "unknown";
+                    var id = c.TryGetValue("id", out var idVal) ? idVal.ToString() : "unknown";
+                    return $"{name}({id})";
+                }));
+                _logger.LogDebug("Category processing order (hierarchical): [{CategoryOrder}]", categoryOrder);
+
                 allCategories = filteredCategories;
             }
 
-            // NOTE: Categories are already sorted hierarchically in the discovery phase
-            // No need to sort again - just maintain the order from the pre-sorted EntityIds
-            _logger.LogInformation("Processing {CategoryCount} categories (already hierarchically sorted) for migration {MigrationId}",
+            // Categories are now in correct hierarchical order (parents before children)
+            _logger.LogInformation("Processing {CategoryCount} categories (hierarchically sorted) for migration {MigrationId}",
                 allCategories.Count, request.MigrationId);
 
             return allCategories;
@@ -864,9 +880,17 @@ public class ProcessEntityBatchActivity
             }
             else
             {
-                // Parent not found - this could be a hierarchy ordering issue
-                _logger.LogWarning("Parent category {ParentId} not found in mappings for category {CategoryName}. Setting as root category.",
-                    parentId, category.TryGetValue("name", out var name) ? name : "unknown");
+                // Parent not found - this indicates either:
+                // 1. Data integrity issue (orphaned category in source store)
+                // 2. Hierarchy processing order issue (child processed before parent)
+                // 3. Parent category filtered out or failed to migrate
+                var catName = category.TryGetValue("name", out var nameValue) ? nameValue.ToString() : "unknown";
+                var catId = category.TryGetValue("id", out var idValue) ? idValue.ToString() : "unknown";
+                
+                _logger.LogWarning("HIERARCHY ISSUE: Parent category {ParentId} not found in mappings for category '{CategoryName}' (ID: {CategoryId}). " +
+                                 "This could indicate orphaned data in source store or processing order issue. Converting to root category.",
+                    parentId, catName, catId);
+                
                 category["parent_id"] = 0; // Make it a root category - BigCommerce expects 0, not null
             }
         }

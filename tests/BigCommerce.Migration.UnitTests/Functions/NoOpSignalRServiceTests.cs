@@ -71,7 +71,7 @@ public class NoOpSignalRServiceTests
                 LogLevel.Debug,
                 It.IsAny<EventId>(),
                 It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("SignalR not configured") 
-                    && v.ToString()!.Contains("migration started broadcast") 
+                    && v.ToString()!.Contains("Migration started for migration") 
                     && v.ToString()!.Contains(_testMigrationId)),
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
@@ -94,7 +94,7 @@ public class NoOpSignalRServiceTests
                 LogLevel.Debug,
                 It.IsAny<EventId>(),
                 It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("SignalR not configured") 
-                    && v.ToString()!.Contains("migration completed broadcast") 
+                    && v.ToString()!.Contains("Migration completed for migration") 
                     && v.ToString()!.Contains(_testMigrationId)),
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
@@ -117,7 +117,7 @@ public class NoOpSignalRServiceTests
                 LogLevel.Debug,
                 It.IsAny<EventId>(),
                 It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("SignalR not configured") 
-                    && v.ToString()!.Contains("migration failed broadcast") 
+                    && v.ToString()!.Contains("Migration failed for migration") 
                     && v.ToString()!.Contains(_testMigrationId)),
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
@@ -140,7 +140,7 @@ public class NoOpSignalRServiceTests
                 LogLevel.Debug,
                 It.IsAny<EventId>(),
                 It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("SignalR not configured") 
-                    && v.ToString()!.Contains("migration cancelled broadcast") 
+                    && v.ToString()!.Contains("Migration cancelled for migration") 
                     && v.ToString()!.Contains(_testMigrationId)),
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
@@ -167,7 +167,7 @@ public class NoOpSignalRServiceTests
                 LogLevel.Debug,
                 It.IsAny<EventId>(),
                 It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("SignalR not configured") 
-                    && v.ToString()!.Contains("entity phase start broadcast") 
+                    && v.ToString()!.Contains("Entity phase start for migration") 
                     && v.ToString()!.Contains(_testMigrationId)
                     && v.ToString()!.Contains(_testEntityType)),
                 It.IsAny<Exception>(),
@@ -191,7 +191,7 @@ public class NoOpSignalRServiceTests
                 LogLevel.Debug,
                 It.IsAny<EventId>(),
                 It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("SignalR not configured") 
-                    && v.ToString()!.Contains("entity phase completed broadcast") 
+                    && v.ToString()!.Contains("Entity phase completed for migration") 
                     && v.ToString()!.Contains(_testMigrationId)
                     && v.ToString()!.Contains(_testEntityType)),
                 It.IsAny<Exception>(),
@@ -225,7 +225,7 @@ public class NoOpSignalRServiceTests
                 LogLevel.Debug,
                 It.IsAny<EventId>(),
                 It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("SignalR not configured") 
-                    && v.ToString()!.Contains("error notification broadcast") 
+                    && v.ToString()!.Contains("Error notification for migration") 
                     && v.ToString()!.Contains(_testMigrationId)),
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
@@ -249,7 +249,7 @@ public class NoOpSignalRServiceTests
                 LogLevel.Debug,
                 It.IsAny<EventId>(),
                 It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("SignalR not configured") 
-                    && v.ToString()!.Contains("system alert broadcast") 
+                    && v.ToString()!.Contains("System alert for type") 
                     && v.ToString()!.Contains(alertType)),
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),

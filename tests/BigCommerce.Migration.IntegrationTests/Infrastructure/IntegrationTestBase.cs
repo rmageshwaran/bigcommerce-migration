@@ -100,6 +100,13 @@ public abstract class IntegrationTestBase : IDisposable
         services.AddTransient<IRateLimitService, RateLimitService>();
         services.AddTransient<IProgressTracker, ProgressTracker>();
         services.AddTransient<IBatchSizeCalculator, BatchSizeCalculator>();
+        
+        // Register entity processing services (newly created during refactoring)
+        services.AddTransient<IEntityFetchService, EntityFetchService>();
+        services.AddTransient<IEntityTransformService, EntityTransformService>();
+        services.AddTransient<IEntityCreateService, EntityCreateService>();
+        services.AddTransient<IEntityMappingService, EntityMappingService>();
+        services.AddTransient<IEntityErrorHandlingService, EntityErrorHandlingService>();
 
         // Configure HTTP client
         services.AddHttpClient();

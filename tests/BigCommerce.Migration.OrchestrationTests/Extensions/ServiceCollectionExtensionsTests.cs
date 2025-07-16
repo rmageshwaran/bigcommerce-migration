@@ -4,6 +4,7 @@ using Xunit;
 using BigCommerce.Migration.Orchestration.Extensions;
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Infrastructure.Services;
+using BigCommerce.Migration.Orchestration.Services;
 
 namespace BigCommerce.Migration.OrchestrationTests.Extensions;
 
@@ -45,6 +46,13 @@ public class ServiceCollectionExtensionsTests
         Assert.NotNull(serviceProvider.GetService<IRateLimitService>());
         Assert.NotNull(serviceProvider.GetService<IBatchSizeCalculator>());
         Assert.NotNull(serviceProvider.GetService<IProgressTracker>());
+        
+        // Assert - Verify all entity processing services are registered
+        Assert.NotNull(serviceProvider.GetService<IEntityFetchService>());
+        Assert.NotNull(serviceProvider.GetService<IEntityTransformService>());
+        Assert.NotNull(serviceProvider.GetService<IEntityCreateService>());
+        Assert.NotNull(serviceProvider.GetService<IEntityMappingService>());
+        Assert.NotNull(serviceProvider.GetService<IEntityErrorHandlingService>());
     }
 
     [Fact]

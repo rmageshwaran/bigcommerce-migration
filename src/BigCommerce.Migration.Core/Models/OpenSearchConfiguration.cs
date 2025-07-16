@@ -3,6 +3,22 @@ using System.ComponentModel.DataAnnotations;
 namespace BigCommerce.Migration.Core.Models;
 
 /// <summary>
+/// Sort order enumeration for OpenSearch queries
+/// </summary>
+public enum SortOrder
+{
+    /// <summary>
+    /// Ascending sort order
+    /// </summary>
+    Ascending = 0,
+    
+    /// <summary>
+    /// Descending sort order
+    /// </summary>
+    Descending = 1
+}
+
+/// <summary>
 /// Configuration settings for OpenSearch connection and indexing
 /// Contains connection parameters, timeouts, and indexing preferences
 /// </summary>
@@ -63,9 +79,9 @@ public class OpenSearchConfiguration
     }
 
     /// <summary>
-    /// Checks if credentials are provided
+    /// Validates if authentication credentials are provided
     /// </summary>
-    /// <returns>True if both username and password are provided, false otherwise</returns>
+    /// <returns>True if both username and password are provided</returns>
     public bool HasCredentials()
     {
         return !string.IsNullOrWhiteSpace(Username) && !string.IsNullOrWhiteSpace(Password);
@@ -83,7 +99,7 @@ public class OpenSearchConfiguration
         {
             connectionString += $", Username: {Username}, Password: ***";
         }
-        
+
         connectionString += $", DefaultIndex: {DefaultIndex}";
         connectionString += $", ConnectionTimeout: {ConnectionTimeout}";
         connectionString += $", RequestTimeout: {RequestTimeout}";
@@ -91,4 +107,85 @@ public class OpenSearchConfiguration
         
         return connectionString;
     }
+}
+
+/// <summary>
+/// Structured query request model for optimized OpenSearch queries
+/// </summary>
+public class OpenSearchQuery
+{
+    /// <summary>
+    /// Start date for the search range
+    /// </summary>
+    public DateTime FromDate { get; set; } = DateTime.UtcNow.AddDays(-1);
+
+    /// <summary>
+    /// End date for the search range
+    /// </summary>
+    public DateTime ToDate { get; set; } = DateTime.UtcNow;
+
+    /// <summary>
+    /// Log level filter (Debug, Information, Warning, Error, Critical)
+    /// </summary>
+    public string? Level { get; set; }
+
+    /// <summary>
+    /// Migration ID for filtering
+    /// </summary>
+    public string? MigrationId { get; set; }
+
+    /// <summary>
+    /// Entity type for filtering (Categories, Products, etc.)
+    /// </summary>
+    public string? EntityType { get; set; }
+
+    /// <summary>
+    /// Free text search term
+    /// </summary>
+    public string? SearchTerm { get; set; }
+
+    /// <summary>
+    /// Number of results to return (default: 50, max: 1000)
+    /// </summary>
+    public int Size { get; set; } = 50;
+
+    /// <summary>
+    /// Number of results to skip for pagination
+    /// </summary>
+    public int From { get; set; } = 0;
+
+    /// <summary>
+    /// Field to sort by (default: timestamp)
+    /// </summary>
+    public string SortField { get; set; } = "timestamp";
+
+    /// <summary>
+    /// Sort order (asc/desc, default: desc)
+    /// </summary>
+    public SortOrder SortOrder { get; set; } = SortOrder.Descending;
+
+    /// <summary>
+    /// Specific fields to include in the response (for performance optimization)
+    /// </summary>
+    public string[]? IncludeFields { get; set; }
+
+    /// <summary>
+    /// Enable query result highlighting
+    /// </summary>
+    public bool EnableHighlighting { get; set; } = false;
+
+    /// <summary>
+    /// Validates the query parameters
+    /// </summary>
+    public bool IsValid()
+    {
+        return FromDate <= ToDate && 
+               Size > 0 && Size <= 1000 && 
+               From >= 0;
+    }
+
+    /// <summary>
+    /// Gets the current page number (1-based)
+    /// </summary>
+    public int CurrentPage => (From / Size) + 1;
 } 

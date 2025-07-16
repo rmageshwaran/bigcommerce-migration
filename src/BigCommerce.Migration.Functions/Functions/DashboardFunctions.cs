@@ -41,7 +41,7 @@ namespace BigCommerce.Migration.Functions.Functions
     /// <returns>Migration status response</returns>
     [Function("GetDashboardMigrationStatus")]
     public async Task<HttpResponseData> GetMigrationStatus(
-            [HttpTrigger(AuthorizationLevel.Function, "get", Route = "dashboard/migrations/{migrationId}/status")] HttpRequestData req,
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "dashboard/migrations/{migrationId}/status")] HttpRequestData req,
             string migrationId,
             CancellationToken cancellationToken)
         {
@@ -56,14 +56,109 @@ namespace BigCommerce.Migration.Functions.Functions
                     return badRequestResponse;
                 }
 
+                // Get progress from tracker
                 var progress = await _progressTracker.GetProgressAsync(migrationId, cancellationToken);
+                
+                // Get migration from storage for consistency
+                var migrationEntry = await _storageService.GetMigrationAsync(migrationId);
+                
+                // Check if progress tracker has meaningful data (not just default values from restart)
+                var hasMeaningfulProgress = progress.TotalEntities > 0 || 
+                                          progress.ProcessedEntities > 0 || 
+                                          progress.EntityProgress.Any() ||
+                                          progress.StartTime < DateTime.UtcNow.AddMinutes(-1); // Not just created
+                
+                // If no meaningful progress data and we have storage data, reconstruct from storage
+                if (!hasMeaningfulProgress && migrationEntry != null)
+                {
+                    _logger.LogInformation("Progress tracker has no meaningful data for migration {MigrationId}, reconstructing from storage", migrationId);
+                    
+                    // Reconstruct progress from storage data
+                    progress.MigrationId = migrationId;
+                    progress.Status = migrationEntry.Status.ToString().ToLowerInvariant();
+                    progress.StartTime = migrationEntry.CreatedAt;
+                    progress.LastUpdated = migrationEntry.UpdatedAt;
+                    progress.ElapsedTime = progress.LastUpdated - progress.StartTime;
+                    
+                    // Set appropriate values based on migration status
+                    if (migrationEntry.Status == Core.Models.MigrationStatus.Completed)
+                    {
+                        progress.CurrentPhase = "completed";
+                        progress.OverallProgressPercentage = 100.0;
+                        progress.TotalEntities = migrationEntry.Entities?.Count ?? 0;
+                        progress.ProcessedEntities = progress.TotalEntities;
+                        progress.SuccessfulEntities = progress.TotalEntities; // Assume all successful if completed
+                        progress.FailedEntities = 0;
+                        progress.EntitiesPerSecond = 0.0;
+                        progress.ErrorRate = 0.0;
+                        progress.EstimatedTimeRemaining = TimeSpan.Zero;
+                    }
+                    else if (migrationEntry.Status == Core.Models.MigrationStatus.Failed)
+                    {
+                        progress.CurrentPhase = "failed";
+                        progress.OverallProgressPercentage = 0.0;
+                        progress.TotalEntities = migrationEntry.Entities?.Count ?? 0;
+                        progress.ProcessedEntities = 0;
+                        progress.SuccessfulEntities = 0;
+                        progress.FailedEntities = progress.TotalEntities;
+                        progress.EntitiesPerSecond = 0.0;
+                        progress.ErrorRate = 1.0;
+                        progress.EstimatedTimeRemaining = TimeSpan.Zero;
+                    }
+                    else
+                    {
+                        // In progress - use conservative estimates
+                        progress.CurrentPhase = "in_progress";
+                        progress.OverallProgressPercentage = 0.0;
+                        progress.TotalEntities = migrationEntry.Entities?.Count ?? 0;
+                        progress.ProcessedEntities = 0;
+                        progress.SuccessfulEntities = 0;
+                        progress.FailedEntities = 0;
+                        progress.EntitiesPerSecond = 0.0;
+                        progress.ErrorRate = 0.0;
+                        progress.EstimatedTimeRemaining = TimeSpan.FromMinutes(30); // Conservative estimate
+                    }
+                }
+                
+                // Determine the actual status based on both progress and storage data
+                var actualStatus = progress.Status;
+                
+                if (migrationEntry != null)
+                {
+                    // If storage shows completed but progress shows in-progress, check if all entities are actually done
+                    if (migrationEntry.Status == Core.Models.MigrationStatus.Completed && progress.Status == "inprogress")
+                    {
+                        var allEntitiesCompleted = progress.EntityProgress?.All(ep => ep.Value.Status == "completed") ?? false;
+                        if (!allEntitiesCompleted)
+                        {
+                            _logger.LogWarning("Migration {MigrationId} shows completed in storage but entities are still in progress. Using in-progress status.", migrationId);
+                            actualStatus = "inprogress";
+                        }
+                        else
+                        {
+                            actualStatus = "completed";
+                        }
+                    }
+                    
+                    // If progress shows completed but storage shows in-progress, use completed status
+                    if (migrationEntry.Status == Core.Models.MigrationStatus.InProgress && progress.Status == "completed")
+                    {
+                        var allEntitiesCompleted = progress.EntityProgress?.All(ep => ep.Value.Status == "completed") ?? false;
+                        if (allEntitiesCompleted)
+                        {
+                            _logger.LogInformation("Migration {MigrationId} shows in-progress in storage but all entities are completed. Using completed status.", migrationId);
+                            actualStatus = "completed";
+                        }
+                    }
+                }
+                
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 response.Headers.Add("Content-Type", "application/json");
                 
                 var statusData = new
                 {
                     MigrationId = migrationId,
-                    Status = progress.Status,
+                    Status = actualStatus,
                     OverallProgress = progress.OverallProgressPercentage,
                     CurrentPhase = progress.CurrentPhase,
                     CurrentEntity = progress.CurrentEntity,
@@ -101,7 +196,7 @@ namespace BigCommerce.Migration.Functions.Functions
         /// <returns>List of active migrations</returns>
         [Function("GetActiveMigrations")]
         public async Task<HttpResponseData> GetActiveMigrations(
-            [HttpTrigger(AuthorizationLevel.Function, "get", Route = "dashboard/migrations")] HttpRequestData req,
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "dashboard/migrations")] HttpRequestData req,
             CancellationToken cancellationToken)
         {
             _logger.LogInformation("Getting list of active migrations");
@@ -139,7 +234,7 @@ namespace BigCommerce.Migration.Functions.Functions
         /// <returns>System health response</returns>
         [Function("GetSystemHealth")]
         public async Task<HttpResponseData> GetSystemHealth(
-            [HttpTrigger(AuthorizationLevel.Function, "get", Route = "dashboard/health")] HttpRequestData req,
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "dashboard/health")] HttpRequestData req,
             CancellationToken cancellationToken)
         {
             _logger.LogInformation("Getting system health information");
@@ -190,7 +285,7 @@ namespace BigCommerce.Migration.Functions.Functions
         /// <returns>Migration statistics response</returns>
         [Function("GetMigrationStatistics")]
         public async Task<HttpResponseData> GetMigrationStatistics(
-            [HttpTrigger(AuthorizationLevel.Function, "get", Route = "dashboard/statistics")] HttpRequestData req,
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "dashboard/statistics")] HttpRequestData req,
             CancellationToken cancellationToken)
         {
             _logger.LogInformation("Getting migration statistics");
@@ -246,7 +341,7 @@ namespace BigCommerce.Migration.Functions.Functions
         /// <returns>Queue status response</returns>
         [Function("GetQueueStatus")]
         public async Task<HttpResponseData> GetQueueStatus(
-            [HttpTrigger(AuthorizationLevel.Function, "get", Route = "dashboard/queues")] HttpRequestData req,
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "dashboard/queues")] HttpRequestData req,
             CancellationToken cancellationToken)
         {
             _logger.LogInformation("Getting queue status and metrics");

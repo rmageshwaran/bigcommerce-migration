@@ -849,12 +849,25 @@ public class MigrationStorageService : IMigrationStorageService
             filter += $" and Status eq '{request.Status}'";
         }
 
-        if (!string.IsNullOrEmpty(request.SourceStoreId))
+        // Handle store filtering - if both source and destination are the same, use OR logic
+        if (!string.IsNullOrEmpty(request.SourceStoreId) && !string.IsNullOrEmpty(request.DestinationStoreId))
+        {
+            if (request.SourceStoreId == request.DestinationStoreId)
+            {
+                // Same store - find migrations where this store appears as either source or destination
+                filter += $" and (SourceStoreId eq '{request.SourceStoreId}' or DestinationStoreId eq '{request.DestinationStoreId}')";
+            }
+            else
+            {
+                // Different stores - find migrations with this specific source-destination pair
+                filter += $" and SourceStoreId eq '{request.SourceStoreId}' and DestinationStoreId eq '{request.DestinationStoreId}'";
+            }
+        }
+        else if (!string.IsNullOrEmpty(request.SourceStoreId))
         {
             filter += $" and SourceStoreId eq '{request.SourceStoreId}'";
         }
-
-        if (!string.IsNullOrEmpty(request.DestinationStoreId))
+        else if (!string.IsNullOrEmpty(request.DestinationStoreId))
         {
             filter += $" and DestinationStoreId eq '{request.DestinationStoreId}'";
         }

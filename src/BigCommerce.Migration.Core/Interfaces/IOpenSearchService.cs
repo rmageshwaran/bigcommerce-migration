@@ -1,3 +1,5 @@
+using BigCommerce.Migration.Core.Models;
+
 namespace BigCommerce.Migration.Core.Interfaces;
 
 /// <summary>
@@ -58,6 +60,30 @@ public interface IOpenSearchService
     /// <returns>List of matching log entries</returns>
     Task<IEnumerable<object>> SearchLogsAsync(
         string searchQuery,
+        DateTime fromDate,
+        DateTime toDate,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Optimized structured search with pagination and field selection
+    /// </summary>
+    /// <param name="queryRequest">Structured query request with filters and pagination</param>
+    /// <param name="cancellationToken">Cancellation token for async operations</param>
+    /// <returns>Tuple with matching log entries and total count</returns>
+    Task<(IEnumerable<object> Results, long TotalCount)> SearchLogsOptimizedAsync(
+        OpenSearchQuery queryRequest,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Batch search for multiple migration IDs with aggregations
+    /// </summary>
+    /// <param name="migrationIds">Collection of migration IDs to search for</param>
+    /// <param name="fromDate">Start date for search range</param>
+    /// <param name="toDate">End date for search range</param>
+    /// <param name="cancellationToken">Cancellation token for async operations</param>
+    /// <returns>Dictionary with aggregated results by migration ID</returns>
+    Task<Dictionary<string, object>> SearchLogsBatchAsync(
+        IEnumerable<string> migrationIds,
         DateTime fromDate,
         DateTime toDate,
         CancellationToken cancellationToken = default);

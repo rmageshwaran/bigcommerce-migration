@@ -44,7 +44,7 @@ public static class ServiceCollectionExtensions
             {
                 BaseUrl = configuration["BigCommerce:BaseUrl"] ?? "https://api.bigcommerce.com",
                 RequestTimeout = TimeSpan.FromSeconds(double.Parse(configuration["BigCommerce:RequestTimeoutSeconds"] ?? "30")),
-                MaxRetries = int.Parse(configuration["BigCommerce:MaxRetries"] ?? "3"),
+                MaxRetries = int.Parse(configuration["BigCommerce:MaxRetries"] ?? "0"), // ✅ Disable retry logic per user preference
                 RateLimitRequestsPerSecond = int.Parse(configuration["BigCommerce:RateLimitRequestsPerSecond"] ?? "12"),
                 EnableDebugLogging = bool.Parse(configuration["BigCommerce:EnableDebugLogging"] ?? "false"),
                 UserAgent = configuration["BigCommerce:UserAgent"] ?? "BigCommerce-Migration-System/1.0"
@@ -90,6 +90,13 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IRateLimitService, RateLimitService>();
         services.TryAddSingleton<IBatchSizeCalculator, BatchSizeCalculator>();
         services.TryAddSingleton<IProgressTracker, ProgressTracker>();
+        
+        // Register entity processing services (newly created during refactoring)
+        services.TryAddSingleton<IEntityFetchService, EntityFetchService>();
+        services.TryAddSingleton<IEntityTransformService, EntityTransformService>();
+        services.TryAddSingleton<IEntityCreateService, EntityCreateService>();
+        services.TryAddSingleton<IEntityMappingService, EntityMappingService>();
+        services.TryAddSingleton<IEntityErrorHandlingService, EntityErrorHandlingService>();
         
         return services;
     }

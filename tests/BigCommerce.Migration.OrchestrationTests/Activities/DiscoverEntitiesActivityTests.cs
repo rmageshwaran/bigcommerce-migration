@@ -39,9 +39,7 @@ public class DiscoverEntitiesActivityTests
             },
             EntityConfig = new EntityConfiguration
             {
-                EntityType = "products",
-                IncludeDeleted = false,
-                IncludeDrafts = false
+                EntityType = "products"
             }
         };
 
@@ -54,7 +52,7 @@ public class DiscoverEntitiesActivityTests
             },
             ApiVersion = BigCommerceApiVersion.V3,
             CurrentPage = 1,
-            PerPage = 50,
+            PerPage = 250,
             TotalItems = 2,
             TotalPages = 1,
             HasNextPage = false,
@@ -80,9 +78,7 @@ public class DiscoverEntitiesActivityTests
         Assert.NotNull(result);
         Assert.Equal("products", result.EntityType);
         Assert.Equal(2, result.TotalCount);
-        Assert.Equal(2, result.EntityIds.Count);
-        Assert.Contains("1", result.EntityIds);
-        Assert.Contains("2", result.EntityIds);
+        Assert.Empty(result.EntityIds); // ✅ Empty for efficient pagination strategy
         Assert.Empty(result.Errors);
         Assert.NotNull(result.PaginationMetadata);
         Assert.Equal(BigCommerceApiVersion.V3, result.ApiVersion);
@@ -90,6 +86,8 @@ public class DiscoverEntitiesActivityTests
         Assert.False(result.SkipDiscovery);
         Assert.True(result.PaginationMetadata.ContainsKey("MemoryOptimized"));
         Assert.True(result.PaginationMetadata.ContainsKey("CachingDisabled"));
+        Assert.True(result.PaginationMetadata.ContainsKey("UseDirectPagination"));
+        Assert.Equal("DirectPagination", result.PaginationMetadata["Strategy"]);
     }
 
     [Fact]
@@ -143,7 +141,7 @@ public class DiscoverEntitiesActivityTests
             },
             ApiVersion = BigCommerceApiVersion.V3,
             CurrentPage = 1,
-            PerPage = 100,
+            PerPage = 250,
             TotalItems = 2,
             TotalPages = 1,
             HasNextPage = false,
@@ -169,9 +167,7 @@ public class DiscoverEntitiesActivityTests
         Assert.NotNull(result);
         Assert.Equal("brands", result.EntityType);
         Assert.Equal(2, result.TotalCount);
-        Assert.Equal(2, result.EntityIds.Count);
-        Assert.Contains("1", result.EntityIds);
-        Assert.Contains("2", result.EntityIds);
+        Assert.Empty(result.EntityIds); // ✅ Empty for efficient pagination strategy
         Assert.Empty(result.Errors);
         Assert.NotNull(result.PaginationMetadata);
         Assert.Equal(BigCommerceApiVersion.V3, result.ApiVersion);
@@ -179,6 +175,8 @@ public class DiscoverEntitiesActivityTests
         Assert.False(result.SkipDiscovery);
         Assert.True(result.PaginationMetadata.ContainsKey("MemoryOptimized"));
         Assert.True(result.PaginationMetadata.ContainsKey("CachingDisabled"));
+        Assert.True(result.PaginationMetadata.ContainsKey("UseDirectPagination"));
+        Assert.Equal("DirectPagination", result.PaginationMetadata["Strategy"]);
     }
 
     [Fact]

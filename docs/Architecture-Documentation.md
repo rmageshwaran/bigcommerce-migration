@@ -2036,3 +2036,185 @@ The solution can handle migrations of any size, from thousands to millions of pr
 *Document Version: 1.0*  
 *Last Updated: January 2024*  
 *Author: Architecture Team* 
+
+## Migration History & Entity Breakdown Endpoints (Dashboard/Reporting)
+
+### 1. Get Latest Migration for a Store
+**Endpoint:** `GET /api/migrations/latest/{storeId}`
+
+**Description:**
+Returns the most recent migration for the given store (as source or destination) with progress and status. Use for the "Latest Migration" grid.
+
+**Example Request:**
+```
+GET /api/migrations/latest/in2msaitrc
+```
+
+**Example Response:**
+```json
+{
+  "storeId": "in2msaitrc",
+  "migrationId": "65726fbf-6bbe-451d-96a6-e5bb5956ffc0",
+  "startDateTime": "2025-07-03T14:24:00Z",
+  "endDateTime": "2025-07-03T14:25:00Z",
+  "status": "completed",
+  "percentageCompleted": 100.0,
+  "sourceStore": "tmdsef6c6o",
+  "destinationStore": "in2msaitrc",
+  "totalEntities": 108,
+  "processedEntities": 108,
+  "successfulEntities": 108,
+  "failedEntities": 0,
+  "message": "Latest migration retrieved successfully"
+}
+```
+
+---
+
+### 2. Get Migration History (with Filters)
+**Endpoint:** `GET /api/migrations/history`
+
+**Query Parameters:**
+- `startDate` (ISO 8601, optional)
+- `endDate` (ISO 8601, optional)
+- `status` (Queued, InProgress, Completed, Failed, Cancelled, optional)
+- `sourceStore` (optional)
+- `destinationStore` (optional)
+- `page` (default: 1)
+- `pageSize` (default: 50)
+
+**Description:**
+Returns a paginated list of migrations with entity-level counts and progress. Use for the "All Migrations" grid.
+
+**Example Request:**
+```
+GET /api/migrations/history?startDate=2025-07-01T00:00:00Z&endDate=2025-07-31T23:59:59Z&status=completed&page=1&pageSize=10
+```
+
+**Example Response:**
+```json
+{
+  "migrations": [
+    {
+      "migrationId": "65726fbf-6bbe-451d-96a6-e5bb5956ffc0",
+      "sourceStore": "tmdsef6c6o",
+      "destinationStore": "in2msaitrc",
+      "startedAt": "2025-07-03T14:24:00Z",
+      "completedAt": "2025-07-03T14:25:00Z",
+      "status": "completed",
+      "totalEntities": 108,
+      "processedEntities": 108,
+      "successfulEntities": 108,
+      "failedEntities": 0,
+      "percentageCompleted": 100.0,
+      "entities": ["brands", "categories"]
+    }
+  ],
+  "totalCount": 1,
+  "pageSize": 10,
+  "currentPage": 1,
+  "totalPages": 1,
+  "hasMorePages": false,
+  "message": "Migration history retrieved successfully"
+}
+```
+
+---
+
+### 3. Get Entity Breakdown for a Migration
+**Endpoint:** `GET /api/migrations/{migrationId}/entities`
+
+**Description:**
+Returns a grid of all entities for the migration, with source/destination counts, status, and error presence. Use for the "View More Details"/"View Details" grid.
+
+**Example Request:**
+```
+GET /api/migrations/65726fbf-6bbe-451d-96a6-e5bb5956ffc0/entities
+```
+
+**Example Response:**
+```json
+{
+  "migrationId": "65726fbf-6bbe-451d-96a6-e5bb5956ffc0",
+  "sourceStore": "tmdsef6c6o",
+  "destinationStore": "in2msaitrc",
+  "status": "completed",
+  "startTime": "2025-07-03T14:24:00Z",
+  "endTime": "2025-07-03T14:25:00Z",
+  "entities": [
+    {
+      "entity": "brands",
+      "source": "tmdsef6c6o (24)",
+      "destination": "in2msaitrc (24)",
+      "status": "completed",
+      "totalEntities": 24,
+      "successfulEntities": 24,
+      "failedEntities": 0,
+      "skippedEntities": 0,
+      "percentageCompleted": 100.0,
+      "hasErrors": false
+    },
+    {
+      "entity": "categories",
+      "source": "tmdsef6c6o (84)",
+      "destination": "in2msaitrc (84)",
+      "status": "completed",
+      "totalEntities": 84,
+      "successfulEntities": 84,
+      "failedEntities": 0,
+      "skippedEntities": 0,
+      "percentageCompleted": 100.0,
+      "hasErrors": false
+    }
+  ],
+  "message": "Entity breakdown retrieved successfully"
+}
+```
+
+---
+
+### 4. Get Errors for a Specific Entity in a Migration
+**Endpoint:** `GET /api/migrations/{migrationId}/entities/{entityType}/errors`
+
+**Query Parameters:**
+- `page` (default: 1)
+- `pageSize` (default: 50)
+
+**Description:**
+Returns all errors for the given entity type in the migration (with pagination). Use for the "View Errors" link in the entity grid.
+
+**Example Request:**
+```
+GET /api/migrations/65726fbf-6bbe-451d-96a6-e5bb5956ffc0/entities/brands/errors?page=1&pageSize=10
+```
+
+**Example Response:**
+```json
+{
+  "migrationId": "65726fbf-6bbe-451d-96a6-e5bb5956ffc0",
+  "entityType": "brands",
+  "errors": [
+    {
+      "timestamp": "2025-07-03T14:24:30Z",
+      "entityType": "brands",
+      "errorMessage": "API request failed with status 422: Duplicate brand name",
+      "sourceId": "123",
+      "destinationId": null,
+      "batchNumber": 1,
+      "stackTrace": null
+    }
+  ],
+  "totalCount": 1,
+  "pageSize": 10,
+  "currentPage": 1,
+  "totalPages": 1,
+  "message": "Entity errors retrieved successfully"
+}
+```
+
+---
+
+### Usage for Dashboard Grids
+- **Latest Migration Grid:** Use `/api/migrations/latest/{storeId}` for summary, `/api/migrations/{migrationId}/entities` for entity breakdown.
+- **All Migrations Grid:** Use `/api/migrations/history` for list, `/api/migrations/{migrationId}/entities` for details.
+- **Entity Error Details:** Use `/api/migrations/{migrationId}/entities/{entityType}/errors` for error drilldown. 

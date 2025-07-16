@@ -23,6 +23,7 @@ public class MigrationHttpFunctions
     private readonly IMigrationStorageService _migrationStorageService;
     private readonly IQueueService _queueService;
     private readonly IBlobService _blobService;
+    private readonly IProgressTracker _progressTracker;
 
     /// <summary>
     /// Initializes a new instance of the MigrationHttpFunctions class
@@ -41,7 +42,8 @@ public class MigrationHttpFunctions
         IOpenSearchService openSearchService,
         IMigrationStorageService migrationStorageService,
         IQueueService queueService,
-        IBlobService blobService)
+        IBlobService blobService,
+        IProgressTracker progressTracker)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _bigCommerceApiClient = bigCommerceApiClient ?? throw new ArgumentNullException(nameof(bigCommerceApiClient));
@@ -50,6 +52,7 @@ public class MigrationHttpFunctions
         _migrationStorageService = migrationStorageService ?? throw new ArgumentNullException(nameof(migrationStorageService));
         _queueService = queueService ?? throw new ArgumentNullException(nameof(queueService));
         _blobService = blobService ?? throw new ArgumentNullException(nameof(blobService));
+        _progressTracker = progressTracker ?? throw new ArgumentNullException(nameof(progressTracker));
     }
 
     /// <summary>
@@ -243,25 +246,133 @@ public class MigrationHttpFunctions
                 return await CreateErrorResponse(req, HttpStatusCode.NotFound, "Migration not found", migrationId);
             }
 
+            // Get detailed progress information
+            MigrationProgress? detailedProgress = null;
+            try
+            {
+                detailedProgress = await _progressTracker.GetProgressAsync(migrationId, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to get detailed progress for migration {MigrationId}, using basic status", migrationId);
+            }
+
+            // Determine the actual status based on both storage and progress data
+            var actualStatus = migrationEntry.Status.ToString().ToLower();
+            
+            // Check if progress tracker has meaningful data (not just default values after restart)
+            var hasMeaningfulProgress = detailedProgress != null && 
+                (detailedProgress.TotalEntities > 0 || 
+                 detailedProgress.ProcessedEntities > 0 || 
+                 detailedProgress.SuccessfulEntities > 0 || 
+                 detailedProgress.FailedEntities > 0 ||
+                 (detailedProgress.EntityProgress?.Any() == true));
+            
+            // If progress tracker has no meaningful data (after restart), reconstruct from storage
+            if (!hasMeaningfulProgress && migrationEntry.Status == Core.Models.MigrationStatus.Completed)
+            {
+                _logger.LogInformation("Migration {MigrationId} completed but progress tracker has no data (after restart). Reconstructing from storage.", migrationId);
+                
+                // For completed migrations, reconstruct progress data from storage
+                var reconstructedProgress = new MigrationProgress
+                {
+                    MigrationId = migrationId,
+                    Status = "completed",
+                    OverallProgressPercentage = 100,
+                    TotalEntities = migrationEntry.Entities?.Count() ?? 0,
+                    ProcessedEntities = migrationEntry.Entities?.Count() ?? 0,
+                    SuccessfulEntities = migrationEntry.Entities?.Count() ?? 0, // Assume all succeeded for completed migrations
+                    FailedEntities = 0, // Could be refined if we store failure counts
+                    StartTime = migrationEntry.CreatedAt,
+                    LastUpdated = migrationEntry.UpdatedAt,
+                    ElapsedTime = migrationEntry.UpdatedAt - migrationEntry.CreatedAt,
+                    EstimatedTimeRemaining = TimeSpan.Zero,
+                    EntitiesPerSecond = 0,
+                    ErrorRate = 0,
+                    CurrentPhase = "completed",
+                    CurrentEntity = "",
+                    EntityProgress = migrationEntry.Entities?.ToDictionary(
+                        entity => entity,
+                        entity => new EntityProgress
+                        {
+                            EntityType = entity,
+                            TotalCount = 1, // Could be refined if we store actual counts
+                            ProcessedCount = 1,
+                            SuccessCount = 1,
+                            FailureCount = 0,
+                            ProgressPercentage = 100,
+                            Status = "completed",
+                            StartTime = migrationEntry.CreatedAt,
+                            EndTime = migrationEntry.UpdatedAt,
+                            ProcessingTime = migrationEntry.UpdatedAt - migrationEntry.CreatedAt
+                        }) ?? new Dictionary<string, EntityProgress>()
+                };
+                
+                detailedProgress = reconstructedProgress;
+            }
+            else if (hasMeaningfulProgress && detailedProgress != null)
+            {
+                // If storage shows completed but progress shows in-progress, check if all entities are actually done
+                if (migrationEntry.Status == Core.Models.MigrationStatus.Completed && detailedProgress.Status == "inprogress")
+                {
+                    // Check if all entities are completed
+                    var allEntitiesCompleted = detailedProgress.EntityProgress?.All(ep => ep.Value.Status == "completed") ?? false;
+                    if (!allEntitiesCompleted)
+                    {
+                        _logger.LogWarning("Migration {MigrationId} shows completed in storage but entities are still in progress. Updating status.", migrationId);
+                        actualStatus = "inprogress";
+                    }
+                }
+                
+                // If progress shows completed but storage shows in-progress, update the status
+                if (migrationEntry.Status == Core.Models.MigrationStatus.InProgress && detailedProgress.Status == "completed")
+                {
+                    var allEntitiesCompleted = detailedProgress.EntityProgress?.All(ep => ep.Value.Status == "completed") ?? false;
+                    if (allEntitiesCompleted)
+                    {
+                        _logger.LogInformation("Migration {MigrationId} shows in-progress in storage but all entities are completed. Status should be completed.", migrationId);
+                        actualStatus = "completed";
+                    }
+                }
+            }
+
             var response = req.CreateResponse(HttpStatusCode.OK);
             response.Headers.Add("Content-Type", "application/json; charset=utf-8");
             
-            // TODO: Calculate actual progress from entity mappings in next phase
             var responseData = new
             {
                 migrationId = migrationEntry.Id,
-                status = migrationEntry.Status.ToString().ToLower(),
+                status = actualStatus,
                 message = "Migration status retrieved successfully",
                 entities = migrationEntry.Entities,
                 createdAt = migrationEntry.CreatedAt,
                 updatedAt = migrationEntry.UpdatedAt,
                 progress = new
                 {
-                    overallProgress = migrationEntry.Status == Core.Models.MigrationStatus.Completed ? 100 : 0,
-                    completedEntities = migrationEntry.Status == Core.Models.MigrationStatus.Completed ? migrationEntry.Entities.Count() : 0,
-                    totalEntities = migrationEntry.Entities.Count(),
-                    estimatedTimeRemaining = migrationEntry.Status == Core.Models.MigrationStatus.Completed ? "0 minutes" : "15-30 minutes"
-                }
+                    overallProgress = detailedProgress?.OverallProgressPercentage ?? (actualStatus == "completed" ? 100 : 0),
+                    completedEntities = detailedProgress?.SuccessfulEntities ?? 0,
+                    totalEntities = detailedProgress?.TotalEntities ?? 0,
+                    failedEntities = detailedProgress?.FailedEntities ?? 0,
+                    processedEntities = detailedProgress?.ProcessedEntities ?? 0,
+                    estimatedTimeRemaining = detailedProgress?.EstimatedTimeRemaining.TotalMinutes > 0 
+                        ? $"{Math.Ceiling(detailedProgress.EstimatedTimeRemaining.TotalMinutes)} minutes" 
+                        : (actualStatus == "completed" ? "0 minutes" : "15-30 minutes")
+                },
+                entityProgress = detailedProgress?.EntityProgress?.ToDictionary(
+                    kvp => kvp.Key,
+                    kvp => (object)new
+                    {
+                        entityType = kvp.Value.EntityType,
+                        totalCount = kvp.Value.TotalCount,
+                        processedCount = kvp.Value.ProcessedCount,
+                        successCount = kvp.Value.SuccessCount,
+                        failureCount = kvp.Value.FailureCount,
+                        progressPercentage = kvp.Value.ProgressPercentage,
+                        status = kvp.Value.Status,
+                        startTime = kvp.Value.StartTime,
+                        endTime = kvp.Value.EndTime,
+                        processingTime = kvp.Value.ProcessingTime
+                    }) ?? new Dictionary<string, object>()
             };
 
             await response.WriteStringAsync(JsonSerializer.Serialize(responseData, new JsonSerializerOptions
@@ -426,6 +537,744 @@ public class MigrationHttpFunctions
             _logger.LogError(ex, "Error cancelling migration. MigrationId: {MigrationId}", migrationId);
             return await CreateErrorResponse(req, HttpStatusCode.InternalServerError, "Internal server error occurred", migrationId);
         }
+    }
+
+    /// <summary>
+    /// Gets the latest migration for a specific store
+    /// </summary>
+    /// <param name="req">HTTP request</param>
+    /// <param name="storeId">Store ID</param>
+    /// <param name="context">Function execution context</param>
+    /// <returns>HTTP response with latest migration details</returns>
+    [Function("GetLatestMigrationForStore")]
+    [OpenApiOperation(operationId: "GetLatestMigrationForStore", tags: new[] { "Migrations" },
+        Summary = "Get latest migration for store",
+        Description = "Retrieves the most recent migration for a specific store with detailed progress information.")]
+    [OpenApiParameter(name: "storeId", In = ParameterLocation.Path, Required = true, Type = typeof(string),
+        Description = "Store identifier")]
+    [OpenApiResponseWithBody(statusCode: HttpStatusCode.OK, contentType: "application/json",
+        bodyType: typeof(object), Description = "Latest migration details")]
+    [OpenApiResponseWithBody(statusCode: HttpStatusCode.NotFound, contentType: "application/json",
+        bodyType: typeof(object), Description = "No migration found for store")]
+    public async Task<HttpResponseData> GetLatestMigrationForStore(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "migrations/latest/{storeId}")] HttpRequestData req,
+        string storeId,
+        FunctionContext context)
+    {
+        try
+        {
+            _logger.LogInformation("Getting latest migration for store. StoreId: {StoreId}", storeId);
+
+            // Query for migrations involving this store (as source or destination)
+            var queryRequest = new Core.Models.MigrationQueryRequest
+            {
+                SourceStoreId = storeId,
+                DestinationStoreId = storeId,
+                PageSize = 1,
+                Page = 1,
+                SortBy = "CreatedAt",
+                SortDirection = "desc"
+            };
+
+            var migrationListResult = await _migrationStorageService.GetMigrationsAsync(queryRequest);
+            
+            if (!migrationListResult.Migrations.Any())
+            {
+                return await CreateErrorResponse(req, HttpStatusCode.NotFound, "No migration found for store", storeId);
+            }
+
+            var latestMigration = migrationListResult.Migrations.First();
+            
+            // Get detailed progress information
+            var detailedProgress = await GetDetailedProgressAsync(latestMigration.Id);
+
+            var response = req.CreateResponse(HttpStatusCode.OK);
+            response.Headers.Add("Content-Type", "application/json; charset=utf-8");
+            
+            var responseData = new
+            {
+                storeId = storeId,
+                migrationId = latestMigration.Id,
+                startDateTime = latestMigration.CreatedAt,
+                endDateTime = latestMigration.UpdatedAt,
+                status = latestMigration.Status.ToString().ToLower(),
+                percentageCompleted = detailedProgress.OverallProgressPercentage,
+                sourceStore = latestMigration.SourceStoreId,
+                destinationStore = latestMigration.DestinationStoreId,
+                totalEntities = detailedProgress.TotalEntities,
+                processedEntities = detailedProgress.ProcessedEntities,
+                successfulEntities = detailedProgress.SuccessfulEntities,
+                failedEntities = detailedProgress.FailedEntities,
+                message = "Latest migration retrieved successfully"
+            };
+
+            await response.WriteStringAsync(JsonSerializer.Serialize(responseData, new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            }));
+
+            return response;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting latest migration for store {StoreId}", storeId);
+            return await CreateErrorResponse(req, HttpStatusCode.InternalServerError, "Internal server error occurred", storeId);
+        }
+    }
+
+    /// <summary>
+    /// Gets migration history with date range filtering
+    /// </summary>
+    /// <param name="req">HTTP request</param>
+    /// <param name="context">Function execution context</param>
+    /// <returns>HTTP response with migration history</returns>
+    [Function("GetMigrationHistory")]
+    [OpenApiOperation(operationId: "GetMigrationHistory", tags: new[] { "Migrations" },
+        Summary = "Get migration history",
+        Description = "Retrieves migration history with date range filtering and detailed entity counts.")]
+    [OpenApiResponseWithBody(statusCode: HttpStatusCode.OK, contentType: "application/json",
+        bodyType: typeof(object), Description = "Migration history")]
+    public async Task<HttpResponseData> GetMigrationHistory(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "migrations/history")] HttpRequestData req,
+        FunctionContext context)
+    {
+        try
+        {
+            _logger.LogInformation("Getting migration history");
+
+            // Parse query parameters for filtering
+            var query = req.Url.Query;
+            var startDate = ExtractQueryParameter(query, "startDate");
+            var endDate = ExtractQueryParameter(query, "endDate");
+            var statusFilter = ExtractQueryParameter(query, "status");
+            var sourceStore = ExtractQueryParameter(query, "sourceStore");
+            var destinationStore = ExtractQueryParameter(query, "destinationStore");
+            var pageSize = int.TryParse(ExtractQueryParameter(query, "pageSize"), out var size) ? size : 50;
+            var currentPage = int.TryParse(ExtractQueryParameter(query, "page"), out var page) ? page : 1;
+            
+            // Create migration query request
+            var queryRequest = new Core.Models.MigrationQueryRequest
+            {
+                Status = statusFilter,
+                SourceStoreId = sourceStore,
+                DestinationStoreId = destinationStore,
+                PageSize = pageSize,
+                Page = currentPage,
+                SortBy = "CreatedAt",
+                SortDirection = "desc"
+            };
+
+            // Add date range filtering if provided
+            if (!string.IsNullOrEmpty(startDate) && DateTime.TryParse(startDate, out var start))
+            {
+                queryRequest.CreatedAfter = start;
+            }
+            if (!string.IsNullOrEmpty(endDate) && DateTime.TryParse(endDate, out var end))
+            {
+                queryRequest.CreatedBefore = end;
+            }
+
+            // Retrieve migrations from Azure Storage
+            var migrationListResult = await _migrationStorageService.GetMigrationsAsync(queryRequest);
+            
+            // Get detailed progress for each migration
+            var migrationsWithDetails = new List<object>();
+            foreach (var migration in migrationListResult.Migrations)
+            {
+                var detailedProgress = await GetDetailedProgressAsync(migration.Id);
+                
+                migrationsWithDetails.Add(new
+                {
+                    migrationId = migration.Id,
+                    sourceStore = migration.SourceStoreId,
+                    destinationStore = migration.DestinationStoreId,
+                    startedAt = migration.CreatedAt,
+                    completedAt = migration.UpdatedAt,
+                    status = migration.Status.ToString().ToLower(),
+                    totalEntities = detailedProgress.TotalEntities,
+                    processedEntities = detailedProgress.ProcessedEntities,
+                    successfulEntities = detailedProgress.SuccessfulEntities,
+                    failedEntities = detailedProgress.FailedEntities,
+                    percentageCompleted = detailedProgress.OverallProgressPercentage,
+                    entities = migration.Entities
+                });
+            }
+            
+            var response = req.CreateResponse(HttpStatusCode.OK);
+            response.Headers.Add("Content-Type", "application/json; charset=utf-8");
+            
+            var responseData = new
+            {
+                migrations = migrationsWithDetails,
+                totalCount = migrationListResult.TotalCount,
+                pageSize = migrationListResult.PageSize,
+                currentPage = migrationListResult.CurrentPage,
+                totalPages = migrationListResult.TotalPages,
+                hasMorePages = migrationListResult.HasMorePages,
+                message = "Migration history retrieved successfully"
+            };
+
+            await response.WriteStringAsync(JsonSerializer.Serialize(responseData, new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            }));
+
+            return response;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting migration history");
+            return await CreateErrorResponse(req, HttpStatusCode.InternalServerError, "Internal server error occurred", string.Empty);
+        }
+    }
+
+    /// <summary>
+    /// Gets detailed entity breakdown for a specific migration
+    /// </summary>
+    /// <param name="req">HTTP request</param>
+    /// <param name="migrationId">Migration ID</param>
+    /// <param name="context">Function execution context</param>
+    /// <returns>HTTP response with entity breakdown</returns>
+    [Function("GetMigrationEntityBreakdown")]
+    [OpenApiOperation(operationId: "GetMigrationEntityBreakdown", tags: new[] { "Migrations" },
+        Summary = "Get migration entity breakdown",
+        Description = "Retrieves detailed entity-level breakdown for a specific migration.")]
+    [OpenApiParameter(name: "migrationId", In = ParameterLocation.Path, Required = true, Type = typeof(string),
+        Description = "Migration identifier")]
+    [OpenApiResponseWithBody(statusCode: HttpStatusCode.OK, contentType: "application/json",
+        bodyType: typeof(object), Description = "Entity breakdown")]
+    [OpenApiResponseWithBody(statusCode: HttpStatusCode.NotFound, contentType: "application/json",
+        bodyType: typeof(object), Description = "Migration not found")]
+    public async Task<HttpResponseData> GetMigrationEntityBreakdown(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "migrations/{migrationId}/entities")] HttpRequestData req,
+        string migrationId,
+        FunctionContext context)
+    {
+        try
+        {
+            _logger.LogInformation("Getting entity breakdown for migration. MigrationId: {MigrationId}", migrationId);
+
+            // Get migration details
+            var migrationEntry = await _migrationStorageService.GetMigrationAsync(migrationId);
+            if (migrationEntry == null)
+            {
+                return await CreateErrorResponse(req, HttpStatusCode.NotFound, "Migration not found", migrationId);
+            }
+
+            // Get detailed progress
+            var detailedProgress = await GetDetailedProgressAsync(migrationId);
+            
+            // Build entity breakdown
+            var entityBreakdown = new List<object>();
+            if (detailedProgress.EntityProgress != null)
+            {
+                foreach (var entityProgress in detailedProgress.EntityProgress)
+                {
+                    entityBreakdown.Add(new
+                    {
+                        entity = entityProgress.Key,
+                        source = $"{migrationEntry.SourceStoreId} ({entityProgress.Value.TotalCount})",
+                        destination = $"{migrationEntry.DestinationStoreId} ({entityProgress.Value.SuccessCount})",
+                        status = entityProgress.Value.Status,
+                        totalEntities = entityProgress.Value.TotalCount,
+                        successfulEntities = entityProgress.Value.SuccessCount,
+                        failedEntities = entityProgress.Value.FailureCount,
+                        skippedEntities = 0, // EntityProgress doesn't have SkippedEntities
+                        percentageCompleted = entityProgress.Value.ProgressPercentage,
+                        hasErrors = entityProgress.Value.FailureCount > 0
+                    });
+                }
+            }
+            
+            var response = req.CreateResponse(HttpStatusCode.OK);
+            response.Headers.Add("Content-Type", "application/json; charset=utf-8");
+            
+            var responseData = new
+            {
+                migrationId = migrationId,
+                sourceStore = migrationEntry.SourceStoreId,
+                destinationStore = migrationEntry.DestinationStoreId,
+                status = migrationEntry.Status.ToString().ToLower(),
+                startTime = migrationEntry.CreatedAt,
+                endTime = migrationEntry.UpdatedAt,
+                entities = entityBreakdown,
+                message = "Entity breakdown retrieved successfully"
+            };
+
+            await response.WriteStringAsync(JsonSerializer.Serialize(responseData, new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            }));
+
+            return response;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting entity breakdown for migration {MigrationId}", migrationId);
+            return await CreateErrorResponse(req, HttpStatusCode.InternalServerError, "Internal server error occurred", migrationId);
+        }
+    }
+
+    /// <summary>
+    /// Gets errors for a specific entity type in a migration
+    /// </summary>
+    /// <param name="req">HTTP request</param>
+    /// <param name="migrationId">Migration ID</param>
+    /// <param name="entityType">Entity type</param>
+    /// <param name="context">Function execution context</param>
+    /// <returns>HTTP response with entity errors</returns>
+    [Function("GetMigrationEntityErrors")]
+    [OpenApiOperation(operationId: "GetMigrationEntityErrors", tags: new[] { "Migrations" },
+        Summary = "Get migration entity errors",
+        Description = "Retrieves detailed error information for a specific entity type in a migration.")]
+    [OpenApiParameter(name: "migrationId", In = ParameterLocation.Path, Required = true, Type = typeof(string),
+        Description = "Migration identifier")]
+    [OpenApiParameter(name: "entityType", In = ParameterLocation.Path, Required = true, Type = typeof(string),
+        Description = "Entity type")]
+    [OpenApiResponseWithBody(statusCode: HttpStatusCode.OK, contentType: "application/json",
+        bodyType: typeof(object), Description = "Entity errors")]
+    [OpenApiResponseWithBody(statusCode: HttpStatusCode.NotFound, contentType: "application/json",
+        bodyType: typeof(object), Description = "Migration or entity not found")]
+    public async Task<HttpResponseData> GetMigrationEntityErrors(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "migrations/{migrationId}/entities/{entityType}/errors")] HttpRequestData req,
+        string migrationId,
+        string entityType,
+        FunctionContext context)
+    {
+        try
+        {
+            _logger.LogInformation("Getting entity errors for migration. MigrationId: {MigrationId}, EntityType: {EntityType}", migrationId, entityType);
+
+            // Parse query parameters for pagination
+            var query = req.Url.Query;
+            var pageSize = int.TryParse(ExtractQueryParameter(query, "pageSize"), out var size) ? size : 50;
+            var currentPage = int.TryParse(ExtractQueryParameter(query, "page"), out var page) ? page : 1;
+
+            // Get errors from logging service
+            var from = DateTime.UtcNow.AddDays(-30); // Default to last 30 days
+            var to = DateTime.UtcNow;
+            
+            // Query directly for Error category logs - they have all the detailed error information
+            var queryRequest = new Core.Models.OpenSearchQuery
+            {
+                FromDate = from,
+                ToDate = to,
+                MigrationId = migrationId,
+                SearchTerm = $"category:\"Error\" AND entityType:\"{entityType}\"", // Direct query for Error category logs
+                Size = pageSize,
+                From = (currentPage - 1) * pageSize,
+                SortField = "timestamp",
+                SortOrder = Core.Models.SortOrder.Descending,
+                IncludeFields = null // Include all fields
+            };
+
+            _logger.LogInformation("Searching for entity errors with optimized query: MigrationId={MigrationId}, EntityType={EntityType}", migrationId, entityType);
+            
+            var (searchResults, totalCount) = await _openSearchService.SearchLogsOptimizedAsync(queryRequest);
+            
+            // Convert OpenSearch results to proper format - handle JsonElement results
+            var errorLogs = new List<Dictionary<string, object>>();
+            foreach (var result in searchResults)
+            {
+                if (result is JsonElement jsonElement)
+                {
+                    errorLogs.Add(ParseJsonElementToDictionary(jsonElement));
+                }
+                else if (result is Dictionary<string, object> dict)
+                {
+                    errorLogs.Add(dict);
+                }
+                else
+                {
+                    _logger.LogWarning("Unexpected result type from OpenSearch: {Type}", result?.GetType()?.Name ?? "null");
+                }
+            }
+            
+            // If no results with structured query, try broader search without entity type filter
+            if (!errorLogs.Any())
+            {
+                _logger.LogInformation("No entity-specific errors found, trying broader search for migration {MigrationId}", migrationId);
+                
+                queryRequest.EntityType = null; // Remove entity type filter
+                queryRequest.SearchTerm = entityType; // Use as text search instead
+                
+                var (broadResults, broadTotalCount) = await _openSearchService.SearchLogsOptimizedAsync(queryRequest);
+                
+                // Convert broader search results
+                foreach (var result in broadResults)
+                {
+                    if (result is JsonElement jsonElement)
+                    {
+                        var dict = ParseJsonElementToDictionary(jsonElement);
+                        if (IsLogEntityRelated(dict, entityType))
+                        {
+                            errorLogs.Add(dict);
+                        }
+                    }
+                    else if (result is Dictionary<string, object> dict)
+                    {
+                        if (IsLogEntityRelated(dict, entityType))
+                        {
+                            errorLogs.Add(dict);
+                        }
+                    }
+                }
+                totalCount = errorLogs.Count;
+            }
+
+            _logger.LogInformation("Found {Count} error logs for entity type {EntityType} in migration {MigrationId}", errorLogs.Count, entityType, migrationId);
+            
+            // Debug: Log the structure of the first result to understand what we're getting
+            if (errorLogs.Any())
+            {
+                var firstLog = errorLogs.First();
+                _logger.LogInformation("First error log structure: {Keys}", string.Join(", ", firstLog.Keys));
+                _logger.LogInformation("First error log category: {Category}", firstLog.TryGetValue("category", out var cat) ? cat : "null");
+                _logger.LogInformation("First error log context: {Context}", firstLog.TryGetValue("context", out var ctx) ? ctx : "null");
+            }
+
+            // Process Error category logs only - they have all the detailed error information we need
+            var errors = new List<object>();
+            
+            foreach (var logDict in errorLogs)
+            {
+                // Only process Error category logs - skip everything else
+                if (!logDict.TryGetValue("category", out var category) || 
+                    category?.ToString() != "Error")
+                {
+                    continue;
+                }
+                
+                string errorMessage = "Unknown error";
+                string? stackTrace = null;
+                
+                // Extract error message from exception
+                if (logDict.TryGetValue("exception", out var exception))
+                {
+                    Dictionary<string, object>? exceptionDict = null;
+                    if (exception is JsonElement exceptionJsonElement)
+                    {
+                        exceptionDict = ParseJsonElementToDictionary(exceptionJsonElement);
+                    }
+                    else if (exception is Dictionary<string, object> exceptionDictDirect)
+                    {
+                        exceptionDict = exceptionDictDirect;
+                    }
+                    
+                    if (exceptionDict != null)
+                    {
+                        if (exceptionDict.TryGetValue("message", out var messageValue))
+                        {
+                            errorMessage = messageValue?.ToString() ?? "Unknown error";
+                        }
+                        if (exceptionDict.TryGetValue("stackTrace", out var stackValue))
+                        {
+                            stackTrace = stackValue?.ToString();
+                        }
+                    }
+                }
+                
+                // Extract additional error details from additionalData
+                if (logDict.TryGetValue("additionalData", out var errorAdditionalData))
+                {
+                    Dictionary<string, object>? errorAdditionalDataDict = null;
+                    if (errorAdditionalData is JsonElement additionalJsonElement)
+                    {
+                        errorAdditionalDataDict = ParseJsonElementToDictionary(additionalJsonElement);
+                    }
+                    else if (errorAdditionalData is Dictionary<string, object> additionalDictDirect)
+                    {
+                        errorAdditionalDataDict = additionalDictDirect;
+                    }
+                    
+                    // Use errorMessage from additionalData if available (more detailed)
+                    if (errorAdditionalDataDict?.TryGetValue("errorMessage", out var additionalErrorMessage) == true)
+                    {
+                        errorMessage = additionalErrorMessage?.ToString() ?? errorMessage;
+                    }
+                }
+                
+                var errorInfo = new
+                {
+                    timestamp = logDict.TryGetValue("timestamp", out var ts) ? ts : null,
+                    category = category,
+                    entityType = GetEntityTypeFromLog(logDict),
+                    errorMessage = errorMessage,
+                    context = logDict.TryGetValue("context", out var ctx) ? ctx : null,
+                    stackTrace = stackTrace,
+                    requestPayloadBlobUrl = GetRequestPayloadBlobUrl(logDict),
+                    responsePayloadBlobUrl = GetResponsePayloadBlobUrl(logDict),
+                    entityId = GetEntityIdFromLog(logDict),
+                    entityName = GetEntityNameFromLog(logDict),
+                    sourceStoreId = GetSourceStoreIdFromLog(logDict),
+                    destinationStoreId = GetDestinationStoreIdFromLog(logDict)
+                };
+                errors.Add(errorInfo);
+            }
+            
+            // Deduplicate by entity - keep only the most recent error for each entity
+            var deduplicatedErrors = errors
+                .GroupBy(e => {
+                    var errorDict = e as dynamic;
+                    return errorDict?.entityId?.ToString() ?? errorDict?.entityName?.ToString() ?? "unknown";
+                })
+                .Select(g => g.OrderByDescending(e => {
+                    var errorDict = e as dynamic;
+                    return DateTime.TryParse(errorDict?.timestamp?.ToString(), out DateTime ts) ? ts : DateTime.MinValue;
+                }).First())
+                .Cast<object>()
+                .ToList();
+            
+            // Apply pagination
+            var finalCount = deduplicatedErrors.Count;
+            errors = deduplicatedErrors.Skip((currentPage - 1) * pageSize).Take(pageSize).ToList();
+            
+            var response = req.CreateResponse(HttpStatusCode.OK);
+            response.Headers.Add("Content-Type", "application/json; charset=utf-8");
+            
+            var responseData = new
+            {
+                migrationId = migrationId,
+                entityType = entityType,
+                errors = errors,
+                pagination = new
+                {
+                    page = currentPage,
+                    pageSize = pageSize,
+                    totalItems = finalCount,
+                    totalPages = (int)Math.Ceiling((double)finalCount / pageSize)
+                }
+            };
+
+            await response.WriteStringAsync(JsonSerializer.Serialize(responseData, new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            }));
+
+            return response;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting entity errors for migration {MigrationId}, entity {EntityType}", migrationId, entityType);
+            return await CreateErrorResponse(req, HttpStatusCode.InternalServerError, "Internal server error occurred", $"{migrationId}/{entityType}");
+        }
+    }
+
+    /// <summary>
+    /// Determines if a log entry is related to a specific entity type
+    /// </summary>
+    /// <param name="logDict">Log dictionary</param>
+    /// <param name="entityType">Entity type to check for</param>
+    /// <returns>True if the log is related to the entity type</returns>
+    private bool IsLogEntityRelated(Dictionary<string, object> logDict, string entityType)
+    {
+        // Check entityType field at root level
+        var logEntityType = logDict.TryGetValue("entityType", out var et) ? et?.ToString() : null;
+        if (IsEntityTypeMatch(logEntityType, entityType))
+        {
+            return true;
+        }
+        
+        // Check additionalData.entityType field (where entity type is often stored)
+        if (logDict.TryGetValue("additionalData", out var additionalData) && 
+            additionalData is Dictionary<string, object> additionalDataDict)
+        {
+            var additionalEntityType = additionalDataDict.TryGetValue("entityType", out var aet) ? aet?.ToString() : null;
+            if (IsEntityTypeMatch(additionalEntityType, entityType))
+            {
+                return true;
+            }
+        }
+        
+        // Check context field
+        if (logDict.ContainsKey("context") && 
+            logDict["context"]?.ToString()?.Contains(entityType, StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return true;
+        }
+        
+        // Check if any field contains the entity type
+        foreach (var kvp in logDict)
+        {
+            if (kvp.Value?.ToString()?.Contains(entityType, StringComparison.OrdinalIgnoreCase) == true)
+            {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+    
+    /// <summary>
+    /// Checks if two entity types match (handles singular/plural variations)
+    /// </summary>
+    /// <param name="logEntityType">Entity type from log</param>
+    /// <param name="requestedEntityType">Requested entity type</param>
+    /// <returns>True if they match</returns>
+    private bool IsEntityTypeMatch(string? logEntityType, string requestedEntityType)
+    {
+        if (string.IsNullOrEmpty(logEntityType))
+            return false;
+            
+        return logEntityType.Equals(requestedEntityType, StringComparison.OrdinalIgnoreCase) ||
+               logEntityType.Equals($"{requestedEntityType}s", StringComparison.OrdinalIgnoreCase) ||
+               logEntityType.Equals(requestedEntityType.TrimEnd('s'), StringComparison.OrdinalIgnoreCase) ||
+               (requestedEntityType.Equals("category", StringComparison.OrdinalIgnoreCase) && logEntityType.Equals("categories", StringComparison.OrdinalIgnoreCase)) ||
+               (requestedEntityType.Equals("categories", StringComparison.OrdinalIgnoreCase) && logEntityType.Equals("category", StringComparison.OrdinalIgnoreCase));
+    }
+    
+    /// <summary>
+    /// Gets the entity type from a log dictionary
+    /// </summary>
+    /// <param name="logDict">Log dictionary</param>
+    /// <returns>Entity type or null if not found</returns>
+    private string? GetEntityTypeFromLog(Dictionary<string, object> logDict)
+    {
+        // Check entityType field at root level
+        var logEntityType = logDict.TryGetValue("entityType", out var et) ? et?.ToString() : null;
+        if (!string.IsNullOrEmpty(logEntityType))
+        {
+            return logEntityType;
+        }
+        
+        // Check additionalData.entityType field
+        if (logDict.TryGetValue("additionalData", out var additionalData) && 
+            additionalData is Dictionary<string, object> additionalDataDict)
+        {
+            var additionalEntityType = additionalDataDict.TryGetValue("entityType", out var aet) ? aet?.ToString() : null;
+            if (!string.IsNullOrEmpty(additionalEntityType))
+            {
+                return additionalEntityType;
+            }
+        }
+        
+        return null;
+    }
+    
+    /// <summary>
+    /// Gets the request payload blob URL from a log dictionary
+    /// </summary>
+    /// <param name="logDict">Log dictionary</param>
+    /// <returns>Request payload blob URL or null if not found</returns>
+    private string? GetRequestPayloadBlobUrl(Dictionary<string, object> logDict)
+    {
+        // Check additionalData.requestPayloadBlobUrl field
+        if (logDict.TryGetValue("additionalData", out var additionalData) && 
+            additionalData is Dictionary<string, object> additionalDataDict)
+        {
+            var blobUrl = additionalDataDict.TryGetValue("requestPayloadBlobUrl", out var rpb) ? rpb?.ToString() : null;
+            if (!string.IsNullOrEmpty(blobUrl))
+            {
+                return blobUrl;
+            }
+        }
+        
+        return null;
+    }
+    
+    /// <summary>
+    /// Gets the response payload blob URL from a log dictionary
+    /// </summary>
+    /// <param name="logDict">Log dictionary</param>
+    /// <returns>Response payload blob URL or null if not found</returns>
+    private string? GetResponsePayloadBlobUrl(Dictionary<string, object> logDict)
+    {
+        // Check additionalData.responsePayloadBlobUrl field
+        if (logDict.TryGetValue("additionalData", out var additionalData) && 
+            additionalData is Dictionary<string, object> additionalDataDict)
+        {
+            var blobUrl = additionalDataDict.TryGetValue("responsePayloadBlobUrl", out var rpb) ? rpb?.ToString() : null;
+            if (!string.IsNullOrEmpty(blobUrl))
+            {
+                return blobUrl;
+            }
+        }
+        
+        return null;
+    }
+    
+    /// <summary>
+    /// Gets the entity ID from a log dictionary
+    /// </summary>
+    /// <param name="logDict">Log dictionary</param>
+    /// <returns>Entity ID or null if not found</returns>
+    private string? GetEntityIdFromLog(Dictionary<string, object> logDict)
+    {
+        // Check additionalData.entityId field
+        if (logDict.TryGetValue("additionalData", out var additionalData) && 
+            additionalData is Dictionary<string, object> additionalDataDict)
+        {
+            var entityId = additionalDataDict.TryGetValue("entityId", out var eid) ? eid?.ToString() : null;
+            if (!string.IsNullOrEmpty(entityId))
+            {
+                return entityId;
+            }
+        }
+        
+        return null;
+    }
+    
+    /// <summary>
+    /// Gets the entity name from a log dictionary
+    /// </summary>
+    /// <param name="logDict">Log dictionary</param>
+    /// <returns>Entity name or null if not found</returns>
+    private string? GetEntityNameFromLog(Dictionary<string, object> logDict)
+    {
+        // Check additionalData.entityName field
+        if (logDict.TryGetValue("additionalData", out var additionalData) && 
+            additionalData is Dictionary<string, object> additionalDataDict)
+        {
+            var entityName = additionalDataDict.TryGetValue("entityName", out var en) ? en?.ToString() : null;
+            if (!string.IsNullOrEmpty(entityName))
+            {
+                return entityName;
+            }
+        }
+        
+        return null;
+    }
+    
+    /// <summary>
+    /// Gets the source store ID from a log dictionary
+    /// </summary>
+    /// <param name="logDict">Log dictionary</param>
+    /// <returns>Source store ID or null if not found</returns>
+    private string? GetSourceStoreIdFromLog(Dictionary<string, object> logDict)
+    {
+        // Check additionalData.sourceStoreId field
+        if (logDict.TryGetValue("additionalData", out var additionalData) && 
+            additionalData is Dictionary<string, object> additionalDataDict)
+        {
+            var sourceStoreId = additionalDataDict.TryGetValue("sourceStoreId", out var ssi) ? ssi?.ToString() : null;
+            if (!string.IsNullOrEmpty(sourceStoreId))
+            {
+                return sourceStoreId;
+            }
+        }
+        
+        return null;
+    }
+    
+    /// <summary>
+    /// Gets the destination store ID from a log dictionary
+    /// </summary>
+    /// <param name="logDict">Log dictionary</param>
+    /// <returns>Destination store ID or null if not found</returns>
+    private string? GetDestinationStoreIdFromLog(Dictionary<string, object> logDict)
+    {
+        // Check additionalData.destinationStoreId field
+        if (logDict.TryGetValue("additionalData", out var additionalData) && 
+            additionalData is Dictionary<string, object> additionalDataDict)
+        {
+            var destinationStoreId = additionalDataDict.TryGetValue("destinationStoreId", out var dsi) ? dsi?.ToString() : null;
+            if (!string.IsNullOrEmpty(destinationStoreId))
+            {
+                return destinationStoreId;
+            }
+        }
+        
+        return null;
     }
 
     /// <summary>
@@ -635,6 +1484,129 @@ public class MigrationHttpFunctions
         }));
 
         return response;
+    }
+
+    /// <summary>
+    /// Helper method to get detailed progress for a migration
+    /// </summary>
+    /// <param name="migrationId">Migration ID</param>
+    /// <returns>Detailed progress information</returns>
+    private async Task<MigrationProgress> GetDetailedProgressAsync(string migrationId)
+    {
+        try
+        {
+            // Try to get from progress tracker first
+            var progress = await _progressTracker.GetProgressAsync(migrationId, CancellationToken.None);
+            
+            // If progress tracker has meaningful data, use it
+            if (progress != null && progress.TotalEntities > 0)
+            {
+                return progress;
+            }
+            
+            // Otherwise, reconstruct from storage
+            var migrationEntry = await _migrationStorageService.GetMigrationAsync(migrationId);
+            if (migrationEntry != null)
+            {
+                return new MigrationProgress
+                {
+                    MigrationId = migrationId,
+                    Status = migrationEntry.Status.ToString().ToLower(),
+                    StartTime = migrationEntry.CreatedAt,
+                    LastUpdated = migrationEntry.UpdatedAt,
+                    OverallProgressPercentage = migrationEntry.ProgressPercentage,
+                    TotalEntities = migrationEntry.TotalEntities,
+                    ProcessedEntities = migrationEntry.ProcessedEntities,
+                    SuccessfulEntities = migrationEntry.ProcessedEntities - migrationEntry.FailedEntities,
+                    FailedEntities = migrationEntry.FailedEntities,
+                    CurrentPhase = migrationEntry.CurrentPhase ?? "completed",
+                    EntityProgress = new Dictionary<string, EntityProgress>()
+                };
+            }
+            
+            return new MigrationProgress
+            {
+                MigrationId = migrationId,
+                Status = "unknown",
+                StartTime = DateTime.UtcNow,
+                LastUpdated = DateTime.UtcNow,
+                OverallProgressPercentage = 0,
+                TotalEntities = 0,
+                ProcessedEntities = 0,
+                SuccessfulEntities = 0,
+                FailedEntities = 0,
+                CurrentPhase = "unknown",
+                EntityProgress = new Dictionary<string, EntityProgress>()
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to get detailed progress for migration {MigrationId}", migrationId);
+            return new MigrationProgress
+            {
+                MigrationId = migrationId,
+                Status = "unknown",
+                StartTime = DateTime.UtcNow,
+                LastUpdated = DateTime.UtcNow,
+                OverallProgressPercentage = 0,
+                TotalEntities = 0,
+                ProcessedEntities = 0,
+                SuccessfulEntities = 0,
+                FailedEntities = 0,
+                CurrentPhase = "unknown",
+                EntityProgress = new Dictionary<string, EntityProgress>()
+            };
+        }
+    }
+
+    /// <summary>
+    /// Parses a JsonElement into a Dictionary<string, object>
+    /// </summary>
+    /// <param name="jsonElement">The JsonElement to parse</param>
+    /// <returns>A Dictionary<string, object> representation of the JSON</returns>
+    private Dictionary<string, object> ParseJsonElementToDictionary(JsonElement jsonElement)
+    {
+        var dictionary = new Dictionary<string, object>();
+        foreach (var property in jsonElement.EnumerateObject())
+        {
+            var value = ParseJsonElement(property.Value);
+            if (value != null)
+            {
+                dictionary[property.Name] = value;
+            }
+        }
+        return dictionary;
+    }
+
+    /// <summary>
+    /// Recursively parses JsonElement values into a Dictionary<string, object>
+    /// </summary>
+    /// <param name="jsonElement">The JsonElement to parse</param>
+    /// <returns>A Dictionary<string, object> representation of the JSON</returns>
+    private object? ParseJsonElement(JsonElement jsonElement)
+    {
+        switch (jsonElement.ValueKind)
+        {
+            case JsonValueKind.Object:
+                return ParseJsonElementToDictionary(jsonElement);
+            case JsonValueKind.Array:
+                return jsonElement.EnumerateArray().Select(ParseJsonElement).ToList();
+            case JsonValueKind.String:
+                return jsonElement.GetString() ?? string.Empty;
+            case JsonValueKind.Number:
+                if (jsonElement.TryGetInt32(out int intValue)) return intValue;
+                if (jsonElement.TryGetInt64(out long longValue)) return longValue;
+                if (jsonElement.TryGetDouble(out double doubleValue)) return doubleValue;
+                return jsonElement.GetDecimal();
+            case JsonValueKind.True:
+                return true;
+            case JsonValueKind.False:
+                return false;
+            case JsonValueKind.Null:
+                return null;
+            default:
+                return jsonElement.ToString();
+        }
     }
 }
 

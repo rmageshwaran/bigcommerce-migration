@@ -109,6 +109,16 @@ public static class EntityMigrationDurableOrchestrator
 
             // Step 4: Start entity progress tracking
             await context.CallActivityAsync(
+                "StartEntityProcessingActivity",
+                new StartEntityProcessingRequest
+                {
+                    MigrationId = migrationId,
+                    EntityType = entityType,
+                    TotalCount = discoverResult.TotalCount
+                });
+
+            // Step 5: Update initial progress
+            await context.CallActivityAsync(
                 "UpdateEntityProgressActivity",
                 new UpdateEntityProgressRequest
                 {
@@ -121,7 +131,7 @@ public static class EntityMigrationDurableOrchestrator
                     FailedEntities = 0
                 });
 
-            // Step 5: Process entities in batches
+            // Step 6: Process entities in batches
             const int batchSize = 10; // Default batch size of 10
             var entityIds = discoverResult.EntityIds;
             var totalBatches = CalculateBatchCount(discoverResult.TotalCount, batchSize);

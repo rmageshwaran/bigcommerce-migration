@@ -65,6 +65,13 @@ public static class ServiceCollectionExtensions
     /// </summary>
     private static IServiceCollection AddConfiguration(this IServiceCollection services, IConfiguration configuration)
     {
+        // Add debugging for configuration loading
+        Console.WriteLine("=== Configuration Debugging ===");
+        Console.WriteLine($"OpenSearch:Endpoint = '{configuration["OpenSearch:Endpoint"]}'");
+        Console.WriteLine($"OpenSearch:Username = '{configuration["OpenSearch:Username"]}'");
+        Console.WriteLine($"OpenSearch:DefaultIndex = '{configuration["OpenSearch:DefaultIndex"]}'");
+        Console.WriteLine("=== End Configuration Debugging ===");
+
         // Validate critical configuration sections early
         ValidateConfigurationSections(configuration);
 
@@ -369,6 +376,13 @@ public static class ServiceCollectionExtensions
             var openSearchConfig = serviceProvider.GetRequiredService<OpenSearchConfiguration>();
             var logger = serviceProvider.GetRequiredService<ILogger<OpenSearchService>>();
 
+            // Add detailed logging for debugging
+            Console.WriteLine($"OpenSearch Configuration:");
+            Console.WriteLine($"  Endpoint: {openSearchConfig.Endpoint}");
+            Console.WriteLine($"  Username: {openSearchConfig.Username}");
+            Console.WriteLine($"  DefaultIndex: {openSearchConfig.DefaultIndex}");
+            Console.WriteLine($"  IsValidEndpoint(): {openSearchConfig.IsValidEndpoint()}");
+
             // Check if OpenSearch is disabled or has invalid configuration
             if (!openSearchConfig.IsValidEndpoint())
             {
@@ -377,6 +391,7 @@ public static class ServiceCollectionExtensions
                 return new NoOpOpenSearchService(noOpLogger);
             }
 
+            Console.WriteLine("OpenSearch endpoint is valid - using real OpenSearchService");
             return new OpenSearchService(openSearchConfig, logger);
         });
 
@@ -404,10 +419,16 @@ public static class ServiceCollectionExtensions
         {
             var logger = serviceProvider.GetRequiredService<ILogger<ProgressTracker>>();
             var signalRService = serviceProvider.GetService<IMigrationSignalRService>(); // Optional dependency
-            return signalRService != null
-                ? new ProgressTracker(logger, signalRService)
-                : new ProgressTracker(logger); // Use default null parameter
+            var storageService = serviceProvider.GetService<IMigrationStorageService>(); // Optional dependency
+            return new ProgressTracker(logger, signalRService, storageService);
         });
+
+        // Register entity processing services (newly created during refactoring)
+        services.TryAddSingleton<IEntityFetchService, EntityFetchService>();
+        services.TryAddSingleton<IEntityTransformService, EntityTransformService>();
+        services.TryAddSingleton<IEntityCreateService, EntityCreateService>();
+        services.TryAddSingleton<IEntityMappingService, EntityMappingService>();
+        services.TryAddSingleton<IEntityErrorHandlingService, EntityErrorHandlingService>();
 
         // Register API authentication services
         services.TryAddSingleton<IApiKeyService, ApiKeyService>();

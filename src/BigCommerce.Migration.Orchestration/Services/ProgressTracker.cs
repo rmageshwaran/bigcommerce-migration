@@ -13,18 +13,21 @@ public class ProgressTracker : IProgressTracker
     private readonly ILogger<ProgressTracker> _logger;
     private readonly ConcurrentDictionary<string, MigrationProgress> _progressCache;
     private readonly object _lock = new object();
-    private readonly IMigrationSignalRService _signalRService;
+    private readonly IMigrationSignalRService? _signalRService;
+    private readonly IMigrationStorageService? _storageService;
     
     /// <summary>
     /// Initializes a new instance of the ProgressTracker
     /// </summary>
     /// <param name="logger">Logger instance</param>
     /// <param name="signalRService">SignalR service for real-time updates</param>
-    public ProgressTracker(ILogger<ProgressTracker> logger, IMigrationSignalRService signalRService = null)
+    /// <param name="storageService">Storage service for persisting progress</param>
+    public ProgressTracker(ILogger<ProgressTracker> logger, IMigrationSignalRService? signalRService = null, IMigrationStorageService? storageService = null)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _progressCache = new ConcurrentDictionary<string, MigrationProgress>();
         _signalRService = signalRService; // Optional for backward compatibility
+        _storageService = storageService; // Optional for backward compatibility
     }
     
     /// <inheritdoc />
@@ -64,8 +67,19 @@ public class ProgressTracker : IProgressTracker
                 }
             }
             
-            // TODO: Implement progress storage in future phase when needed
-            // For now, use in-memory tracking which is sufficient for current requirements
+            // Persist progress to storage for durability across application restarts
+            if (_storageService != null)
+            {
+                try
+                {
+                    await PersistProgressToStorageAsync(migrationId, progress, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to persist progress to storage for migration {MigrationId}", migrationId);
+                    // Don't fail the progress update if storage fails
+                }
+            }
         }
         catch (OperationCanceledException)
         {
@@ -513,5 +527,42 @@ public class ProgressTracker : IProgressTracker
             EntitiesPerSecond = original.EntitiesPerSecond,
             ErrorRate = original.ErrorRate
         };
+    }
+    
+    /// <summary>
+    /// Persists progress to storage for durability across application restarts
+    /// </summary>
+    /// <param name="migrationId">Migration identifier</param>
+    /// <param name="progress">Progress to persist</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    private async Task PersistProgressToStorageAsync(string migrationId, MigrationProgress progress, CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Get the current migration entry from storage
+            var migrationEntry = await _storageService.GetMigrationAsync(migrationId);
+            if (migrationEntry != null)
+            {
+                // Update the migration entry with current progress
+                migrationEntry.ProgressPercentage = (int)Math.Round(progress.OverallProgressPercentage);
+                migrationEntry.CurrentPhase = progress.CurrentPhase;
+                migrationEntry.TotalEntities = progress.TotalEntities;
+                migrationEntry.ProcessedEntities = progress.ProcessedEntities;
+                migrationEntry.FailedEntities = progress.FailedEntities;
+                migrationEntry.UpdatedAt = DateTime.UtcNow;
+                
+                // Update the migration in storage
+                await _storageService.UpdateMigrationAsync(migrationEntry);
+                
+                _logger.LogDebug("Persisted progress to storage for migration {MigrationId}: {ProgressPercentage}% complete, " +
+                    "{ProcessedEntities}/{TotalEntities} entities processed", 
+                    migrationId, progress.OverallProgressPercentage, progress.ProcessedEntities, progress.TotalEntities);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to persist progress to storage for migration {MigrationId}", migrationId);
+            // Don't rethrow - progress persistence is not critical for migration execution
+        }
     }
 } 

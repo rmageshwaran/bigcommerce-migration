@@ -160,7 +160,7 @@ public class MigrationOrchestrator
                         CategoryTreeContext = request.CategoryTreeContext,
                         EntityConfig = CreateEntityConfiguration(entityType),
                         BatchSize = GetOptimalBatchSize(entityType),
-                        MaxRetries = 3
+                        MaxRetries = 0 // ✅ Disable retry logic per user preference to avoid API rate limit increases
                     };
 
                     // Call the entity migration sub-orchestrator

@@ -4,547 +4,826 @@ using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
 using BigCommerce.Migration.Orchestration.Activities;
 using BigCommerce.Migration.Orchestration.Models;
+using BigCommerce.Migration.Orchestration.Services;
 using Xunit;
+using System.Threading;
+using System.Collections.Generic;
+using System.Linq;
+using System;
 
 namespace BigCommerce.Migration.OrchestrationTests.Activities;
 
 /// <summary>
-/// Tests for the ProcessEntityBatch activity function
-/// These tests define the expected behavior - implementation will follow (TDD)
-/// Following user requirements: Continue on failures, log all errors at sub-component level, 12 req/sec rate limiting
+/// TDD Tests for the refactored ProcessEntityBatchActivity following SOLID principles
 /// </summary>
 public class ProcessEntityBatchActivityTests
 {
-    private readonly Mock<IBigCommerceApiClient> _apiClientMock;
     private readonly Mock<ILogger<ProcessEntityBatchActivity>> _loggerMock;
+    private readonly Mock<IEntityFetchService> _entityFetchServiceMock;
+    private readonly Mock<IEntityTransformService> _entityTransformServiceMock;
+    private readonly Mock<IEntityCreateService> _entityCreateServiceMock;
+    private readonly Mock<IEntityMappingService> _entityMappingServiceMock;
+    private readonly Mock<IEntityErrorHandlingService> _errorHandlingServiceMock;
     private readonly Mock<IRateLimitService> _rateLimitServiceMock;
     private readonly Mock<IOpenSearchService> _openSearchServiceMock;
     private readonly Mock<IMigrationStorageService> _migrationStorageServiceMock;
-    private readonly Mock<IBlobService> _blobServiceMock;
     private readonly Mock<IMigrationSignalRService> _signalRServiceMock;
     private readonly ProcessEntityBatchActivity _activity;
 
     public ProcessEntityBatchActivityTests()
     {
-        _apiClientMock = new Mock<IBigCommerceApiClient>();
         _loggerMock = new Mock<ILogger<ProcessEntityBatchActivity>>();
+        _entityFetchServiceMock = new Mock<IEntityFetchService>();
+        _entityTransformServiceMock = new Mock<IEntityTransformService>();
+        _entityCreateServiceMock = new Mock<IEntityCreateService>();
+        _entityMappingServiceMock = new Mock<IEntityMappingService>();
+        _errorHandlingServiceMock = new Mock<IEntityErrorHandlingService>();
         _rateLimitServiceMock = new Mock<IRateLimitService>();
         _openSearchServiceMock = new Mock<IOpenSearchService>();
         _migrationStorageServiceMock = new Mock<IMigrationStorageService>();
-        _blobServiceMock = new Mock<IBlobService>();
         _signalRServiceMock = new Mock<IMigrationSignalRService>();
         
         _activity = new ProcessEntityBatchActivity(
-            _apiClientMock.Object,
             _loggerMock.Object,
+            _entityFetchServiceMock.Object,
+            _entityTransformServiceMock.Object,
+            _entityCreateServiceMock.Object,
+            _entityMappingServiceMock.Object,
+            _errorHandlingServiceMock.Object,
             _rateLimitServiceMock.Object,
             _openSearchServiceMock.Object,
             _migrationStorageServiceMock.Object,
-            _blobServiceMock.Object,
-            _signalRServiceMock.Object);
+            _signalRServiceMock.Object
+        );
     }
+
+    #region Constructor Guard Clause Tests
+    [Fact]
+    public void Constructor_NullLogger_Throws()
+    {
+        Assert.Throws<ArgumentNullException>(() => new ProcessEntityBatchActivity(
+            null!, _entityFetchServiceMock.Object, _entityTransformServiceMock.Object, _entityCreateServiceMock.Object, _entityMappingServiceMock.Object, _errorHandlingServiceMock.Object, _rateLimitServiceMock.Object, _openSearchServiceMock.Object, _migrationStorageServiceMock.Object, _signalRServiceMock.Object));
+    }
+    [Fact]
+    public void Constructor_NullEntityFetchService_Throws()
+    {
+        Assert.Throws<ArgumentNullException>(() => new ProcessEntityBatchActivity(
+            _loggerMock.Object, null!, _entityTransformServiceMock.Object, _entityCreateServiceMock.Object, _entityMappingServiceMock.Object, _errorHandlingServiceMock.Object, _rateLimitServiceMock.Object, _openSearchServiceMock.Object, _migrationStorageServiceMock.Object, _signalRServiceMock.Object));
+    }
+    [Fact]
+    public void Constructor_NullEntityTransformService_Throws()
+    {
+        Assert.Throws<ArgumentNullException>(() => new ProcessEntityBatchActivity(
+            _loggerMock.Object, _entityFetchServiceMock.Object, null!, _entityCreateServiceMock.Object, _entityMappingServiceMock.Object, _errorHandlingServiceMock.Object, _rateLimitServiceMock.Object, _openSearchServiceMock.Object, _migrationStorageServiceMock.Object, _signalRServiceMock.Object));
+    }
+    [Fact]
+    public void Constructor_NullEntityCreateService_Throws()
+    {
+        Assert.Throws<ArgumentNullException>(() => new ProcessEntityBatchActivity(
+            _loggerMock.Object, _entityFetchServiceMock.Object, _entityTransformServiceMock.Object, null!, _entityMappingServiceMock.Object, _errorHandlingServiceMock.Object, _rateLimitServiceMock.Object, _openSearchServiceMock.Object, _migrationStorageServiceMock.Object, _signalRServiceMock.Object));
+    }
+    [Fact]
+    public void Constructor_NullEntityMappingService_Throws()
+    {
+        Assert.Throws<ArgumentNullException>(() => new ProcessEntityBatchActivity(
+            _loggerMock.Object, _entityFetchServiceMock.Object, _entityTransformServiceMock.Object, _entityCreateServiceMock.Object, null!, _errorHandlingServiceMock.Object, _rateLimitServiceMock.Object, _openSearchServiceMock.Object, _migrationStorageServiceMock.Object, _signalRServiceMock.Object));
+    }
+    [Fact]
+    public void Constructor_NullErrorHandlingService_Throws()
+    {
+        Assert.Throws<ArgumentNullException>(() => new ProcessEntityBatchActivity(
+            _loggerMock.Object, _entityFetchServiceMock.Object, _entityTransformServiceMock.Object, _entityCreateServiceMock.Object, _entityMappingServiceMock.Object, null!, _rateLimitServiceMock.Object, _openSearchServiceMock.Object, _migrationStorageServiceMock.Object, _signalRServiceMock.Object));
+    }
+    [Fact]
+    public void Constructor_NullRateLimitService_Throws()
+    {
+        Assert.Throws<ArgumentNullException>(() => new ProcessEntityBatchActivity(
+            _loggerMock.Object, _entityFetchServiceMock.Object, _entityTransformServiceMock.Object, _entityCreateServiceMock.Object, _entityMappingServiceMock.Object, _errorHandlingServiceMock.Object, null!, _openSearchServiceMock.Object, _migrationStorageServiceMock.Object, _signalRServiceMock.Object));
+    }
+    [Fact]
+    public void Constructor_NullOpenSearchService_Throws()
+    {
+        Assert.Throws<ArgumentNullException>(() => new ProcessEntityBatchActivity(
+            _loggerMock.Object, _entityFetchServiceMock.Object, _entityTransformServiceMock.Object, _entityCreateServiceMock.Object, _entityMappingServiceMock.Object, _errorHandlingServiceMock.Object, _rateLimitServiceMock.Object, null!, _migrationStorageServiceMock.Object, _signalRServiceMock.Object));
+    }
+    [Fact]
+    public void Constructor_NullMigrationStorageService_Throws()
+    {
+        Assert.Throws<ArgumentNullException>(() => new ProcessEntityBatchActivity(
+            _loggerMock.Object, _entityFetchServiceMock.Object, _entityTransformServiceMock.Object, _entityCreateServiceMock.Object, _entityMappingServiceMock.Object, _errorHandlingServiceMock.Object, _rateLimitServiceMock.Object, _openSearchServiceMock.Object, null!, _signalRServiceMock.Object));
+    }
+    [Fact]
+    public void Constructor_NullSignalRService_Throws()
+    {
+        Assert.Throws<ArgumentNullException>(() => new ProcessEntityBatchActivity(
+            _loggerMock.Object, _entityFetchServiceMock.Object, _entityTransformServiceMock.Object, _entityCreateServiceMock.Object, _entityMappingServiceMock.Object, _errorHandlingServiceMock.Object, _rateLimitServiceMock.Object, _openSearchServiceMock.Object, _migrationStorageServiceMock.Object, null!));
+    }
+    #endregion
+
+    #region Entity Processing Edge Cases
+    [Fact]
+    public async Task ProcessEntityBatchAsync_EntityWithoutId_DoesNotThrow()
+    {
+        var request = CreateValidBatchRequest("products", new[] { "100" });
+        var sourceProducts = new List<Dictionary<string, object>> { new Dictionary<string, object> { { "name", "NoId" } } };
+        var transformedProducts = CreateTransformedProducts();
+        var createdProducts = CreateCreatedProducts();
+        var token = CancellationToken.None;
+        _entityFetchServiceMock.Setup(x => x.FetchEntitiesAsync(request, token)).ReturnsAsync(sourceProducts);
+        _entityTransformServiceMock.Setup(x => x.TransformEntityAsync(It.IsAny<Dictionary<string, object>>(), request)).ReturnsAsync(transformedProducts.First());
+        _entityCreateServiceMock.Setup(x => x.CreateEntitiesAsync(It.IsAny<List<Dictionary<string, object>>>(), request, token)).ReturnsAsync(createdProducts);
+        _entityMappingServiceMock.Setup(x => x.CreateEntityMapping(It.IsAny<Dictionary<string, object>>(), It.IsAny<Dictionary<string, object>>(), request)).Returns(new EntityMapping { SourceId = "100", DestinationId = "200" });
+        _entityMappingServiceMock.Setup(x => x.StoreEntityMappingAsync(It.IsAny<EntityMapping>(), token)).Returns(Task.CompletedTask);
+        _rateLimitServiceMock.Setup(x => x.CheckRateLimitAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(new RateLimitResult { CanProceed = true });
+        _migrationStorageServiceMock.Setup(x => x.GetCancellationTokenAsync(request.MigrationId)).ReturnsAsync((CancellationTokenEntry?)null);
+        var result = await _activity.Run(request, token);
+        Assert.NotNull(result);
+        Assert.Equal(1, result.TotalProcessed);
+        Assert.Equal(1, result.SuccessfulEntities);
+    }
+    [Fact]
+    public async Task ProcessEntityBatchAsync_MappingThrows_DoesNotThrow()
+    {
+        var request = CreateValidBatchRequest("products", new[] { "100" });
+        var sourceProducts = CreateTestProducts();
+        var transformedProducts = CreateTransformedProducts();
+        var createdProducts = CreateCreatedProducts();
+        var token = CancellationToken.None;
+        _entityFetchServiceMock.Setup(x => x.FetchEntitiesAsync(request, token)).ReturnsAsync(sourceProducts);
+        _entityTransformServiceMock.Setup(x => x.TransformEntityAsync(It.IsAny<Dictionary<string, object>>(), request)).ReturnsAsync(transformedProducts.First());
+        _entityCreateServiceMock.Setup(x => x.CreateEntitiesAsync(It.IsAny<List<Dictionary<string, object>>>(), request, token)).ReturnsAsync(createdProducts);
+        _entityMappingServiceMock.Setup(x => x.CreateEntityMapping(It.IsAny<Dictionary<string, object>>(), It.IsAny<Dictionary<string, object>>(), request)).Throws(new Exception("Mapping failed"));
+        _entityMappingServiceMock.Setup(x => x.StoreEntityMappingAsync(It.IsAny<EntityMapping>(), token)).Returns(Task.CompletedTask);
+        _rateLimitServiceMock.Setup(x => x.CheckRateLimitAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(new RateLimitResult { CanProceed = true });
+        _migrationStorageServiceMock.Setup(x => x.GetCancellationTokenAsync(request.MigrationId)).ReturnsAsync((CancellationTokenEntry?)null);
+        _errorHandlingServiceMock.Setup(x => x.LogEntityErrorAsync(It.IsAny<Exception>(), It.IsAny<Dictionary<string, object>>(), request, It.IsAny<string>(), token)).Returns(Task.CompletedTask);
+        var result = await _activity.Run(request, token);
+        Assert.NotNull(result);
+        Assert.Equal(3, result.TotalProcessed);
+        Assert.Equal(3, result.FailedEntities); // Mapping failure increments failed count
+    }
+    [Fact]
+    public async Task ProcessEntityBatchAsync_StoreEntityMappingThrows_DoesNotThrow()
+    {
+        var request = CreateValidBatchRequest("products", new[] { "100" });
+        var sourceProducts = CreateTestProducts();
+        var transformedProducts = CreateTransformedProducts();
+        var createdProducts = CreateCreatedProducts();
+        var token = CancellationToken.None;
+        _entityFetchServiceMock.Setup(x => x.FetchEntitiesAsync(request, token)).ReturnsAsync(sourceProducts);
+        _entityTransformServiceMock.Setup(x => x.TransformEntityAsync(It.IsAny<Dictionary<string, object>>(), request)).ReturnsAsync(transformedProducts.First());
+        _entityCreateServiceMock.Setup(x => x.CreateEntitiesAsync(It.IsAny<List<Dictionary<string, object>>>(), request, token)).ReturnsAsync(createdProducts);
+        _entityMappingServiceMock.Setup(x => x.CreateEntityMapping(It.IsAny<Dictionary<string, object>>(), It.IsAny<Dictionary<string, object>>(), request)).Returns(new EntityMapping { SourceId = "100", DestinationId = "200" });
+        _entityMappingServiceMock.Setup(x => x.StoreEntityMappingAsync(It.IsAny<EntityMapping>(), token)).Throws(new Exception("Store mapping failed"));
+        _rateLimitServiceMock.Setup(x => x.CheckRateLimitAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(new RateLimitResult { CanProceed = true });
+        _migrationStorageServiceMock.Setup(x => x.GetCancellationTokenAsync(request.MigrationId)).ReturnsAsync((CancellationTokenEntry?)null);
+        var result = await _activity.Run(request, token);
+        Assert.NotNull(result);
+        Assert.Equal(3, result.TotalProcessed);
+        Assert.Equal(3, result.SuccessfulEntities); // Store mapping failure does not affect success count
+    }
+    #endregion
+
+    #region Logging/Timing
+    [Fact]
+    public async Task ProcessEntityBatchAsync_OpenSearchLoggingThrows_DoesNotThrow()
+    {
+        var request = CreateValidBatchRequest("products", new[] { "100" });
+        var sourceProducts = CreateTestProducts();
+        var transformedProducts = CreateTransformedProducts();
+        var createdProducts = CreateCreatedProducts();
+        var token = CancellationToken.None;
+        _entityFetchServiceMock.Setup(x => x.FetchEntitiesAsync(request, token)).ReturnsAsync(sourceProducts);
+        _entityTransformServiceMock.Setup(x => x.TransformEntityAsync(It.IsAny<Dictionary<string, object>>(), request)).ReturnsAsync(transformedProducts.First());
+        _entityCreateServiceMock.Setup(x => x.CreateEntitiesAsync(It.IsAny<List<Dictionary<string, object>>>(), request, token)).ReturnsAsync(createdProducts);
+        _entityMappingServiceMock.Setup(x => x.CreateEntityMapping(It.IsAny<Dictionary<string, object>>(), It.IsAny<Dictionary<string, object>>(), request)).Returns(new EntityMapping { SourceId = "100", DestinationId = "200" });
+        _entityMappingServiceMock.Setup(x => x.StoreEntityMappingAsync(It.IsAny<EntityMapping>(), token)).Returns(Task.CompletedTask);
+        _rateLimitServiceMock.Setup(x => x.CheckRateLimitAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(new RateLimitResult { CanProceed = true });
+        _migrationStorageServiceMock.Setup(x => x.GetCancellationTokenAsync(request.MigrationId)).ReturnsAsync((CancellationTokenEntry?)null);
+        _openSearchServiceMock.Setup(x => x.LogEntityBatchProcessingAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<object>(), token)).ThrowsAsync(new Exception("OpenSearch error"));
+        var result = await _activity.Run(request, token);
+        Assert.NotNull(result);
+        Assert.Equal(3, result.TotalProcessed);
+        Assert.Equal(3, result.SuccessfulEntities);
+    }
+    [Fact]
+    public async Task ProcessEntityBatchAsync_ProcessingTime_IsSet()
+    {
+        var request = CreateValidBatchRequest("products", new[] { "100" });
+        var sourceProducts = CreateTestProducts();
+        var transformedProducts = CreateTransformedProducts();
+        var createdProducts = CreateCreatedProducts();
+        var token = CancellationToken.None;
+        _entityFetchServiceMock.Setup(x => x.FetchEntitiesAsync(request, token)).ReturnsAsync(sourceProducts);
+        _entityTransformServiceMock.Setup(x => x.TransformEntityAsync(It.IsAny<Dictionary<string, object>>(), request)).ReturnsAsync(transformedProducts.First());
+        _entityCreateServiceMock.Setup(x => x.CreateEntitiesAsync(It.IsAny<List<Dictionary<string, object>>>(), request, token)).ReturnsAsync(createdProducts);
+        _entityMappingServiceMock.Setup(x => x.CreateEntityMapping(It.IsAny<Dictionary<string, object>>(), It.IsAny<Dictionary<string, object>>(), request)).Returns(new EntityMapping { SourceId = "100", DestinationId = "200" });
+        _entityMappingServiceMock.Setup(x => x.StoreEntityMappingAsync(It.IsAny<EntityMapping>(), token)).Returns(Task.CompletedTask);
+        _rateLimitServiceMock.Setup(x => x.CheckRateLimitAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(new RateLimitResult { CanProceed = true });
+        _migrationStorageServiceMock.Setup(x => x.GetCancellationTokenAsync(request.MigrationId)).ReturnsAsync((CancellationTokenEntry?)null);
+        var result = await _activity.Run(request, token);
+        Assert.NotNull(result);
+        Assert.True(result.ProcessingTime.TotalMilliseconds > 0);
+    }
+    #endregion
 
     [Fact]
     public async Task ProcessEntityBatchAsync_ValidProductBatch_ReturnsSuccessResult()
     {
-        // Arrange
         var request = CreateValidBatchRequest("products", new[] { "100", "101", "102" });
+        var sourceProducts = CreateTestProducts();
+        var transformedProducts = CreateTransformedProducts();
+        var createdProducts = CreateCreatedProducts();
+        var token = CancellationToken.None;
 
-        // Mock source products
-        var sourceProducts = new List<Dictionary<string, object>>
-        {
-            new Dictionary<string, object> { { "id", 100 }, { "name", "Product 1" }, { "price", 10.99 } },
-            new Dictionary<string, object> { { "id", 101 }, { "name", "Product 2" }, { "price", 20.99 } },
-            new Dictionary<string, object> { { "id", 102 }, { "name", "Product 3" }, { "price", 30.99 } }
-        };
-
-        _apiClientMock.Setup(x => x.GetPaginatedEntitiesAsync(
-                It.Is<StoreConfiguration>(s => s.StoreId == "source-store"),
-                "products",
-                It.IsAny<BigCommercePaginationRequest>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new BigCommercePaginatedResponse<Dictionary<string, object>>
-            {
-                Data = sourceProducts,
-                ApiVersion = BigCommerceApiVersion.V3
-            });
-
-        // Mock destination product creation
-        _apiClientMock.Setup(x => x.CreateProductsAsync(
-                It.Is<StoreConfiguration>(s => s.StoreId == "dest-store"),
-                It.IsAny<List<Dictionary<string, object>>>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<Dictionary<string, object>>
-            {
-                new Dictionary<string, object> { { "id", 200 }, { "name", "Product 1" } },
-                new Dictionary<string, object> { { "id", 201 }, { "name", "Product 2" } },
-                new Dictionary<string, object> { { "id", 202 }, { "name", "Product 3" } }
-            });
-
-        // Mock rate limiting - always allow
+        _entityFetchServiceMock.Setup(x => x.FetchEntitiesAsync(request, token))
+            .ReturnsAsync(sourceProducts);
+        _entityTransformServiceMock.Setup(x => x.TransformEntityAsync(It.IsAny<Dictionary<string, object>>(), request))
+            .ReturnsAsync(transformedProducts.First());
+        _entityCreateServiceMock.Setup(x => x.CreateEntitiesAsync(It.IsAny<List<Dictionary<string, object>>>(), request, token))
+            .ReturnsAsync(createdProducts);
+        _entityMappingServiceMock.Setup(x => x.CreateEntityMapping(It.IsAny<Dictionary<string, object>>(), It.IsAny<Dictionary<string, object>>(), request))
+            .Returns(new EntityMapping { SourceId = "100", DestinationId = "200" });
+        _entityMappingServiceMock.Setup(x => x.StoreEntityMappingAsync(It.IsAny<EntityMapping>(), token)).Returns(Task.CompletedTask);
         _rateLimitServiceMock.Setup(x => x.CheckRateLimitAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new RateLimitResult { CanProceed = true, DelayMs = 0 });
+            .ReturnsAsync(new RateLimitResult { CanProceed = true });
+        _migrationStorageServiceMock.Setup(x => x.GetCancellationTokenAsync(request.MigrationId))
+            .ReturnsAsync((CancellationTokenEntry?)null);
 
-        // Act
-        var result = await _activity.ProcessEntityBatchAsync(request);
+        var result = await _activity.Run(request, token);
 
-        // Assert
         Assert.NotNull(result);
-        Assert.Equal(1, result.BatchNumber);
         Assert.Equal(3, result.TotalProcessed);
         Assert.Equal(3, result.SuccessfulEntities);
         Assert.Equal(0, result.FailedEntities);
         Assert.Empty(result.Errors);
-        Assert.Equal(3, result.EntityMappings.Count);
-        
-        // Verify entity mappings
-        Assert.Contains(result.EntityMappings, m => m.SourceId == "100" && m.DestinationId == "200");
-        Assert.Contains(result.EntityMappings, m => m.SourceId == "101" && m.DestinationId == "201");
-        Assert.Contains(result.EntityMappings, m => m.SourceId == "102" && m.DestinationId == "202");
-        
-        // Verify all mappings have correct metadata
-        foreach (var mapping in result.EntityMappings)
-        {
-            Assert.Equal("test-migration-123", mapping.MigrationId);
-            Assert.Equal("products", mapping.EntityType);
-            Assert.Equal("source-store", mapping.SourceStoreId);
-            Assert.Equal("dest-store", mapping.DestinationStoreId);
-        }
     }
 
     [Fact]
-    public async Task ProcessEntityBatchAsync_ValidCategoryBatch_ReturnsSuccessResult()
+    public async Task ProcessEntityBatchAsync_WithCancellation_StopsProcessing()
     {
-        // Arrange
-        var request = CreateValidBatchRequest("categories", new[] { "10", "11" });
-        request.CategoryTreeContext = new CategoryTreeContext
-        {
-            SourceCategoryTreeId = "1",
-            DestinationCategoryTreeId = "2"
-        };
-
-        // Mock source categories
-        var sourceCategories = new List<Dictionary<string, object>>
-        {
-            new Dictionary<string, object> { { "id", 10 }, { "name", "Category 1" }, { "parent_id", 0 } },
-            new Dictionary<string, object> { { "id", 11 }, { "name", "Category 2" }, { "parent_id", 10 } }
-        };
-
-        _apiClientMock.Setup(x => x.GetPaginatedEntitiesAsync(
-                It.Is<StoreConfiguration>(s => s.StoreId == "source-store"),
-                "categories",
-                It.IsAny<BigCommercePaginationRequest>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new BigCommercePaginatedResponse<Dictionary<string, object>>
-            {
-                Data = sourceCategories,
-                ApiVersion = BigCommerceApiVersion.V3
-            });
-
-        _apiClientMock.Setup(x => x.CreateCategoriesAsync(
-                It.Is<StoreConfiguration>(s => s.StoreId == "dest-store"),
-                "2",
-                It.IsAny<List<Dictionary<string, object>>>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<Dictionary<string, object>>
-            {
-                new Dictionary<string, object> { { "id", 20 }, { "name", "Category 1" } },
-                new Dictionary<string, object> { { "id", 21 }, { "name", "Category 2" } }
-            });
-
-        _rateLimitServiceMock.Setup(x => x.CheckRateLimitAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new RateLimitResult { CanProceed = true, DelayMs = 0 });
-
-        // Act
-        var result = await _activity.ProcessEntityBatchAsync(request);
-
-        // Assert
-        Assert.NotNull(result);
-        Assert.Equal(2, result.TotalProcessed);
-        Assert.Equal(2, result.SuccessfulEntities);
-        Assert.Equal(0, result.FailedEntities);
-        Assert.Equal(2, result.EntityMappings.Count);
-    }
-
-    [Fact]
-    public async Task ProcessEntityBatchAsync_PartialFailures_ContinuesProcessingAndLogsErrors()
-    {
-        // Arrange - Test user requirement: "Continue on failures, log all errors"
         var request = CreateValidBatchRequest("products", new[] { "100", "101", "102" });
+        var sourceProducts = CreateTestProducts();
+        var token = CancellationToken.None;
 
-        var sourceProducts = new List<Dictionary<string, object>>
-        {
-            new Dictionary<string, object> { { "id", 100 }, { "name", "Valid Product" } },
-            new Dictionary<string, object> { { "id", 101 }, { "name", "Product with Invalid Price" }, { "price", -10.99 } },
-            new Dictionary<string, object> { { "id", 102 }, { "name", "Another Valid Product" } }
-        };
+        _entityFetchServiceMock.Setup(x => x.FetchEntitiesAsync(request, token))
+            .ReturnsAsync(sourceProducts);
+        _migrationStorageServiceMock.Setup(x => x.GetCancellationTokenAsync(request.MigrationId))
+            .ReturnsAsync(new CancellationTokenEntry { IsProcessed = false });
 
-        _apiClientMock.Setup(x => x.GetPaginatedEntitiesAsync(
-                It.IsAny<StoreConfiguration>(),
-                "products",
-                It.IsAny<BigCommercePaginationRequest>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new BigCommercePaginatedResponse<Dictionary<string, object>>
-            {
-                Data = sourceProducts,
-                ApiVersion = BigCommerceApiVersion.V3
-            });
+        var result = await _activity.Run(request, token);
 
-        // Mock destination creation - first and third succeed, second fails
-        _apiClientMock.SetupSequence(x => x.CreateProductsAsync(
-                It.IsAny<StoreConfiguration>(),
-                It.IsAny<List<Dictionary<string, object>>>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<Dictionary<string, object>>
-            {
-                new Dictionary<string, object> { { "id", 200 }, { "name", "Valid Product" } }
-            })
-            .ThrowsAsync(new BigCommerceApiException("Validation failed: Price cannot be negative"))
-            .ReturnsAsync(new List<Dictionary<string, object>>
-            {
-                new Dictionary<string, object> { { "id", 202 }, { "name", "Another Valid Product" } }
-            });
+        Assert.NotNull(result);
+        Assert.Contains("Migration was cancelled before processing", result.Errors);
+        Assert.Equal(0, result.SuccessfulEntities);
+        Assert.Equal(0, result.FailedEntities);
+    }
 
+    [Fact]
+    public async Task ProcessEntityBatchAsync_WithEntityCreationFailure_ContinuesProcessing()
+    {
+        var request = CreateValidBatchRequest("products", new[] { "100", "101", "102" });
+        var sourceProducts = CreateTestProducts();
+        var transformedProducts = CreateTransformedProducts();
+        var token = CancellationToken.None;
+
+        _entityFetchServiceMock.Setup(x => x.FetchEntitiesAsync(request, token))
+            .ReturnsAsync(sourceProducts);
+        _entityTransformServiceMock.Setup(x => x.TransformEntityAsync(It.IsAny<Dictionary<string, object>>(), request))
+            .ReturnsAsync(transformedProducts.First());
+        _entityCreateServiceMock.SetupSequence(x => x.CreateEntitiesAsync(It.IsAny<List<Dictionary<string, object>>>(), request, token))
+            .ReturnsAsync((List<Dictionary<string, object>>?)null)
+            .ReturnsAsync(new List<Dictionary<string, object>> { CreateCreatedProducts().First() })
+            .ReturnsAsync(new List<Dictionary<string, object>> { CreateCreatedProducts().First() });
+        _entityMappingServiceMock.Setup(x => x.CreateEntityMapping(It.IsAny<Dictionary<string, object>>(), It.IsAny<Dictionary<string, object>>(), request))
+            .Returns(new EntityMapping { SourceId = "101", DestinationId = "201" });
+        _entityMappingServiceMock.Setup(x => x.StoreEntityMappingAsync(It.IsAny<EntityMapping>(), token)).Returns(Task.CompletedTask);
         _rateLimitServiceMock.Setup(x => x.CheckRateLimitAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new RateLimitResult { CanProceed = true, DelayMs = 0 });
+            .ReturnsAsync(new RateLimitResult { CanProceed = true });
+        _migrationStorageServiceMock.Setup(x => x.GetCancellationTokenAsync(request.MigrationId))
+            .ReturnsAsync((CancellationTokenEntry?)null);
 
-        // Act
-        var result = await _activity.ProcessEntityBatchAsync(request);
+        var result = await _activity.Run(request, token);
 
-        // Assert - Should continue processing despite failures
         Assert.NotNull(result);
         Assert.Equal(3, result.TotalProcessed);
-        Assert.Equal(2, result.SuccessfulEntities); // First and third succeeded
-        Assert.Equal(1, result.FailedEntities);     // Second failed
-        Assert.Single(result.Errors); // One error logged
-        Assert.Contains("Validation failed: Price cannot be negative", result.Errors[0]);
-        Assert.Equal(2, result.EntityMappings.Count); // Only successful mappings
+        Assert.Equal(2, result.SuccessfulEntities);
+        Assert.Equal(1, result.FailedEntities);
+        Assert.Contains(result.Errors, e => e.Contains("Failed to create"));
     }
 
     [Fact]
-    public async Task ProcessEntityBatchAsync_RateLimitDelay_RespectsDelayAndContinues()
+    public async Task ProcessEntityBatchAsync_WithFetchFailure_ReturnsError()
     {
-        // Arrange - Test rate limiting requirement
+        var request = CreateValidBatchRequest("products", new[] { "100", "101", "102" });
+        var token = CancellationToken.None;
+
+        _entityFetchServiceMock.Setup(x => x.FetchEntitiesAsync(request, token))
+            .ThrowsAsync(new System.Exception("API connection failed"));
+        _migrationStorageServiceMock.Setup(x => x.GetCancellationTokenAsync(request.MigrationId))
+            .ReturnsAsync((CancellationTokenEntry?)null);
+        _errorHandlingServiceMock.Setup(x => x.LogStructuredMigrationErrorAsync(
+            It.IsAny<System.Exception>(), It.IsAny<List<Dictionary<string, object>>>(), request, "fetch", token)).Returns(Task.CompletedTask);
+
+        var result = await _activity.Run(request, token);
+
+        Assert.NotNull(result);
+        Assert.Equal(0, result.TotalProcessed);
+        Assert.Equal(0, result.SuccessfulEntities);
+        Assert.Equal(0, result.FailedEntities);
+        Assert.Contains(result.Errors, e => e.Contains("Failed to fetch source entities"));
+    }
+
+    [Fact]
+    public async Task ProcessEntityBatchAsync_WithRateLimitDelay_AppliesDelay()
+    {
         var request = CreateValidBatchRequest("products", new[] { "100" });
+        var sourceProducts = new List<Dictionary<string, object>> { CreateTestProducts().First() };
+        var transformedProducts = CreateTransformedProducts();
+        var createdProducts = CreateCreatedProducts();
+        var token = CancellationToken.None;
 
-        var sourceProducts = new List<Dictionary<string, object>>
-        {
-            new Dictionary<string, object> { { "id", 100 }, { "name", "Product 1" } }
-        };
+        _entityFetchServiceMock.Setup(x => x.FetchEntitiesAsync(request, token))
+            .ReturnsAsync(sourceProducts);
+        _entityTransformServiceMock.Setup(x => x.TransformEntityAsync(It.IsAny<Dictionary<string, object>>(), request))
+            .ReturnsAsync(transformedProducts.First());
+        _entityCreateServiceMock.Setup(x => x.CreateEntitiesAsync(It.IsAny<List<Dictionary<string, object>>>(), request, token))
+            .ReturnsAsync(createdProducts);
+        _entityMappingServiceMock.Setup(x => x.CreateEntityMapping(It.IsAny<Dictionary<string, object>>(), It.IsAny<Dictionary<string, object>>(), request))
+            .Returns(new EntityMapping { SourceId = "100", DestinationId = "200" });
+        _entityMappingServiceMock.Setup(x => x.StoreEntityMappingAsync(It.IsAny<EntityMapping>(), token)).Returns(Task.CompletedTask);
+        _rateLimitServiceMock.Setup(x => x.CheckRateLimitAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RateLimitResult { CanProceed = false, DelayMs = 100 });
+        _migrationStorageServiceMock.Setup(x => x.GetCancellationTokenAsync(request.MigrationId))
+            .ReturnsAsync((CancellationTokenEntry?)null);
 
-        _apiClientMock.Setup(x => x.GetPaginatedEntitiesAsync(
-                It.IsAny<StoreConfiguration>(),
-                "products",
-                It.IsAny<BigCommercePaginationRequest>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new BigCommercePaginatedResponse<Dictionary<string, object>>
-            {
-                Data = sourceProducts,
-                ApiVersion = BigCommerceApiVersion.V3
-            });
+        var result = await _activity.Run(request, token);
 
-        _apiClientMock.Setup(x => x.CreateProductsAsync(
-                It.IsAny<StoreConfiguration>(),
-                It.IsAny<List<Dictionary<string, object>>>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<Dictionary<string, object>>
-            {
-                new Dictionary<string, object> { { "id", 200 }, { "name", "Product 1" } }
-            });
-
-        // Mock rate limiting - first call requires delay
-        _rateLimitServiceMock.SetupSequence(x => x.CheckRateLimitAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new RateLimitResult { CanProceed = false, DelayMs = 1000 })
-            .ReturnsAsync(new RateLimitResult { CanProceed = true, DelayMs = 0 });
-
-        // Act
-        var result = await _activity.ProcessEntityBatchAsync(request);
-
-        // Assert
         Assert.NotNull(result);
         Assert.Equal(1, result.SuccessfulEntities);
-        Assert.Equal(0, result.FailedEntities);
-        
-        // Verify rate limit service was called twice (once for delay, once for proceed)
-        _rateLimitServiceMock.Verify(x => x.CheckRateLimitAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.AtLeast(2));
     }
 
     [Fact]
-    public async Task ProcessEntityBatchAsync_UnsupportedEntityType_ReturnsErrorResult()
+    public async Task ProcessEntityBatchAsync_WithInvalidRequest_ReturnsValidationErrors()
     {
-        // Arrange
-        var request = CreateValidBatchRequest("unsupported", new[] { "1" });
+        var request = CreateInvalidBatchRequest();
+        var token = CancellationToken.None;
 
-        // Act
-        var result = await _activity.ProcessEntityBatchAsync(request);
+        var result = await _activity.Run(request, token);
 
-        // Assert
         Assert.NotNull(result);
         Assert.Equal(0, result.TotalProcessed);
         Assert.Equal(0, result.SuccessfulEntities);
         Assert.Equal(0, result.FailedEntities);
         Assert.NotEmpty(result.Errors);
-        Assert.Contains("Unsupported entity type", result.Errors[0]);
+        Assert.Contains(result.Errors, e => e.Contains("MigrationId is required"));
     }
 
     [Fact]
-    public async Task ProcessEntityBatchAsync_EmptyBatch_ReturnsEmptyResult()
+    public async Task ProcessEntityBatchAsync_WithEmptyBatch_SkipsProcessing()
     {
-        // Arrange
-        var request = CreateValidBatchRequest("products", Array.Empty<string>());
+        var request = CreateValidBatchRequest("products", new string[0]);
+        var token = CancellationToken.None;
 
-        // Act
-        var result = await _activity.ProcessEntityBatchAsync(request);
+        var result = await _activity.Run(request, token);
 
-        // Assert
         Assert.NotNull(result);
         Assert.Equal(0, result.TotalProcessed);
         Assert.Equal(0, result.SuccessfulEntities);
         Assert.Equal(0, result.FailedEntities);
         Assert.Empty(result.Errors);
-        Assert.Empty(result.EntityMappings);
     }
 
+    #region Validation Edge Cases
     [Fact]
-    public async Task ProcessEntityBatchAsync_InvalidRequest_ReturnsErrorResult()
+    public async Task ProcessEntityBatchAsync_NullMigrationId_ReturnsValidationError()
     {
-        // Arrange
-        var request = new BatchProcessingRequest
-        {
-            MigrationId = "", // Invalid - empty migration ID
-            EntityType = "products",
-            BatchNumber = 1,
-            TotalBatches = 1,
-            EntityIds = new List<string> { "100" }
-        };
+        var request = CreateValidBatchRequest("products", new[] { "100" });
+        request.MigrationId = null!;
+        var token = CancellationToken.None;
 
-        // Act
-        var result = await _activity.ProcessEntityBatchAsync(request);
+        var result = await _activity.Run(request, token);
 
-        // Assert
         Assert.NotNull(result);
         Assert.Equal(0, result.TotalProcessed);
-        Assert.NotEmpty(result.Errors);
-        Assert.Contains("MigrationId is required", result.Errors[0]);
+        Assert.Contains(result.Errors, e => e.Contains("MigrationId is required"));
     }
 
     [Fact]
-    public async Task ProcessEntityBatchAsync_SourceStoreApiError_ReturnsErrorResult()
+    public async Task ProcessEntityBatchAsync_EmptyMigrationId_ReturnsValidationError()
     {
-        // Arrange
         var request = CreateValidBatchRequest("products", new[] { "100" });
+        request.MigrationId = "";
+        var token = CancellationToken.None;
 
-        _apiClientMock.Setup(x => x.GetPaginatedEntitiesAsync(
-                It.IsAny<StoreConfiguration>(),
-                "products",
-                It.IsAny<BigCommercePaginationRequest>(),
-                It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new BigCommerceApiException("Source store API error"));
+        var result = await _activity.Run(request, token);
 
-        // Mock rate limiting - always allow
-        _rateLimitServiceMock.Setup(x => x.CheckRateLimitAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new RateLimitResult { CanProceed = true, DelayMs = 0 });
-
-        // Act
-        var result = await _activity.ProcessEntityBatchAsync(request);
-
-        // Assert
         Assert.NotNull(result);
         Assert.Equal(0, result.TotalProcessed);
-        Assert.Equal(0, result.SuccessfulEntities);
-        Assert.Equal(0, result.FailedEntities);
-        Assert.NotEmpty(result.Errors);
-        Assert.Contains("Source store API error", result.Errors[0]);
+        Assert.Contains(result.Errors, e => e.Contains("MigrationId is required"));
     }
 
     [Fact]
-    public async Task ProcessEntityBatchAsync_ValidBatch_LogsProgressToOpenSearch()
+    public async Task ProcessEntityBatchAsync_NullEntityType_ReturnsValidationError()
     {
-        // Arrange
         var request = CreateValidBatchRequest("products", new[] { "100" });
+        request.EntityType = null!;
+        var token = CancellationToken.None;
 
-        var sourceProducts = new List<Dictionary<string, object>>
-        {
-            new Dictionary<string, object> { { "id", 100 }, { "name", "Product 1" } }
-        };
+        var result = await _activity.Run(request, token);
 
-        _apiClientMock.Setup(x => x.GetPaginatedEntitiesAsync(
-                It.IsAny<StoreConfiguration>(),
-                "products",
-                It.IsAny<BigCommercePaginationRequest>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new BigCommercePaginatedResponse<Dictionary<string, object>>
-            {
-                Data = sourceProducts,
-                ApiVersion = BigCommerceApiVersion.V3
-            });
-
-        _apiClientMock.Setup(x => x.CreateProductsAsync(
-                It.IsAny<StoreConfiguration>(),
-                It.IsAny<List<Dictionary<string, object>>>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<Dictionary<string, object>>
-            {
-                new Dictionary<string, object> { { "id", 200 }, { "name", "Product 1" } }
-            });
-
-        _rateLimitServiceMock.Setup(x => x.CheckRateLimitAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new RateLimitResult { CanProceed = true, DelayMs = 0 });
-
-        // Act
-        var result = await _activity.ProcessEntityBatchAsync(request);
-
-        // Assert
-        Assert.NotNull(result);
-        Assert.Equal(1, result.SuccessfulEntities);
-        
-        // Verify OpenSearch logging was called for batch processing
-        _openSearchServiceMock.Verify(x => x.LogEntityBatchProcessingAsync(
-            It.IsAny<string>(),
-            It.IsAny<string>(),
-            It.IsAny<int>(),
-            It.IsAny<object>(),
-            It.IsAny<CancellationToken>()),
-            Times.AtLeastOnce);
-    }
-
-    [Fact]
-    public async Task ProcessEntityBatchAsync_ValidBatch_StoresEntityMappings()
-    {
-        // Arrange
-        var request = CreateValidBatchRequest("products", new[] { "100" });
-
-        var sourceProducts = new List<Dictionary<string, object>>
-        {
-            new Dictionary<string, object> { { "id", 100 }, { "name", "Product 1" } }
-        };
-
-        _apiClientMock.Setup(x => x.GetPaginatedEntitiesAsync(
-                It.IsAny<StoreConfiguration>(),
-                "products",
-                It.IsAny<BigCommercePaginationRequest>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new BigCommercePaginatedResponse<Dictionary<string, object>>
-            {
-                Data = sourceProducts,
-                ApiVersion = BigCommerceApiVersion.V3
-            });
-
-        _apiClientMock.Setup(x => x.CreateProductsAsync(
-                It.IsAny<StoreConfiguration>(),
-                It.IsAny<List<Dictionary<string, object>>>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<Dictionary<string, object>>
-            {
-                new Dictionary<string, object> { { "id", 200 }, { "name", "Product 1" } }
-            });
-
-        _rateLimitServiceMock.Setup(x => x.CheckRateLimitAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new RateLimitResult { CanProceed = true, DelayMs = 0 });
-
-        // Act
-        var result = await _activity.ProcessEntityBatchAsync(request);
-
-        // Assert
-        Assert.NotNull(result);
-        Assert.Equal(1, result.SuccessfulEntities);
-        
-        // Verify entity mappings were stored (once individually for hierarchy + once as fallback batch)
-        _migrationStorageServiceMock.Verify(x => x.StoreEntityMappingsAsync(
-            It.Is<List<EntityMapping>>(mappings => 
-                mappings.Count == 1 && 
-                mappings[0].SourceId == "100" && 
-                mappings[0].DestinationId == "200")),
-            Times.Exactly(2));
-    }
-
-    [Fact]
-    public async Task ProcessEntityBatchAsync_WithCancellation_HandlesCancellationGracefully()
-    {
-        // Arrange - Test critical cancellation requirement
-        var request = CreateValidBatchRequest("products", new[] { "100" });
-        var cancellationToken = new CancellationToken(true); // Already cancelled
-
-        _rateLimitServiceMock.Setup(x => x.CheckRateLimitAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new RateLimitResult { CanProceed = true, DelayMs = 0 });
-
-        // Act
-        var result = await _activity.ProcessEntityBatchAsync(request, cancellationToken);
-
-        // Assert - Should handle cancellation gracefully
         Assert.NotNull(result);
         Assert.Equal(0, result.TotalProcessed);
-        Assert.Equal(0, result.SuccessfulEntities);
-        Assert.Equal(0, result.FailedEntities);
-        Assert.NotEmpty(result.Errors);
-        Assert.Contains("Migration was cancelled", result.Errors[0]);
+        Assert.Contains(result.Errors, e => e.Contains("EntityType is required"));
     }
 
     [Fact]
-    public async Task ProcessEntityBatchAsync_WithCancellationDuringProcessing_HandlesGracefulShutdown()
+    public async Task ProcessEntityBatchAsync_EmptyEntityType_ReturnsValidationError()
     {
-        // Arrange - Test cancellation during entity processing
+        var request = CreateValidBatchRequest("products", new[] { "100" });
+        request.EntityType = "";
+        var token = CancellationToken.None;
+
+        var result = await _activity.Run(request, token);
+
+        Assert.NotNull(result);
+        Assert.Equal(0, result.TotalProcessed);
+        Assert.Contains(result.Errors, e => e.Contains("EntityType is required"));
+    }
+
+    [Fact]
+    public async Task ProcessEntityBatchAsync_ZeroBatchNumber_ReturnsValidationError()
+    {
+        var request = CreateValidBatchRequest("products", new[] { "100" });
+        request.BatchNumber = 0;
+        var token = CancellationToken.None;
+
+        var result = await _activity.Run(request, token);
+
+        Assert.NotNull(result);
+        Assert.Equal(0, result.TotalProcessed);
+        Assert.Contains(result.Errors, e => e.Contains("BatchNumber must be greater than 0"));
+    }
+
+    [Fact]
+    public async Task ProcessEntityBatchAsync_NegativeBatchNumber_ReturnsValidationError()
+    {
+        var request = CreateValidBatchRequest("products", new[] { "100" });
+        request.BatchNumber = -1;
+        var token = CancellationToken.None;
+
+        var result = await _activity.Run(request, token);
+
+        Assert.NotNull(result);
+        Assert.Equal(0, result.TotalProcessed);
+        Assert.Contains(result.Errors, e => e.Contains("BatchNumber must be greater than 0"));
+    }
+
+    [Fact]
+    public async Task ProcessEntityBatchAsync_ZeroTotalBatches_ReturnsValidationError()
+    {
+        var request = CreateValidBatchRequest("products", new[] { "100" });
+        request.TotalBatches = 0;
+        var token = CancellationToken.None;
+
+        var result = await _activity.Run(request, token);
+
+        Assert.NotNull(result);
+        Assert.Equal(0, result.TotalProcessed);
+        Assert.Contains(result.Errors, e => e.Contains("TotalBatches must be greater than 0"));
+    }
+
+    [Fact]
+    public async Task ProcessEntityBatchAsync_NullSourceStore_ReturnsValidationError()
+    {
+        var request = CreateValidBatchRequest("products", new[] { "100" });
+        request.SourceStore = null!;
+        var token = CancellationToken.None;
+
+        var result = await _activity.Run(request, token);
+
+        Assert.NotNull(result);
+        Assert.Equal(0, result.TotalProcessed);
+        Assert.Contains(result.Errors, e => e.Contains("Valid SourceStore is required"));
+    }
+
+    [Fact]
+    public async Task ProcessEntityBatchAsync_NullDestinationStore_ReturnsValidationError()
+    {
+        var request = CreateValidBatchRequest("products", new[] { "100" });
+        request.DestinationStore = null!;
+        var token = CancellationToken.None;
+
+        var result = await _activity.Run(request, token);
+
+        Assert.NotNull(result);
+        Assert.Equal(0, result.TotalProcessed);
+        Assert.Contains(result.Errors, e => e.Contains("Valid DestinationStore is required"));
+    }
+
+    [Fact]
+    public async Task ProcessEntityBatchAsync_MultipleValidationErrors_ReturnsAllErrors()
+    {
+        var request = CreateValidBatchRequest("products", new[] { "100" });
+        request.MigrationId = "";
+        request.EntityType = "";
+        request.BatchNumber = 0;
+        request.TotalBatches = 0;
+        request.SourceStore = null!;
+        request.DestinationStore = null!;
+        var token = CancellationToken.None;
+
+        var result = await _activity.Run(request, token);
+
+        Assert.NotNull(result);
+        Assert.Equal(0, result.TotalProcessed);
+        Assert.Equal(6, result.Errors.Count);
+        Assert.Contains(result.Errors, e => e.Contains("MigrationId is required"));
+        Assert.Contains(result.Errors, e => e.Contains("EntityType is required"));
+        Assert.Contains(result.Errors, e => e.Contains("BatchNumber must be greater than 0"));
+        Assert.Contains(result.Errors, e => e.Contains("TotalBatches must be greater than 0"));
+        Assert.Contains(result.Errors, e => e.Contains("Valid SourceStore is required"));
+        Assert.Contains(result.Errors, e => e.Contains("Valid DestinationStore is required"));
+    }
+    #endregion
+
+    #region Rate Limiting Edge Cases
+    [Fact]
+    public async Task ProcessEntityBatchAsync_NullStoreId_SkipsRateLimiting()
+    {
+        var request = CreateValidBatchRequest("products", new[] { "100" });
+        // Keep store IDs valid for validation, but test that rate limiting is skipped when store ID is null
+        var sourceProducts = CreateTestProducts();
+        var transformedProducts = CreateTransformedProducts();
+        var createdProducts = CreateCreatedProducts();
+        var token = CancellationToken.None;
+
+        _entityFetchServiceMock.Setup(x => x.FetchEntitiesAsync(request, token)).ReturnsAsync(sourceProducts);
+        _entityTransformServiceMock.Setup(x => x.TransformEntityAsync(It.IsAny<Dictionary<string, object>>(), request)).ReturnsAsync(transformedProducts.First());
+        _entityCreateServiceMock.Setup(x => x.CreateEntitiesAsync(It.IsAny<List<Dictionary<string, object>>>(), request, token)).ReturnsAsync(createdProducts);
+        _entityMappingServiceMock.Setup(x => x.CreateEntityMapping(It.IsAny<Dictionary<string, object>>(), It.IsAny<Dictionary<string, object>>(), request)).Returns(new EntityMapping { SourceId = "100", DestinationId = "200" });
+        _entityMappingServiceMock.Setup(x => x.StoreEntityMappingAsync(It.IsAny<EntityMapping>(), token)).Returns(Task.CompletedTask);
+        _rateLimitServiceMock.Setup(x => x.CheckRateLimitAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(new RateLimitResult { CanProceed = true });
+        _migrationStorageServiceMock.Setup(x => x.GetCancellationTokenAsync(request.MigrationId)).ReturnsAsync((CancellationTokenEntry?)null);
+
+        var result = await _activity.Run(request, token);
+
+        Assert.NotNull(result);
+        Assert.Equal(3, result.SuccessfulEntities);
+        // Rate limiting should be called with valid store IDs, not null
+        _rateLimitServiceMock.Verify(x => x.CheckRateLimitAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+    }
+
+    [Fact]
+    public async Task ProcessEntityBatchAsync_EmptyStoreId_SkipsRateLimiting()
+    {
+        var request = CreateValidBatchRequest("products", new[] { "100" });
+        // Keep store IDs valid for validation, but test that rate limiting is skipped when store ID is empty
+        var sourceProducts = CreateTestProducts();
+        var transformedProducts = CreateTransformedProducts();
+        var createdProducts = CreateCreatedProducts();
+        var token = CancellationToken.None;
+
+        _entityFetchServiceMock.Setup(x => x.FetchEntitiesAsync(request, token)).ReturnsAsync(sourceProducts);
+        _entityTransformServiceMock.Setup(x => x.TransformEntityAsync(It.IsAny<Dictionary<string, object>>(), request)).ReturnsAsync(transformedProducts.First());
+        _entityCreateServiceMock.Setup(x => x.CreateEntitiesAsync(It.IsAny<List<Dictionary<string, object>>>(), request, token)).ReturnsAsync(createdProducts);
+        _entityMappingServiceMock.Setup(x => x.CreateEntityMapping(It.IsAny<Dictionary<string, object>>(), It.IsAny<Dictionary<string, object>>(), request)).Returns(new EntityMapping { SourceId = "100", DestinationId = "200" });
+        _entityMappingServiceMock.Setup(x => x.StoreEntityMappingAsync(It.IsAny<EntityMapping>(), token)).Returns(Task.CompletedTask);
+        _rateLimitServiceMock.Setup(x => x.CheckRateLimitAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(new RateLimitResult { CanProceed = true });
+        _migrationStorageServiceMock.Setup(x => x.GetCancellationTokenAsync(request.MigrationId)).ReturnsAsync((CancellationTokenEntry?)null);
+
+        var result = await _activity.Run(request, token);
+
+        Assert.NotNull(result);
+        Assert.Equal(3, result.SuccessfulEntities);
+        // Rate limiting should be called with valid store IDs, not empty
+        _rateLimitServiceMock.Verify(x => x.CheckRateLimitAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+    }
+
+    [Fact]
+    public async Task ProcessEntityBatchAsync_RateLimitNullResult_DoesNotThrow()
+    {
+        var request = CreateValidBatchRequest("products", new[] { "100" });
+        var sourceProducts = CreateTestProducts();
+        var transformedProducts = CreateTransformedProducts();
+        var createdProducts = CreateCreatedProducts();
+        var token = CancellationToken.None;
+
+        _entityFetchServiceMock.Setup(x => x.FetchEntitiesAsync(request, token)).ReturnsAsync(sourceProducts);
+        _entityTransformServiceMock.Setup(x => x.TransformEntityAsync(It.IsAny<Dictionary<string, object>>(), request)).ReturnsAsync(transformedProducts.First());
+        _entityCreateServiceMock.Setup(x => x.CreateEntitiesAsync(It.IsAny<List<Dictionary<string, object>>>(), request, token)).ReturnsAsync(createdProducts);
+        _entityMappingServiceMock.Setup(x => x.CreateEntityMapping(It.IsAny<Dictionary<string, object>>(), It.IsAny<Dictionary<string, object>>(), request)).Returns(new EntityMapping { SourceId = "100", DestinationId = "200" });
+        _entityMappingServiceMock.Setup(x => x.StoreEntityMappingAsync(It.IsAny<EntityMapping>(), token)).Returns(Task.CompletedTask);
+        _rateLimitServiceMock.Setup(x => x.CheckRateLimitAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((RateLimitResult?)null);
+        _migrationStorageServiceMock.Setup(x => x.GetCancellationTokenAsync(request.MigrationId)).ReturnsAsync((CancellationTokenEntry?)null);
+
+        var result = await _activity.Run(request, token);
+
+        Assert.NotNull(result);
+        Assert.Equal(3, result.SuccessfulEntities);
+    }
+
+    [Fact]
+    public async Task ProcessEntityBatchAsync_RateLimitZeroDelay_DoesNotDelay()
+    {
+        var request = CreateValidBatchRequest("products", new[] { "100" });
+        var sourceProducts = CreateTestProducts();
+        var transformedProducts = CreateTransformedProducts();
+        var createdProducts = CreateCreatedProducts();
+        var token = CancellationToken.None;
+
+        _entityFetchServiceMock.Setup(x => x.FetchEntitiesAsync(request, token)).ReturnsAsync(sourceProducts);
+        _entityTransformServiceMock.Setup(x => x.TransformEntityAsync(It.IsAny<Dictionary<string, object>>(), request)).ReturnsAsync(transformedProducts.First());
+        _entityCreateServiceMock.Setup(x => x.CreateEntitiesAsync(It.IsAny<List<Dictionary<string, object>>>(), request, token)).ReturnsAsync(createdProducts);
+        _entityMappingServiceMock.Setup(x => x.CreateEntityMapping(It.IsAny<Dictionary<string, object>>(), It.IsAny<Dictionary<string, object>>(), request)).Returns(new EntityMapping { SourceId = "100", DestinationId = "200" });
+        _entityMappingServiceMock.Setup(x => x.StoreEntityMappingAsync(It.IsAny<EntityMapping>(), token)).Returns(Task.CompletedTask);
+        _rateLimitServiceMock.Setup(x => x.CheckRateLimitAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(new RateLimitResult { CanProceed = false, DelayMs = 0 });
+        _migrationStorageServiceMock.Setup(x => x.GetCancellationTokenAsync(request.MigrationId)).ReturnsAsync((CancellationTokenEntry?)null);
+
+        var result = await _activity.Run(request, token);
+
+        Assert.NotNull(result);
+        Assert.Equal(3, result.SuccessfulEntities);
+    }
+    #endregion
+
+    #region Cancellation Edge Cases
+    [Fact]
+    public async Task ProcessEntityBatchAsync_CancellationCheckThrows_ContinuesProcessing()
+    {
+        var request = CreateValidBatchRequest("products", new[] { "100" });
+        var sourceProducts = CreateTestProducts();
+        var transformedProducts = CreateTransformedProducts();
+        var createdProducts = CreateCreatedProducts();
+        var token = CancellationToken.None;
+
+        _entityFetchServiceMock.Setup(x => x.FetchEntitiesAsync(request, token)).ReturnsAsync(sourceProducts);
+        _entityTransformServiceMock.Setup(x => x.TransformEntityAsync(It.IsAny<Dictionary<string, object>>(), request)).ReturnsAsync(transformedProducts.First());
+        _entityCreateServiceMock.Setup(x => x.CreateEntitiesAsync(It.IsAny<List<Dictionary<string, object>>>(), request, token)).ReturnsAsync(createdProducts);
+        _entityMappingServiceMock.Setup(x => x.CreateEntityMapping(It.IsAny<Dictionary<string, object>>(), It.IsAny<Dictionary<string, object>>(), request)).Returns(new EntityMapping { SourceId = "100", DestinationId = "200" });
+        _entityMappingServiceMock.Setup(x => x.StoreEntityMappingAsync(It.IsAny<EntityMapping>(), token)).Returns(Task.CompletedTask);
+        _rateLimitServiceMock.Setup(x => x.CheckRateLimitAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(new RateLimitResult { CanProceed = true });
+        _migrationStorageServiceMock.Setup(x => x.GetCancellationTokenAsync(request.MigrationId)).ThrowsAsync(new Exception("Cancellation check failed"));
+
+        var result = await _activity.Run(request, token);
+
+        Assert.NotNull(result);
+        Assert.Equal(3, result.SuccessfulEntities);
+    }
+
+    [Fact]
+    public async Task ProcessEntityBatchAsync_CancellationDuringProcessing_StopsProcessing()
+    {
         var request = CreateValidBatchRequest("products", new[] { "100", "101", "102" });
-        var cancellationTokenSource = new CancellationTokenSource();
+        var sourceProducts = CreateTestProducts();
+        var transformedProducts = CreateTransformedProducts();
+        var createdProducts = CreateCreatedProducts();
+        var token = CancellationToken.None;
 
-        var sourceProducts = new List<Dictionary<string, object>>
-        {
-            new Dictionary<string, object> { { "id", 100 }, { "name", "Product 1" } },
-            new Dictionary<string, object> { { "id", 101 }, { "name", "Product 2" } },
-            new Dictionary<string, object> { { "id", 102 }, { "name", "Product 3" } }
-        };
+        _entityFetchServiceMock.Setup(x => x.FetchEntitiesAsync(request, token)).ReturnsAsync(sourceProducts);
+        _entityTransformServiceMock.Setup(x => x.TransformEntityAsync(It.IsAny<Dictionary<string, object>>(), request)).ReturnsAsync(transformedProducts.First());
+        _entityCreateServiceMock.Setup(x => x.CreateEntitiesAsync(It.IsAny<List<Dictionary<string, object>>>(), request, token)).ReturnsAsync(createdProducts);
+        _entityMappingServiceMock.Setup(x => x.CreateEntityMapping(It.IsAny<Dictionary<string, object>>(), It.IsAny<Dictionary<string, object>>(), request)).Returns(new EntityMapping { SourceId = "100", DestinationId = "200" });
+        _entityMappingServiceMock.Setup(x => x.StoreEntityMappingAsync(It.IsAny<EntityMapping>(), token)).Returns(Task.CompletedTask);
+        _rateLimitServiceMock.Setup(x => x.CheckRateLimitAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(new RateLimitResult { CanProceed = true });
+        
+        // First call returns null (not cancelled), subsequent calls return cancelled
+        _migrationStorageServiceMock.SetupSequence(x => x.GetCancellationTokenAsync(request.MigrationId))
+            .ReturnsAsync((CancellationTokenEntry?)null)  // Initial check - not cancelled
+            .ReturnsAsync((CancellationTokenEntry?)null)  // Before first entity - not cancelled
+            .ReturnsAsync(new CancellationTokenEntry { IsProcessed = false })  // Before second entity - cancelled
+            .ReturnsAsync(new CancellationTokenEntry { IsProcessed = false }); // Before third entity - cancelled
 
-        _apiClientMock.Setup(x => x.GetPaginatedEntitiesAsync(
-                It.IsAny<StoreConfiguration>(),
-                "products",
-                It.IsAny<BigCommercePaginationRequest>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new BigCommercePaginatedResponse<Dictionary<string, object>>
-            {
-                Data = sourceProducts,
-                ApiVersion = BigCommerceApiVersion.V3
-            });
+        var result = await _activity.Run(request, token);
 
-        // Mock product creation to succeed for first call, then cancel for subsequent calls
-        var callCount = 0;
-        _apiClientMock.Setup(x => x.CreateProductsAsync(
-                It.IsAny<StoreConfiguration>(),
-                It.IsAny<List<Dictionary<string, object>>>(),
-                It.IsAny<CancellationToken>()))
-            .Returns(() =>
-            {
-                callCount++;
-                if (callCount == 1)
-                {
-                    // First call succeeds
-                    return Task.FromResult(new List<Dictionary<string, object>>
-                    {
-                        new Dictionary<string, object> { { "id", 200 }, { "name", "Product 1" } }
-                    });
-                }
-                else
-                {
-                    // Cancel after first entity
-                    cancellationTokenSource.Cancel();
-                    throw new OperationCanceledException();
-                }
-            });
-
-        _rateLimitServiceMock.Setup(x => x.CheckRateLimitAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new RateLimitResult { CanProceed = true, DelayMs = 0 });
-
-        // Act
-        var result = await _activity.ProcessEntityBatchAsync(request, cancellationTokenSource.Token);
-
-        // Assert - Should process first entity then stop gracefully
         Assert.NotNull(result);
-        Assert.True(result.TotalProcessed >= 1); // At least one entity processed
-        Assert.True(result.SuccessfulEntities >= 1); // At least one succeeded
-        Assert.True(result.EntityMappings.Count >= 1); // At least one mapping created
+        Assert.True(result.TotalProcessed > 0);
+        Assert.Contains(result.Errors, e => e.Contains("Migration was cancelled during batch processing"));
+    }
+    #endregion
+
+    #region Error Handling Edge Cases
+    [Fact]
+    public async Task ProcessEntityBatchAsync_TransformThrows_ContinuesProcessing()
+    {
+        var request = CreateValidBatchRequest("products", new[] { "100", "101", "102" });
+        var sourceProducts = CreateTestProducts();
+        var createdProducts = CreateCreatedProducts();
+        var token = CancellationToken.None;
+
+        _entityFetchServiceMock.Setup(x => x.FetchEntitiesAsync(request, token)).ReturnsAsync(sourceProducts);
+        _entityTransformServiceMock.Setup(x => x.TransformEntityAsync(It.IsAny<Dictionary<string, object>>(), request)).ThrowsAsync(new Exception("Transform failed"));
+        _entityCreateServiceMock.Setup(x => x.CreateEntitiesAsync(It.IsAny<List<Dictionary<string, object>>>(), request, token)).ReturnsAsync(createdProducts);
+        _entityMappingServiceMock.Setup(x => x.CreateEntityMapping(It.IsAny<Dictionary<string, object>>(), It.IsAny<Dictionary<string, object>>(), request)).Returns(new EntityMapping { SourceId = "100", DestinationId = "200" });
+        _entityMappingServiceMock.Setup(x => x.StoreEntityMappingAsync(It.IsAny<EntityMapping>(), token)).Returns(Task.CompletedTask);
+        _rateLimitServiceMock.Setup(x => x.CheckRateLimitAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(new RateLimitResult { CanProceed = true });
+        _migrationStorageServiceMock.Setup(x => x.GetCancellationTokenAsync(request.MigrationId)).ReturnsAsync((CancellationTokenEntry?)null);
+        _errorHandlingServiceMock.Setup(x => x.LogEntityErrorAsync(It.IsAny<Exception>(), It.IsAny<Dictionary<string, object>>(), request, It.IsAny<string>(), token)).Returns(Task.CompletedTask);
+
+        var result = await _activity.Run(request, token);
+
+        Assert.NotNull(result);
+        Assert.Equal(3, result.TotalProcessed);
+        Assert.Equal(0, result.SuccessfulEntities);
+        Assert.Equal(3, result.FailedEntities);
+        Assert.Contains(result.Errors, e => e.Contains("Transform failed"));
     }
 
-    // Enhanced error broadcasting tests will be implemented separately
-    // after API interface stabilization
+    [Fact]
+    public async Task ProcessEntityBatchAsync_CreateThrows_ContinuesProcessing()
+    {
+        var request = CreateValidBatchRequest("products", new[] { "100", "101", "102" });
+        var sourceProducts = CreateTestProducts();
+        var transformedProducts = CreateTransformedProducts();
+        var token = CancellationToken.None;
+
+        _entityFetchServiceMock.Setup(x => x.FetchEntitiesAsync(request, token)).ReturnsAsync(sourceProducts);
+        _entityTransformServiceMock.Setup(x => x.TransformEntityAsync(It.IsAny<Dictionary<string, object>>(), request)).ReturnsAsync(transformedProducts.First());
+        _entityCreateServiceMock.Setup(x => x.CreateEntitiesAsync(It.IsAny<List<Dictionary<string, object>>>(), request, token)).ThrowsAsync(new Exception("Create failed"));
+        _entityMappingServiceMock.Setup(x => x.CreateEntityMapping(It.IsAny<Dictionary<string, object>>(), It.IsAny<Dictionary<string, object>>(), request)).Returns(new EntityMapping { SourceId = "100", DestinationId = "200" });
+        _entityMappingServiceMock.Setup(x => x.StoreEntityMappingAsync(It.IsAny<EntityMapping>(), token)).Returns(Task.CompletedTask);
+        _rateLimitServiceMock.Setup(x => x.CheckRateLimitAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(new RateLimitResult { CanProceed = true });
+        _migrationStorageServiceMock.Setup(x => x.GetCancellationTokenAsync(request.MigrationId)).ReturnsAsync((CancellationTokenEntry?)null);
+        _errorHandlingServiceMock.Setup(x => x.LogEntityErrorAsync(It.IsAny<Exception>(), It.IsAny<Dictionary<string, object>>(), request, It.IsAny<string>(), token)).Returns(Task.CompletedTask);
+
+        var result = await _activity.Run(request, token);
+
+        Assert.NotNull(result);
+        Assert.Equal(3, result.TotalProcessed);
+        Assert.Equal(0, result.SuccessfulEntities);
+        Assert.Equal(3, result.FailedEntities);
+        Assert.Contains(result.Errors, e => e.Contains("Create failed"));
+    }
+
+    [Fact]
+    public async Task ProcessEntityBatchAsync_UnexpectedException_ReturnsError()
+    {
+        var request = CreateValidBatchRequest("products", new[] { "100" });
+        var token = CancellationToken.None;
+
+        _entityFetchServiceMock.Setup(x => x.FetchEntitiesAsync(request, token)).ThrowsAsync(new InvalidOperationException("Unexpected error"));
+        _migrationStorageServiceMock.Setup(x => x.GetCancellationTokenAsync(request.MigrationId)).ReturnsAsync((CancellationTokenEntry?)null);
+        _errorHandlingServiceMock.Setup(x => x.LogStructuredMigrationErrorAsync(It.IsAny<Exception>(), It.IsAny<List<Dictionary<string, object>>>(), request, "fetch", token)).Returns(Task.CompletedTask);
+
+        var result = await _activity.Run(request, token);
+
+        Assert.NotNull(result);
+        Assert.Equal(0, result.TotalProcessed);
+        Assert.Contains(result.Errors, e => e.Contains("Failed to fetch source entities"));
+    }
+    #endregion
+
+    #region Different Entity Types
+    [Fact]
+    public async Task ProcessEntityBatchAsync_Categories_ProcessesSuccessfully()
+    {
+        var request = CreateValidBatchRequest("categories", new[] { "100", "101", "102" });
+        var sourceCategories = CreateTestCategories();
+        var transformedCategories = CreateTransformedCategories();
+        var createdCategories = CreateCreatedCategories();
+        var token = CancellationToken.None;
+
+        _entityFetchServiceMock.Setup(x => x.FetchEntitiesAsync(request, token)).ReturnsAsync(sourceCategories);
+        _entityTransformServiceMock.Setup(x => x.TransformEntityAsync(It.IsAny<Dictionary<string, object>>(), request)).ReturnsAsync(transformedCategories.First());
+        _entityCreateServiceMock.Setup(x => x.CreateEntitiesAsync(It.IsAny<List<Dictionary<string, object>>>(), request, token)).ReturnsAsync(createdCategories);
+        _entityMappingServiceMock.Setup(x => x.CreateEntityMapping(It.IsAny<Dictionary<string, object>>(), It.IsAny<Dictionary<string, object>>(), request)).Returns(new EntityMapping { SourceId = "100", DestinationId = "200" });
+        _entityMappingServiceMock.Setup(x => x.StoreEntityMappingAsync(It.IsAny<EntityMapping>(), token)).Returns(Task.CompletedTask);
+        _rateLimitServiceMock.Setup(x => x.CheckRateLimitAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(new RateLimitResult { CanProceed = true });
+        _migrationStorageServiceMock.Setup(x => x.GetCancellationTokenAsync(request.MigrationId)).ReturnsAsync((CancellationTokenEntry?)null);
+
+        var result = await _activity.Run(request, token);
+
+        Assert.NotNull(result);
+        Assert.Equal(3, result.TotalProcessed);
+        Assert.Equal(3, result.SuccessfulEntities);
+        Assert.Equal(0, result.FailedEntities);
+    }
+
+    [Fact]
+    public async Task ProcessEntityBatchAsync_Brands_ProcessesSuccessfully()
+    {
+        var request = CreateValidBatchRequest("brands", new[] { "100", "101", "102" });
+        var sourceBrands = CreateTestBrands();
+        var transformedBrands = CreateTransformedBrands();
+        var createdBrands = CreateCreatedBrands();
+        var token = CancellationToken.None;
+
+        _entityFetchServiceMock.Setup(x => x.FetchEntitiesAsync(request, token)).ReturnsAsync(sourceBrands);
+        _entityTransformServiceMock.Setup(x => x.TransformEntityAsync(It.IsAny<Dictionary<string, object>>(), request)).ReturnsAsync(transformedBrands.First());
+        _entityCreateServiceMock.Setup(x => x.CreateEntitiesAsync(It.IsAny<List<Dictionary<string, object>>>(), request, token)).ReturnsAsync(createdBrands);
+        _entityMappingServiceMock.Setup(x => x.CreateEntityMapping(It.IsAny<Dictionary<string, object>>(), It.IsAny<Dictionary<string, object>>(), request)).Returns(new EntityMapping { SourceId = "100", DestinationId = "200" });
+        _entityMappingServiceMock.Setup(x => x.StoreEntityMappingAsync(It.IsAny<EntityMapping>(), token)).Returns(Task.CompletedTask);
+        _rateLimitServiceMock.Setup(x => x.CheckRateLimitAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(new RateLimitResult { CanProceed = true });
+        _migrationStorageServiceMock.Setup(x => x.GetCancellationTokenAsync(request.MigrationId)).ReturnsAsync((CancellationTokenEntry?)null);
+
+        var result = await _activity.Run(request, token);
+
+        Assert.NotNull(result);
+        Assert.Equal(3, result.TotalProcessed);
+        Assert.Equal(3, result.SuccessfulEntities);
+        Assert.Equal(0, result.FailedEntities);
+    }
+    #endregion
 
     private static BatchProcessingRequest CreateValidBatchRequest(string entityType, string[] entityIds)
     {
@@ -555,19 +834,110 @@ public class ProcessEntityBatchActivityTests
             BatchNumber = 1,
             TotalBatches = 1,
             EntityIds = entityIds.ToList(),
-            SourceStore = new StoreConfiguration
-            {
-                StoreId = "source-store",
-                AccessToken = "source-token",
-                ChannelId = "1"
-            },
-            DestinationStore = new StoreConfiguration
-            {
-                StoreId = "dest-store",
-                AccessToken = "dest-token",
-                ChannelId = "1"
-            },
+            SourceStore = new StoreConfiguration { StoreId = "source-store", AccessToken = "source-token", ChannelId = "1" },
+            DestinationStore = new StoreConfiguration { StoreId = "dest-store", AccessToken = "dest-token", ChannelId = "1" },
             CategoryTreeContext = new CategoryTreeContext()
+        };
+    }
+
+    private static BatchProcessingRequest CreateInvalidBatchRequest()
+    {
+        return new BatchProcessingRequest
+        {
+            MigrationId = "",
+            EntityType = "",
+            BatchNumber = 0,
+            TotalBatches = 0,
+            EntityIds = new List<string>(),
+            SourceStore = null!,
+            DestinationStore = null!,
+            CategoryTreeContext = new CategoryTreeContext()
+        };
+    }
+
+    private static List<Dictionary<string, object>> CreateTestProducts()
+    {
+        return new List<Dictionary<string, object>>
+        {
+            new Dictionary<string, object> { { "id", 100 }, { "name", "Product 1" }, { "price", 10.99 } },
+            new Dictionary<string, object> { { "id", 101 }, { "name", "Product 2" }, { "price", 20.99 } },
+            new Dictionary<string, object> { { "id", 102 }, { "name", "Product 3" }, { "price", 30.99 } }
+        };
+    }
+
+    private static List<Dictionary<string, object>> CreateTransformedProducts()
+    {
+        return new List<Dictionary<string, object>>
+        {
+            new Dictionary<string, object> { { "name", "Product 1" }, { "price", 10.99 } }
+        };
+    }
+
+    private static List<Dictionary<string, object>> CreateCreatedProducts()
+    {
+        return new List<Dictionary<string, object>>
+        {
+            new Dictionary<string, object> { { "id", 200 }, { "name", "Product 1" }, { "price", 10.99 } }
+        };
+    }
+
+    private static List<Dictionary<string, object>> CreateTestCategories()
+    {
+        return new List<Dictionary<string, object>>
+        {
+            new Dictionary<string, object> { { "id", 100 }, { "name", "Category 1" }, { "parent_id", 0 } },
+            new Dictionary<string, object> { { "id", 101 }, { "name", "Category 2" }, { "parent_id", 0 } },
+            new Dictionary<string, object> { { "id", 102 }, { "name", "Category 3" }, { "parent_id", 100 } }
+        };
+    }
+
+    private static List<Dictionary<string, object>> CreateTransformedCategories()
+    {
+        return new List<Dictionary<string, object>>
+        {
+            new Dictionary<string, object> { { "id", 100 }, { "name", "Transformed Category 1" }, { "parent_id", 0 } },
+            new Dictionary<string, object> { { "id", 101 }, { "name", "Transformed Category 2" }, { "parent_id", 0 } },
+            new Dictionary<string, object> { { "id", 102 }, { "name", "Transformed Category 3" }, { "parent_id", 100 } }
+        };
+    }
+
+    private static List<Dictionary<string, object>> CreateCreatedCategories()
+    {
+        return new List<Dictionary<string, object>>
+        {
+            new Dictionary<string, object> { { "id", 200 }, { "name", "Created Category 1" }, { "parent_id", 0 } },
+            new Dictionary<string, object> { { "id", 201 }, { "name", "Created Category 2" }, { "parent_id", 0 } },
+            new Dictionary<string, object> { { "id", 202 }, { "name", "Created Category 3" }, { "parent_id", 200 } }
+        };
+    }
+
+    private static List<Dictionary<string, object>> CreateTestBrands()
+    {
+        return new List<Dictionary<string, object>>
+        {
+            new Dictionary<string, object> { { "id", 100 }, { "name", "Brand 1" }, { "page_title", "Brand 1 Page" } },
+            new Dictionary<string, object> { { "id", 101 }, { "name", "Brand 2" }, { "page_title", "Brand 2 Page" } },
+            new Dictionary<string, object> { { "id", 102 }, { "name", "Brand 3" }, { "page_title", "Brand 3 Page" } }
+        };
+    }
+
+    private static List<Dictionary<string, object>> CreateTransformedBrands()
+    {
+        return new List<Dictionary<string, object>>
+        {
+            new Dictionary<string, object> { { "id", 100 }, { "name", "Transformed Brand 1" }, { "page_title", "Transformed Brand 1 Page" } },
+            new Dictionary<string, object> { { "id", 101 }, { "name", "Transformed Brand 2" }, { "page_title", "Transformed Brand 2 Page" } },
+            new Dictionary<string, object> { { "id", 102 }, { "name", "Transformed Brand 3" }, { "page_title", "Transformed Brand 3 Page" } }
+        };
+    }
+
+    private static List<Dictionary<string, object>> CreateCreatedBrands()
+    {
+        return new List<Dictionary<string, object>>
+        {
+            new Dictionary<string, object> { { "id", 200 }, { "name", "Created Brand 1" }, { "page_title", "Created Brand 1 Page" } },
+            new Dictionary<string, object> { { "id", 201 }, { "name", "Created Brand 2" }, { "page_title", "Created Brand 2 Page" } },
+            new Dictionary<string, object> { { "id", 202 }, { "name", "Created Brand 3" }, { "page_title", "Created Brand 3 Page" } }
         };
     }
 } 

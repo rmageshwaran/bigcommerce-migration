@@ -349,35 +349,34 @@ public class DiscoverEntitiesActivity
                 paginationRequest,
                 cancellationToken);
 
-            // Extract only the entity IDs from first page (no full entity caching)
-            var firstPageEntityIds = ExtractEntityIds(response.Data ?? new List<Dictionary<string, object>>(), request.EntityType);
-            
-            // Calculate total entity IDs based on pagination metadata
+            // Calculate total entity count and pages based on pagination metadata
             var totalCount = response.TotalItems ?? 0;
             var totalPages = response.TotalPages ?? 1;
+            var pageSize = response.PerPage;
 
-            _logger.LogInformation("Efficient pagination metadata discovery completed for {EntityType}: {TotalCount} entities across {TotalPages} pages (no caching)", 
+            _logger.LogInformation("Efficient pagination metadata discovery completed for {EntityType}: {TotalCount} entities across {TotalPages} pages (using direct pagination strategy)", 
                 request.EntityType, totalCount, totalPages);
 
-            // Generate entity IDs sequence without fetching all entities
-            var allEntityIds = GenerateEntityIdSequence(firstPageEntityIds, totalCount, response.PerPage);
-
+            // ✅ CORRECT APPROACH: Return EMPTY EntityIds for batch processing
+            // Batch processing will use direct pagination (page 1, 2, 3...) instead of entity IDs
             return new EntityDiscoveryResult
             {
                 EntityType = request.EntityType,
-                EntityIds = allEntityIds,
-                EntityData = new List<Dictionary<string, object>>(), // NO caching for scalability
+                EntityIds = new List<string>(), // ✅ Empty - batch processing uses page numbers
+                EntityData = new List<Dictionary<string, object>>(), // ✅ NO caching for scalability
                 TotalCount = totalCount,
                 V3PaginationMetadata = response.Meta?.Pagination,
                 PaginationMetadata = new Dictionary<string, object>
                 {
                     { "ApiVersion", "V3" },
-                    { "Strategy", "EfficientPaginationMetadata" },
+                    { "Strategy", "DirectPagination" },
                     { "TotalPages", totalPages },
-                    { "PageSize", paginationRequest.Limit },
+                    { "PageSize", pageSize },
+                    { "TotalCount", totalCount },
                     { "HierarchicallySorted", false },
                     { "CachingDisabled", true },
-                    { "MemoryOptimized", true }
+                    { "MemoryOptimized", true },
+                    { "UseDirectPagination", true }
                 }
             };
         }
@@ -392,46 +391,6 @@ public class DiscoverEntitiesActivity
                 Errors = new List<string> { ex.Message }
             };
         }
-    }
-
-    /// <summary>
-    /// Generates entity ID sequence based on pagination metadata without fetching all entities
-    /// </summary>
-    /// <param name="firstPageIds">Entity IDs from first page</param>
-    /// <param name="totalCount">Total entity count</param>
-    /// <param name="pageSize">Page size</param>
-    /// <returns>Estimated entity ID sequence</returns>
-    private static List<string> GenerateEntityIdSequence(List<string> firstPageIds, int totalCount, int pageSize)
-    {
-        var entityIds = new List<string>();
-        
-        if (!firstPageIds.Any() || totalCount <= 0)
-        {
-            return entityIds;
-        }
-
-        // For first page, use actual IDs
-        entityIds.AddRange(firstPageIds);
-        
-        // For remaining pages, generate estimated ID sequence
-        // This works because BigCommerce typically uses sequential IDs
-        if (totalCount > firstPageIds.Count && firstPageIds.Count > 0)
-        {
-            var startId = int.Parse(firstPageIds[0]);
-            var endId = int.Parse(firstPageIds[^1]);
-            var increment = firstPageIds.Count > 1 ? (endId - startId) / (firstPageIds.Count - 1) : 1;
-            
-            // Generate remaining IDs based on sequence pattern
-            var remainingCount = totalCount - firstPageIds.Count;
-            var nextId = endId + increment;
-            
-            for (int i = 0; i < remainingCount; i++)
-            {
-                entityIds.Add((nextId + (i * increment)).ToString());
-            }
-        }
-        
-        return entityIds;
     }
 
     /// <summary>

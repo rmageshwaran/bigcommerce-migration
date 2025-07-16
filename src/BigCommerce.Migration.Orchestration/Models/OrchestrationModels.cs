@@ -614,4 +614,25 @@ public class UpdateEntityProgressRequest
     /// Total number of batches (optional)
     /// </summary>
     public int TotalBatches { get; set; }
+}
+
+/// <summary>
+/// Request model for starting entity processing
+/// </summary>
+public class StartEntityProcessingRequest
+{
+    /// <summary>
+    /// Migration ID
+    /// </summary>
+    public string MigrationId { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// Entity type being processed
+    /// </summary>
+    public string EntityType { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// Total number of entities to process
+    /// </summary>
+    public int TotalCount { get; set; }
 } 

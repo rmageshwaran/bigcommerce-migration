@@ -37,116 +37,113 @@ public class LoggingMonitoringFunctions
     /// <summary>
     /// Get recent log entries with filtering and pagination
     /// </summary>
-    [Function("GetLogs")]
-    [OpenApiOperation(operationId: "GetLogs", tags: new[] { "Logging" },
-        Summary = "Get recent log entries",
-        Description = "Returns recent log entries with optional filtering by level, time range, and search terms.")]
-    [OpenApiSecurity("ApiKeyAuth", SecuritySchemeType.ApiKey, Name = "X-API-Key", In = OpenApiSecurityLocationType.Header)]
-    [OpenApiParameter(name: "level", In = ParameterLocation.Query, Required = false, Type = typeof(string),
-        Description = "Log level filter (Debug, Information, Warning, Error, Critical)")]
-    [OpenApiParameter(name: "from", In = ParameterLocation.Query, Required = false, Type = typeof(DateTime),
-        Description = "Start time filter (ISO 8601 format)")]
-    [OpenApiParameter(name: "to", In = ParameterLocation.Query, Required = false, Type = typeof(DateTime),
-        Description = "End time filter (ISO 8601 format)")]
-    [OpenApiParameter(name: "search", In = ParameterLocation.Query, Required = false, Type = typeof(string),
-        Description = "Search term for log messages")]
-    [OpenApiParameter(name: "page", In = ParameterLocation.Query, Required = false, Type = typeof(int),
-        Description = "Page number (default: 1)")]
-    [OpenApiParameter(name: "pageSize", In = ParameterLocation.Query, Required = false, Type = typeof(int),
-        Description = "Page size (default: 50, max: 1000)")]
-    [OpenApiResponseWithBody(statusCode: HttpStatusCode.OK, contentType: "application/json", bodyType: typeof(object),
-        Summary = "Log entries retrieved successfully")]
-    [OpenApiResponseWithBody(statusCode: HttpStatusCode.Unauthorized, contentType: "application/json", bodyType: typeof(object),
-        Summary = "Authentication required")]
-    public async Task<HttpResponseData> GetLogsAsync(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "logs")] HttpRequestData req)
-    {
-        var response = req.CreateResponse(HttpStatusCode.OK);
-        response.Headers.Add("Content-Type", "application/json");
-
-        try
+            [Function("GetLogs")]
+        public async Task<HttpResponseData> GetLogs(
+            [HttpTrigger(AuthorizationLevel.Function, "get", Route = "logs")] HttpRequestData req)
         {
-            // Check authentication
-            var context = req.FunctionContext;
-            var isAuthenticated = context.Items.TryGetValue("IsAuthenticated", out var isAuthenticatedValue) && 
-                                 isAuthenticatedValue is bool authenticated && authenticated;
+            var response = req.CreateResponse(HttpStatusCode.OK);
+            response.Headers.Add("Content-Type", "application/json");
 
-            if (!isAuthenticated)
+            try
             {
-                response.StatusCode = HttpStatusCode.Unauthorized;
+                // Parse query parameters
+                var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
+                var level = query["level"];
+                var search = query["search"];
+                var from = DateTime.TryParse(query["from"], out var fromDate)
+                    ? fromDate : DateTime.UtcNow.AddDays(-1);
+                var to = DateTime.TryParse(query["to"], out var toDate)
+                    ? toDate : DateTime.UtcNow;
+                var page = int.TryParse(query["page"], out var pageNum) && pageNum > 0 ? pageNum : 1;
+                var pageSize = int.TryParse(query["size"], out var size) && size > 0 && size <= 500 ? size : 50;
+
+                _logger.LogDebug("GetLogs called with parameters: level={Level}, search={Search}, from={From}, to={To}, page={Page}, pageSize={PageSize}",
+                    level, search, from, to, page, pageSize);
+
+                // Create optimized query request
+                var queryRequest = new Core.Models.OpenSearchQuery
+                {
+                    FromDate = from,
+                    ToDate = to,
+                    Level = level,
+                    SearchTerm = search,
+                    Size = pageSize,
+                    From = (page - 1) * pageSize,
+                    SortField = "timestamp",
+                    SortOrder = Core.Models.SortOrder.Descending,
+                    IncludeFields = null, // Include all fields like legacy search
+                    EnableHighlighting = !string.IsNullOrEmpty(search)
+                };
+
+                // Check if search term is a GUID (migration ID) for optimized filtering
+                if (!string.IsNullOrEmpty(search) && Guid.TryParse(search, out _))
+                {
+                    queryRequest.MigrationId = search;
+                    queryRequest.SearchTerm = null; // Use exact matching instead of text search
+                }
+
+                _logger.LogDebug("Executing optimized search with query: Level={Level}, MigrationId={MigrationId}, SearchTerm={SearchTerm}, from={From}, to={To}, page={Page}, pageSize={PageSize}", 
+                    queryRequest.Level, queryRequest.MigrationId, queryRequest.SearchTerm, from, to, page, pageSize);
+                
+                // Execute optimized search
+                var (results, totalCount) = await _openSearchService.SearchLogsOptimizedAsync(queryRequest);
+                
+                _logger.LogInformation("Optimized search returned {ResultCount} results, totalCount: {TotalCount}", results.Count(), totalCount);
+                
+                // Convert OpenSearch results to proper format - handle JsonElement results
+                var entries = new List<object>();
+                foreach (var result in results)
+                {
+                    if (result is JsonElement jsonElement)
+                    {
+                        entries.Add(ParseJsonElementToDictionary(jsonElement));
+                    }
+                    else if (result is Dictionary<string, object> dict)
+                    {
+                        entries.Add(dict);
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Unexpected result type from OpenSearch: {Type}", result?.GetType()?.Name ?? "null");
+                    }
+                }
+                
+                _logger.LogInformation("Converted {EntryCount} entries from optimized search", entries.Count);
+
+                // Calculate pagination
+                var totalPages = (int)Math.Ceiling((double)totalCount / pageSize);
+
+                var responseData = new
+                {
+                    entries = entries,
+                    pagination = new
+                    {
+                        page = page,
+                        pageSize = pageSize,
+                        totalItems = totalCount,
+                        totalPages = totalPages
+                    }
+                };
+
+                await response.WriteStringAsync(JsonSerializer.Serialize(responseData, new JsonSerializerOptions
+                {
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                    WriteIndented = true
+                }));
+
+                return response;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting logs");
+                response.StatusCode = HttpStatusCode.InternalServerError;
                 await response.WriteStringAsync(JsonSerializer.Serialize(new
                 {
-                    error = new
-                    {
-                        code = "UNAUTHORIZED",
-                        message = "Authentication required to view logs"
-                    }
+                    error = "An error occurred while retrieving logs"
                 }));
                 return response;
             }
-
-            // Parse query parameters
-            var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
-            var level = query["level"];
-            var fromParam = query["from"];
-            var toParam = query["to"];
-            var search = query["search"];
-            var pageParam = query["page"];
-            var pageSizeParam = query["pageSize"];
-
-            // Validate and set defaults
-            var page = int.TryParse(pageParam, out var p) ? Math.Max(1, p) : 1;
-            var pageSize = int.TryParse(pageSizeParam, out var ps) ? Math.Max(1, Math.Min(1000, ps)) : 50;
-
-            var from = DateTime.TryParse(fromParam, out var f) ? f : DateTime.UtcNow.AddHours(-24);
-            var to = DateTime.TryParse(toParam, out var t) ? t : DateTime.UtcNow;
-
-            // Build log query (this would typically use OpenSearch)
-            var logEntries = await GetLogEntriesAsync(level, from, to, search, page, pageSize);
-
-            var result = new
-            {
-                timestamp = DateTime.UtcNow,
-                filters = new
-                {
-                    level = level,
-                    from = from,
-                    to = to,
-                    search = search
-                },
-                pagination = new
-                {
-                    page = page,
-                    pageSize = pageSize,
-                    totalCount = logEntries.TotalCount,
-                    totalPages = (int)Math.Ceiling((double)logEntries.TotalCount / pageSize)
-                },
-                logs = logEntries.Entries
-            };
-
-            await response.WriteStringAsync(JsonSerializer.Serialize(result, new JsonSerializerOptions
-            {
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-                WriteIndented = true
-            }));
-
-            return response;
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error retrieving logs");
-            response.StatusCode = HttpStatusCode.InternalServerError;
-            await response.WriteStringAsync(JsonSerializer.Serialize(new
-            {
-                error = new
-                {
-                    code = "LOGS_ERROR",
-                    message = "An error occurred while retrieving logs"
-                }
-            }));
-            return response;
-        }
-    }
 
     /// <summary>
     /// Get log statistics and analytics
@@ -482,39 +479,64 @@ public class LoggingMonitoringFunctions
 
     // Helper methods for data retrieval
 
-    private async Task<(List<object> Entries, int TotalCount)> GetLogEntriesAsync(
-        string? level, DateTime from, DateTime to, string? search, int page, int pageSize)
+
+
+    /// <summary>
+    /// Retrieves error logs from blob storage when OpenSearch is not available
+    /// </summary>
+    private async Task<IEnumerable<object>> GetErrorLogsFromBlobStorageAsync(string? search, DateTime from, DateTime to)
     {
         try
         {
-            // Build OpenSearch query
-            var searchQuery = BuildLogSearchQuery(level, search);
+            var errorLogs = new List<object>();
             
-            _logger.LogDebug("Searching logs with query: {Query}, from: {From}, to: {To}, page: {Page}, pageSize: {PageSize}", 
-                searchQuery, from, to, page, pageSize);
+            // If search contains a migration ID, look for error payloads for that migration
+            if (!string.IsNullOrEmpty(search) && Guid.TryParse(search, out var migrationId))
+            {
+                // List files in the error-logs container for this migration
+                var errorFiles = await _blobService.ListFilesAsync("error-logs", $"{migrationId}/");
+                
+                foreach (var fileMetadata in errorFiles)
+                {
+                    try
+                    {
+                        // Get the blob URL from metadata
+                        var blobUrl = fileMetadata.Url;
+                        if (!string.IsNullOrEmpty(blobUrl))
+                        {
+                            var blobContent = await _blobService.GetStoredPayloadAsync(blobUrl);
+                            if (!string.IsNullOrEmpty(blobContent))
+                            {
+                                var errorData = JsonSerializer.Deserialize<object>(blobContent);
+                                if (errorData != null)
+                                {
+                                    errorLogs.Add(new
+                                    {
+                                        timestamp = DateTime.UtcNow,
+                                        level = "Error",
+                                        message = $"Error payload from blob: {fileMetadata.Name}",
+                                        source = "BigCommerce.Migration.BlobStorage",
+                                        migrationId = migrationId.ToString(),
+                                        blobName = fileMetadata.Name,
+                                        errorData = errorData
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to read error blob: {BlobName}", fileMetadata.Name);
+                    }
+                }
+            }
             
-            // Query OpenSearch for real logs
-            var searchResults = await _openSearchService.SearchLogsAsync(searchQuery, from, to);
-            
-            // Convert to list and apply pagination
-            var allEntries = searchResults.ToList();
-            var totalCount = allEntries.Count;
-            
-            // Apply pagination
-            var skip = (page - 1) * pageSize;
-            var pagedEntries = allEntries.Skip(skip).Take(pageSize).ToList();
-            
-            _logger.LogDebug("Retrieved {TotalCount} total logs, returning {PagedCount} for page {Page}", 
-                totalCount, pagedEntries.Count, page);
-            
-            return (pagedEntries, totalCount);
+            return errorLogs;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving logs from OpenSearch. Using fallback data.");
-            
-            // Fallback to basic data if OpenSearch is unavailable
-            return await GetFallbackLogEntriesAsync(level, from, to, search, page, pageSize);
+            _logger.LogError(ex, "Failed to retrieve error logs from blob storage");
+            return Enumerable.Empty<object>();
         }
     }
 
@@ -530,37 +552,26 @@ public class LoggingMonitoringFunctions
         {
             if (level.Equals("Error", StringComparison.OrdinalIgnoreCase))
             {
-                // For Error level, search both individual error logs and any batch logs with errors
-                queryParts.Add($"(Level:Error OR level:Error OR logType:MigrationError OR category:Error OR additionalData.logType:MigrationError OR additionalData.Level:Error OR (category:BatchProcessing AND errors:*))");
+                // For Error level, search for errors in OpenSearch service format
+                // Based on the actual document structure: category field with value "Error" (lowercase 'c')
+                queryParts.Add("category:\"Error\"");
             }
             else
             {
-                // For other levels, search with both casing variations
-                queryParts.Add($"(Level:{level} OR level:{level} OR category:{level} OR additionalData.Level:{level})");
+                // For other levels, search in standard log fields
+                queryParts.Add($"(Level:{level} OR level:{level})");
             }
         }
         
-        // Add search filter (could be migration ID, message content, etc.)
+        // Add search filter for migration ID or other text
         if (!string.IsNullOrWhiteSpace(search))
         {
-            // Check if search looks like a GUID (migration ID)
-            if (Guid.TryParse(search, out _))
-            {
-                queryParts.Add($"(migrationId:{search} OR requestId:{search} OR entityId:{search} OR MigrationId:{search} OR additionalData.migrationId:{search} OR additionalData.MigrationId:{search})");
-            }
-            else
-            {
-                // General text search across message and other fields
-                queryParts.Add($"(message:*{search}* OR context:*{search}* OR eventType:*{search}* OR errorMessage:*{search}* OR searchableContent:*{search}* OR additionalData.errorMessage:*{search}* OR additionalData.searchableContent:*{search}*)");
-            }
+            // Search in multiple fields where migration ID might be stored
+            // Now we have MigrationId field in error documents, so search there too
+            queryParts.Add($"(MigrationId:{search} OR migrationId:{search} OR Context:*{search}* OR context:*{search}*)");
         }
         
-        // Default to all migration-related logs if no specific filters
-        if (queryParts.Count == 0)
-        {
-            queryParts.Add("(source:BigCommerce.Migration OR migrationId:* OR MigrationId:* OR additionalData.migrationId:*)");
-        }
-        
+        // Combine all parts with AND
         return string.Join(" AND ", queryParts);
     }
 
@@ -637,6 +648,56 @@ public class LoggingMonitoringFunctions
         };
 
         return Task.FromResult((object)result);
+    }
+
+    /// <summary>
+    /// Parses a JsonElement into a Dictionary<string, object>
+    /// </summary>
+    /// <param name="jsonElement">The JsonElement to parse</param>
+    /// <returns>A Dictionary<string, object> representation of the JSON</returns>
+    private Dictionary<string, object> ParseJsonElementToDictionary(JsonElement jsonElement)
+    {
+        var dictionary = new Dictionary<string, object>();
+        foreach (var property in jsonElement.EnumerateObject())
+        {
+            var value = ParseJsonElement(property.Value);
+            if (value != null)
+            {
+                dictionary[property.Name] = value;
+            }
+        }
+        return dictionary;
+    }
+
+    /// <summary>
+    /// Recursively parses JsonElement values into a Dictionary<string, object>
+    /// </summary>
+    /// <param name="jsonElement">The JsonElement to parse</param>
+    /// <returns>A Dictionary<string, object> representation of the JSON</returns>
+    private object? ParseJsonElement(JsonElement jsonElement)
+    {
+        switch (jsonElement.ValueKind)
+        {
+            case JsonValueKind.Object:
+                return ParseJsonElementToDictionary(jsonElement);
+            case JsonValueKind.Array:
+                return jsonElement.EnumerateArray().Select(ParseJsonElement).ToList();
+            case JsonValueKind.String:
+                return jsonElement.GetString() ?? string.Empty;
+            case JsonValueKind.Number:
+                if (jsonElement.TryGetInt32(out int intValue)) return intValue;
+                if (jsonElement.TryGetInt64(out long longValue)) return longValue;
+                if (jsonElement.TryGetDouble(out double doubleValue)) return doubleValue;
+                return jsonElement.GetDecimal();
+            case JsonValueKind.True:
+                return true;
+            case JsonValueKind.False:
+                return false;
+            case JsonValueKind.Null:
+                return null;
+            default:
+                return jsonElement.ToString();
+        }
     }
 
     private Task<object> GetPerformanceAnalyticsDataAsync(int hours, string? granularity)

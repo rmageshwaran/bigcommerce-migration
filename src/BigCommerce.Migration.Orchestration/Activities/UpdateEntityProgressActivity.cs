@@ -36,10 +36,33 @@ public class UpdateEntityProgressActivity
             var migrationId = progressUpdate.MigrationId;
             var entityType = progressUpdate.EntityType;
             
-            _logger.LogDebug("Updating progress for {EntityType} in migration {MigrationId}", entityType, migrationId);
+            _logger.LogDebug("Updating progress for {EntityType} in migration {MigrationId}: Phase={Phase}, Processed={ProcessedEntities}/{TotalEntities}, Success={SuccessfulEntities}, Failed={FailedEntities}", 
+                entityType, migrationId, progressUpdate.Phase, progressUpdate.ProcessedEntities, progressUpdate.TotalEntities, progressUpdate.SuccessfulEntities, progressUpdate.FailedEntities);
 
-            // Placeholder for progress tracking implementation
-            await Task.CompletedTask;
+            // Create progress update object
+            var update = new ProgressUpdate
+            {
+                MigrationId = migrationId,
+                EntityType = entityType,
+                Phase = progressUpdate.Phase,
+                ProcessedCount = progressUpdate.ProcessedEntities,
+                SuccessCount = progressUpdate.SuccessfulEntities,
+                FailureCount = progressUpdate.FailedEntities,
+                CurrentBatch = progressUpdate.CurrentBatch,
+                TotalBatches = progressUpdate.TotalBatches,
+                StatusMessage = $"Processing {entityType}: {progressUpdate.ProcessedEntities}/{progressUpdate.TotalEntities} entities",
+                Timestamp = DateTime.UtcNow
+            };
+
+            // Update progress using the progress tracker
+            await _progressTracker.UpdateProgressAsync(migrationId, update, cancellationToken);
+            
+            // If this is a completion phase, also mark the entity as completed
+            if (progressUpdate.Phase.Equals("Completed", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogDebug("Marking {EntityType} as completed for migration {MigrationId}", entityType, migrationId);
+                await _progressTracker.CompleteEntityProcessingAsync(migrationId, entityType, cancellationToken);
+            }
             
             _logger.LogDebug("Progress updated successfully for {EntityType} in migration {MigrationId}", entityType, migrationId);
         }

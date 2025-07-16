@@ -35,12 +35,14 @@ public class EntityCreateService : IEntityCreateService
             return new List<Dictionary<string, object>>();
         }
 
-        _logger.LogInformation("Creating {Count} {EntityType} entities for migration {MigrationId}", 
-            entities.Count, request.EntityType, request.MigrationId);
+        // ✅ Add detailed execution tracking to detect replays
+        var executionId = Guid.NewGuid().ToString("N")[..8];
+        _logger.LogInformation("🔄 [EXEC-{ExecutionId}] Starting entity creation: {Count} {EntityType} entities for migration {MigrationId}", 
+            executionId, entities.Count, request.EntityType, request.MigrationId);
 
         try
         {
-            return request.EntityType.ToLowerInvariant() switch
+            var result = request.EntityType.ToLowerInvariant() switch
             {
                 "categories" => await CreateCategoriesAsync(entities, request, cancellationToken),
                 "products" => await CreateProductsAsync(entities, request, cancellationToken),
@@ -50,12 +52,21 @@ public class EntityCreateService : IEntityCreateService
                 "modifiers" => await CreateModifiersAsync(entities, request, cancellationToken),
                 _ => throw new ArgumentException($"Unsupported entity type: {request.EntityType}")
             };
+            
+            _logger.LogInformation("✅ [EXEC-{ExecutionId}] Completed entity creation: {EntityType} for migration {MigrationId}", 
+                executionId, request.EntityType, request.MigrationId);
+            
+            return result;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to create {EntityType} entities for migration {MigrationId}", 
-                request.EntityType, request.MigrationId);
-            throw new InvalidOperationException($"Entity creation failed for {request.EntityType}", ex);
+            _logger.LogError(ex, "❌ [EXEC-{ExecutionId}] Failed to create {EntityType} entities for migration {MigrationId}", 
+                executionId, request.EntityType, request.MigrationId);
+            
+            // ⚠️ This could cause Durable Functions replay - let's not throw here
+            // Instead, return empty list and let individual error handling manage the errors
+            _logger.LogWarning("🔄 [EXEC-{ExecutionId}] Returning empty result instead of throwing exception to prevent replay", executionId);
+            return new List<Dictionary<string, object>>();
         }
     }
 
@@ -64,7 +75,9 @@ public class EntityCreateService : IEntityCreateService
         BatchProcessingRequest request,
         CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Creating {Count} categories for migration {MigrationId}", categories.Count, request.MigrationId);
+        var executionId = Guid.NewGuid().ToString("N")[..8];
+        _logger.LogInformation("🏷️ [CAT-{ExecutionId}] Creating {Count} categories for migration {MigrationId}", 
+            executionId, categories.Count, request.MigrationId);
         
         var storeConfig = ValidateStoreConfiguration(request.DestinationStore);
         var categoryTreeId = request.CategoryTreeContext?.DestinationCategoryTreeId;
@@ -88,22 +101,22 @@ public class EntityCreateService : IEntityCreateService
             var categoryName = category.TryGetValue("name", out var name) ? name.ToString() : "unknown";
             var parentId = category.TryGetValue("parent_id", out var parent) ? parent?.ToString() : "null";
             
-            _logger.LogDebug("Creating category: Name='{CategoryName}', ParentId={ParentId} in migration {MigrationId}",
-                categoryName, parentId, request.MigrationId);
+            _logger.LogDebug("🏷️ [CAT-{ExecutionId}] Creating category: Name='{CategoryName}', ParentId={ParentId} in migration {MigrationId}",
+                executionId, categoryName, parentId, request.MigrationId);
         }
 
         try
         {
-            _logger.LogDebug("Attempting batch creation of {CategoryCount} categories in destination store {DestinationStore} tree {DestinationTreeId} for migration {MigrationId}",
-                categories.Count, storeConfig.StoreId, categoryTreeId, request.MigrationId);
+            _logger.LogDebug("🏷️ [CAT-{ExecutionId}] 📦 Attempting BATCH creation of {CategoryCount} categories in destination store {DestinationStore} tree {DestinationTreeId} for migration {MigrationId}",
+                executionId, categories.Count, storeConfig.StoreId, categoryTreeId, request.MigrationId);
 
             // Try batch creation first (original approach)
             var createdCategories = await _apiClient.CreateCategoriesAsync(storeConfig, categoryTreeId, categories, cancellationToken);
 
             if (createdCategories != null && createdCategories.Any())
             {
-                _logger.LogInformation("Successfully created {CreatedCount} categories in destination store {DestinationStore} for migration {MigrationId}",
-                    createdCategories.Count, storeConfig.StoreId, request.MigrationId);
+                _logger.LogInformation("🏷️ [CAT-{ExecutionId}] ✅ Successfully created {CreatedCount} categories in destination store {DestinationStore} for migration {MigrationId}",
+                    executionId, createdCategories.Count, storeConfig.StoreId, request.MigrationId);
 
                 // Log created category mappings for debugging (from original implementation)
                 for (int i = 0; i < Math.Min(categories.Count, createdCategories.Count); i++)
@@ -111,13 +124,13 @@ public class EntityCreateService : IEntityCreateService
                     var sourceName = categories[i].TryGetValue("name", out var sName) ? sName.ToString() : "unknown";
                     var createdId = createdCategories[i].TryGetValue("category_id", out var cId) ? cId.ToString() : "unknown";
                     
-                    _logger.LogDebug("Created category mapping: '{CategoryName}' -> ID {CreatedId} in migration {MigrationId}",
-                        sourceName, createdId, request.MigrationId);
+                    _logger.LogDebug("🏷️ [CAT-{ExecutionId}] Created category mapping: '{CategoryName}' -> ID {CreatedId} in migration {MigrationId}",
+                        executionId, sourceName, createdId, request.MigrationId);
                 }
             }
             else
             {
-                _logger.LogWarning("Category creation returned no results for migration {MigrationId}", request.MigrationId);
+                _logger.LogWarning("🏷️ [CAT-{ExecutionId}] Category creation returned no results for migration {MigrationId}", executionId, request.MigrationId);
             }
 
             return createdCategories;
@@ -127,23 +140,23 @@ public class EntityCreateService : IEntityCreateService
             // Extract detailed API error information (from original implementation)
             var detailedErrorMessage = ExtractDetailedErrorMessage(ex);
             
-            _logger.LogError(ex, "Batch creation failed for {CategoryCount} categories in destination store {DestinationStore} tree {DestinationTreeId} for migration {MigrationId}. {DetailedError}",
-                categories.Count, storeConfig.StoreId, categoryTreeId, request.MigrationId, detailedErrorMessage);
+            _logger.LogError(ex, "🏷️ [CAT-{ExecutionId}] ❌ Batch creation failed for {CategoryCount} categories in destination store {DestinationStore} tree {DestinationTreeId} for migration {MigrationId}. {DetailedError}",
+                executionId, categories.Count, storeConfig.StoreId, categoryTreeId, request.MigrationId, detailedErrorMessage);
 
             // Log individual category details for troubleshooting (from original implementation)
             foreach (var category in categories)
             {
                 var categoryName = category.TryGetValue("name", out var name) ? name.ToString() : "unknown";
-                _logger.LogError("Failed category: Name='{CategoryName}', Data={CategoryData}", 
-                    categoryName, System.Text.Json.JsonSerializer.Serialize(category));
+                _logger.LogError("🏷️ [CAT-{ExecutionId}] Failed category: Name='{CategoryName}', Data={CategoryData}", 
+                    executionId, categoryName, System.Text.Json.JsonSerializer.Serialize(category));
             }
 
             // Log batch failure as warning only (no structured error logging to avoid duplicate errors)
-            _logger.LogWarning("Batch category creation failed for migration {MigrationId}, falling back to individual creation. Error: {Error}", 
-                request.MigrationId, detailedErrorMessage);
+            _logger.LogWarning("🏷️ [CAT-{ExecutionId}] Batch category creation failed for migration {MigrationId}, falling back to individual creation. Error: {Error}", 
+                executionId, request.MigrationId, detailedErrorMessage);
 
             // Fallback to individual creation (new approach for robustness)
-            _logger.LogInformation("Falling back to individual category creation for migration {MigrationId}", request.MigrationId);
+            _logger.LogInformation("🏷️ [CAT-{ExecutionId}] 🔄 Falling back to INDIVIDUAL category creation for migration {MigrationId}", executionId, request.MigrationId);
             return await CreateCategoriesIndividuallyAsync(categories, request, cancellationToken);
         }
     }
@@ -153,38 +166,45 @@ public class EntityCreateService : IEntityCreateService
         BatchProcessingRequest request,
         CancellationToken cancellationToken)
     {
+        var executionId = Guid.NewGuid().ToString("N")[..8];
         var storeConfig = ValidateStoreConfiguration(request.DestinationStore);
         var categoryTreeId = request.CategoryTreeContext?.DestinationCategoryTreeId!;
         var createdCategories = new List<Dictionary<string, object>>();
 
+        _logger.LogInformation("🏷️ [IND-{ExecutionId}] Starting individual category creation: {Count} categories for migration {MigrationId}", 
+            executionId, categories.Count, request.MigrationId);
+
         foreach (var category in categories)
         {
+            var categoryName = category.TryGetValue("name", out var name) ? name.ToString() : "unknown";
+            var categoryId = category.TryGetValue("_original_entity_id", out var origId) ? origId?.ToString() : "unknown";
+            
             try
             {
+                _logger.LogDebug("🏷️ [IND-{ExecutionId}] 🔨 Processing individual category '{CategoryName}' (ID: {CategoryId}) in migration {MigrationId}", 
+                    executionId, categoryName, categoryId, request.MigrationId);
+
                 // Create category individually
                 var createdCategory = await _apiClient.CreateCategoriesAsync(storeConfig, categoryTreeId, new List<Dictionary<string, object>> { category }, cancellationToken);
                 
                 if (createdCategory != null && createdCategory.Any())
                 {
                     createdCategories.AddRange(createdCategory);
-                    var categoryName = category.TryGetValue("name", out var name) ? name.ToString() : "unknown";
-                    _logger.LogDebug("Successfully created category '{CategoryName}' individually in migration {MigrationId}", 
-                        categoryName, request.MigrationId);
+                    _logger.LogDebug("🏷️ [IND-{ExecutionId}] ✅ Successfully created category '{CategoryName}' (ID: {CategoryId}) individually in migration {MigrationId}", 
+                        executionId, categoryName, categoryId, request.MigrationId);
                 }
                 else
                 {
-                    var categoryName = category.TryGetValue("name", out var name) ? name.ToString() : "unknown";
-                    _logger.LogWarning("Individual category creation returned no results for '{CategoryName}' in migration {MigrationId}", 
-                        categoryName, request.MigrationId);
+                    _logger.LogWarning("🏷️ [IND-{ExecutionId}] ⚠️ Individual category creation returned no results for '{CategoryName}' (ID: {CategoryId}) in migration {MigrationId}", 
+                        executionId, categoryName, categoryId, request.MigrationId);
                 }
             }
             catch (Exception ex)
             {
                 var detailedErrorMessage = ExtractDetailedErrorMessage(ex);
-                var categoryName = category.TryGetValue("name", out var name) ? name.ToString() : "unknown";
                 
-                _logger.LogError(ex, "Failed to create category '{CategoryName}' individually in migration {MigrationId}. {DetailedError}", 
-                    categoryName, request.MigrationId, detailedErrorMessage);
+                _logger.LogError(ex, "🏷️ [IND-{ExecutionId}] ❌ Failed to create category '{CategoryName}' (ID: {CategoryId}) individually in migration {MigrationId}. {DetailedError}", 
+                    executionId, categoryName, categoryId, request.MigrationId, detailedErrorMessage);
                 
                 // Log structured error to OpenSearch
                 try
@@ -199,16 +219,16 @@ public class EntityCreateService : IEntityCreateService
                 }
                 catch (Exception logEx)
                 {
-                    _logger.LogWarning(logEx, "Failed to log structured error for category '{CategoryName}' in migration {MigrationId}", 
-                        categoryName, request.MigrationId);
+                    _logger.LogWarning(logEx, "🏷️ [IND-{ExecutionId}] Failed to log structured error for category '{CategoryName}' (ID: {CategoryId}) in migration {MigrationId}", 
+                        executionId, categoryName, categoryId, request.MigrationId);
                 }
                 
                 // Continue with next category instead of failing entire batch
             }
         }
 
-        _logger.LogInformation("Individual category creation completed: {CreatedCount}/{TotalCount} successful for migration {MigrationId}", 
-            createdCategories.Count, categories.Count, request.MigrationId);
+        _logger.LogInformation("🏷️ [IND-{ExecutionId}] ✅ Individual category creation completed: {CreatedCount}/{TotalCount} successful for migration {MigrationId}", 
+            executionId, createdCategories.Count, categories.Count, request.MigrationId);
         
         return createdCategories;
     }

@@ -855,12 +855,13 @@ public class MigrationHttpFunctions
             var to = DateTime.UtcNow;
             
             // Query directly for Error category logs - they have all the detailed error information
+            // ✅ Include migrationId in the search term for explicit filtering
             var queryRequest = new Core.Models.OpenSearchQuery
             {
                 FromDate = from,
                 ToDate = to,
                 MigrationId = migrationId,
-                SearchTerm = $"category:\"Error\" AND entityType:\"{entityType}\"", // Direct query for Error category logs
+                SearchTerm = $"category:\"Error\" AND entityType:\"{entityType}\" AND (MigrationId:\"{migrationId}\" OR migrationId:\"{migrationId}\")", // Explicit migration ID filter
                 Size = pageSize,
                 From = (currentPage - 1) * pageSize,
                 SortField = "timestamp",
@@ -868,7 +869,7 @@ public class MigrationHttpFunctions
                 IncludeFields = null // Include all fields
             };
 
-            _logger.LogInformation("Searching for entity errors with optimized query: MigrationId={MigrationId}, EntityType={EntityType}", migrationId, entityType);
+            _logger.LogInformation("🔍 DEBUG: Searching with explicit MigrationId filter: MigrationId={MigrationId}, SearchTerm={SearchTerm}", migrationId, queryRequest.SearchTerm);
             
             var (searchResults, totalCount) = await _openSearchService.SearchLogsOptimizedAsync(queryRequest);
             
@@ -938,9 +939,19 @@ public class MigrationHttpFunctions
             
             foreach (var logDict in errorLogs)
             {
-                // Only process Error category logs - skip everything else
-                if (!logDict.TryGetValue("category", out var category) || 
-                    category?.ToString() != "Error")
+                // ✅ Additional safety filter - ensure this error belongs to the requested migration
+                var logMigrationId = GetMigrationIdFromLog(logDict);
+                if (!string.IsNullOrEmpty(logMigrationId) && !logMigrationId.Equals(migrationId, StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogDebug("🚫 Skipping error from different migration: {LogMigrationId} (requested: {RequestedMigrationId})", 
+                        logMigrationId, migrationId);
+                    continue; // Skip errors from other migrations
+                }
+                
+                var category = logDict.TryGetValue("category", out var cat) ? cat?.ToString() : null;
+                
+                // Only process Error category logs
+                if (!"Error".Equals(category, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
@@ -1208,6 +1219,47 @@ public class MigrationHttpFunctions
             if (!string.IsNullOrEmpty(entityId))
             {
                 return entityId;
+            }
+        }
+        
+        return null;
+    }
+    
+    /// <summary>
+    /// Gets the migration ID from a log dictionary
+    /// </summary>
+    /// <param name="logDict">Log dictionary</param>
+    /// <returns>Migration ID or null if not found</returns>
+    private string? GetMigrationIdFromLog(Dictionary<string, object> logDict)
+    {
+        // Check top-level migrationId field
+        if (logDict.TryGetValue("migrationId", out var migrationId))
+        {
+            var migrationIdStr = migrationId?.ToString();
+            if (!string.IsNullOrEmpty(migrationIdStr))
+            {
+                return migrationIdStr;
+            }
+        }
+        
+        // Check top-level MigrationId field (capitalized)
+        if (logDict.TryGetValue("MigrationId", out var migrationIdCap))
+        {
+            var migrationIdStr = migrationIdCap?.ToString();
+            if (!string.IsNullOrEmpty(migrationIdStr))
+            {
+                return migrationIdStr;
+            }
+        }
+        
+        // Check additionalData.migrationId field
+        if (logDict.TryGetValue("additionalData", out var additionalData) && 
+            additionalData is Dictionary<string, object> additionalDataDict)
+        {
+            var migrationIdFromAdditional = additionalDataDict.TryGetValue("migrationId", out var mid) ? mid?.ToString() : null;
+            if (!string.IsNullOrEmpty(migrationIdFromAdditional))
+            {
+                return migrationIdFromAdditional;
             }
         }
         

@@ -1,18 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Title,
-  Tooltip,
-  Legend,
-  ArcElement,
-  BarElement,
-} from 'chart.js';
-import type { ChartOptions, TooltipItem } from 'chart.js';
-import { Line, Pie, Bar } from 'react-chartjs-2';
+import React, { useEffect, useState } from 'react';
 import {
   Box,
   Card,
@@ -27,8 +13,21 @@ import {
   PieChart as PieChartIcon,
   BarChart as BarChartIcon,
 } from '@mui/icons-material';
+import { Line } from 'react-chartjs-2';
+import type { ChartOptions } from 'chart.js';
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend,
+  TimeScale,
+} from 'chart.js';
+import 'chartjs-adapter-date-fns';
 import { useDashboard } from '../../context/DashboardContext';
-import type { MigrationProgress } from '../../types';
 
 // Register Chart.js components
 ChartJS.register(
@@ -39,8 +38,7 @@ ChartJS.register(
   Title,
   Tooltip,
   Legend,
-  ArcElement,
-  BarElement
+  TimeScale,
 );
 
 type ChartType = 'progress' | 'entities' | 'speed';
@@ -217,7 +215,7 @@ export const ProgressChart: React.FC<ProgressChartProps> = ({
       },
       tooltip: {
         callbacks: {
-          label: (context: TooltipItem<'line'>) => {
+          label: (context) => {
             return `${context.dataset.label}: ${context.parsed.y.toFixed(1)}%`;
           },
         },
@@ -238,60 +236,10 @@ export const ProgressChart: React.FC<ProgressChartProps> = ({
     },
   };
 
-  const pieChartOptions: ChartOptions<'pie'> = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: {
-        position: 'right' as const,
-      },
-      title: {
-        display: true,
-        text: 'Processed Entities by Type',
-      },
-      tooltip: {
-        callbacks: {
-          label: (context: TooltipItem<'pie'>) => {
-            const total = context.dataset.data.reduce((a, b) => Number(a) + Number(b), 0);
-            const percentage = ((Number(context.parsed) / Number(total)) * 100).toFixed(1);
-            return `${context.label}: ${context.parsed.toLocaleString()} (${percentage}%)`;
-          },
-        },
-      },
-    },
-  };
 
-  const barChartOptions: ChartOptions<'bar'> = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: {
-        position: 'top' as const,
-      },
-      title: {
-        display: true,
-        text: 'Processing Speed (entities/second)',
-      },
-      tooltip: {
-        callbacks: {
-          label: (context: TooltipItem<'bar'>) => {
-            return `${context.dataset.label}: ${context.parsed.y.toFixed(1)} entities/sec`;
-          },
-        },
-      },
-    },
-    scales: {
-      y: {
-        beginAtZero: true,
-        ticks: {
-          callback: (value) => `${value}/sec`,
-        },
-      },
-    },
-  };
 
   const handleChartTypeChange = (
-    event: React.MouseEvent<HTMLElement>,
+    _: React.MouseEvent<HTMLElement>,
     newType: ChartType | null,
   ) => {
     if (newType !== null) {
@@ -320,9 +268,9 @@ export const ProgressChart: React.FC<ProgressChartProps> = ({
       case 'progress':
         return <Line data={getProgressChartData()} options={lineChartOptions} />;
       case 'entities':
-        return <Pie data={getEntityChartData()} options={pieChartOptions} />;
+        return <Line data={getEntityChartData()} options={lineChartOptions} />;
       case 'speed':
-        return <Bar data={getSpeedChartData()} options={barChartOptions} />;
+        return <Line data={getSpeedChartData()} options={lineChartOptions} />;
       default:
         return null;
     }

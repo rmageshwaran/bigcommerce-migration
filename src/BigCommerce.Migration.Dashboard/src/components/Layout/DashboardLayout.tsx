@@ -2,100 +2,173 @@ import React, { useState } from 'react';
 import {
   Box,
   CssBaseline,
-  Drawer,
   AppBar,
   Toolbar,
   Typography,
   IconButton,
-  useTheme,
-  useMediaQuery,
+  Tabs,
+  Tab,
+  Switch,
+  FormControlLabel,
+  Button,
+  Container,
 } from '@mui/material';
 import {
-  Menu as MenuIcon,
-  Dashboard as DashboardIcon,
-  Assessment as AssessmentIcon,
-  Settings as SettingsIcon,
+  Help as HelpIcon,
 } from '@mui/icons-material';
-import { Outlet } from 'react-router-dom';
-import { DashboardSidebar } from './DashboardSidebar';
-import { DashboardHeader } from './DashboardHeader';
-
-const drawerWidth = 240;
+import { Outlet, useNavigate, useLocation } from 'react-router-dom';
+import ThemeToggle from './ThemeToggle';
 
 interface DashboardLayoutProps {
   children?: React.ReactNode;
 }
 
-export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-  const [mobileOpen, setMobileOpen] = useState(false);
+interface NavigationTab {
+  label: string;
+  value: string;
+  path: string;
+}
 
-  const handleDrawerToggle = () => {
-    setMobileOpen(!mobileOpen);
+const navigationTabs: NavigationTab[] = [
+  { label: 'Home', value: 'home', path: '/' },
+  { label: 'Bulk Content Migration', value: 'bulk', path: '/start' },
+  { label: 'Selective Content Migration', value: 'selective', path: '/selective' },
+  { label: 'History & Rollback', value: 'history', path: '/history' },
+  { label: 'Settings', value: 'settings', path: '/settings' },
+];
+
+export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [dataMigrationV2, setDataMigrationV2] = useState(true);
+
+  // Determine current tab based on location
+  const getCurrentTab = () => {
+    const currentTab = navigationTabs.find(tab => {
+      if (tab.path === '/') {
+        return location.pathname === '/';
+      }
+      return location.pathname.startsWith(tab.path);
+    });
+    return currentTab?.value || 'home';
+  };
+
+  const handleTabChange = (event: React.SyntheticEvent, newValue: string) => {
+    const tab = navigationTabs.find(t => t.value === newValue);
+    if (tab) {
+      navigate(tab.path);
+    }
+  };
+
+  const handleHelpClick = () => {
+    console.log('Help clicked');
+    // TODO: Implement help functionality
+  };
+
+  const handleDataMigrationToggle = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setDataMigrationV2(event.target.checked);
+    // TODO: Implement version toggle functionality
   };
 
   return (
-    <Box sx={{ display: 'flex' }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
       <CssBaseline />
       
-      {/* Header */}
-      <DashboardHeader 
-        onMenuClick={handleDrawerToggle}
-        drawerWidth={drawerWidth}
-      />
+      {/* Top Navigation */}
+      <AppBar position="static" elevation={0}>
+        <Toolbar sx={{ justifyContent: 'space-between', px: 3 }}>
+          {/* Left side - Navigation Tabs */}
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            <Tabs
+              value={getCurrentTab()}
+              onChange={handleTabChange}
+              textColor="inherit"
+              sx={{
+                '& .MuiTab-root': {
+                  color: 'text.secondary',
+                  '&.Mui-selected': {
+                    color: 'primary.main',
+                  },
+                },
+              }}
+            >
+              {navigationTabs.map((tab) => (
+                <Tab
+                  key={tab.value}
+                  label={tab.label}
+                  value={tab.value}
+                  sx={{
+                    textTransform: 'none',
+                    fontWeight: 500,
+                    fontSize: '0.875rem',
+                    minWidth: 'auto',
+                    px: 2,
+                  }}
+                />
+              ))}
+            </Tabs>
+          </Box>
 
-      {/* Sidebar */}
-      <Box
-        component="nav"
-        sx={{ width: { md: drawerWidth }, flexShrink: { md: 0 } }}
-      >
-        {/* Mobile drawer */}
-        <Drawer
-          variant="temporary"
-          open={mobileOpen}
-          onClose={handleDrawerToggle}
-          ModalProps={{
-            keepMounted: true, // Better open performance on mobile.
-          }}
-          sx={{
-            display: { xs: 'block', md: 'none' },
-            '& .MuiDrawer-paper': {
-              boxSizing: 'border-box',
-              width: drawerWidth,
-            },
-          }}
-        >
-          <DashboardSidebar onItemClick={() => setMobileOpen(false)} />
-        </Drawer>
-        
-        {/* Desktop drawer */}
-        <Drawer
-          variant="permanent"
-          sx={{
-            display: { xs: 'none', md: 'block' },
-            '& .MuiDrawer-paper': {
-              boxSizing: 'border-box',
-              width: drawerWidth,
-            },
-          }}
-          open
-        >
-          <DashboardSidebar />
-        </Drawer>
-      </Box>
+          {/* Right side - Controls */}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            {/* Data Migration V2 Toggle */}
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={dataMigrationV2}
+                  onChange={handleDataMigrationToggle}
+                  size="small"
+                  color="primary"
+                />
+              }
+              label={
+                <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                  Data Migration V2
+                </Typography>
+              }
+              labelPlacement="start"
+              sx={{
+                margin: 0,
+                '& .MuiFormControlLabel-label': {
+                  color: 'text.secondary',
+                },
+              }}
+            />
 
-      {/* Main content */}
+            {/* Theme Toggle */}
+            <ThemeToggle />
+
+            {/* Help Button */}
+            <Button
+              variant="outlined"
+              startIcon={<HelpIcon />}
+              onClick={handleHelpClick}
+              size="small"
+              sx={{
+                textTransform: 'none',
+                fontWeight: 500,
+                borderRadius: '6px',
+                px: 2,
+              }}
+            >
+              Help
+            </Button>
+          </Box>
+        </Toolbar>
+      </AppBar>
+
+      {/* Main Content */}
       <Box
         component="main"
         sx={{
           flexGrow: 1,
-          p: 3,
-          width: { md: `calc(100% - ${drawerWidth}px)` },
-          mt: 8, // Account for header height
+          bgcolor: 'background.default',
+          pt: 3,
         }}
       >
-        {children || <Outlet />}
+        <Container maxWidth="xl" sx={{ px: 3 }}>
+          {children || <Outlet />}
+        </Container>
       </Box>
     </Box>
   );

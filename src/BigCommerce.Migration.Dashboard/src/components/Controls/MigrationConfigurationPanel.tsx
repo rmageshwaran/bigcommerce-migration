@@ -618,7 +618,53 @@ export const MigrationConfigurationPanel: React.FC<MigrationConfigurationPanelPr
   initialConfig = {},
 }) => {
   const [config, setConfig] = useState<MigrationConfig>({
-    ...initialConfig,
+    sourceStore: {
+      hash: '',
+      apiKey: '',
+      apiSecret: '',
+      storeUrl: '',
+      name: '',
+    },
+    destinationStore: {
+      hash: '',
+      apiKey: '',
+      apiSecret: '',
+      storeUrl: '',
+      name: '',
+    },
+    entities: {
+      categories: false,
+      products: false,
+      brands: false,
+      variants: false,
+      images: false,
+      modifiers: false,
+    },
+    batchSizes: {
+      categories: 100,
+      products: 50,
+      brands: 100,
+      variants: 100,
+      images: 25,
+      modifiers: 100,
+    },
+    options: {
+      continueOnError: false,
+      skipExisting: false,
+      validateData: true,
+      enableLogging: true,
+      overwriteExisting: false,
+      preserveIds: false,
+      rateLimitCompliance: true,
+      maxConcurrency: 5,
+      retryAttempts: 3,
+      notifyOnCompletion: true,
+    },
+    scheduling: {
+      startImmediately: true,
+      scheduledStartTime: '',
+      priority: 'normal',
+    },
     ...initialConfig,
   });
   const [activeStep, setActiveStep] = useState(0);

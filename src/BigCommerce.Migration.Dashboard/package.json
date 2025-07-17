@@ -23,6 +23,7 @@
     "@types/file-saver": "^2.0.7",
     "axios": "^1.10.0",
     "chart.js": "^4.5.0",
+    "chartjs-adapter-date-fns": "^3.0.0",
     "date-fns": "^4.1.0",
     "file-saver": "^2.0.5",
     "html2canvas": "^1.4.1",

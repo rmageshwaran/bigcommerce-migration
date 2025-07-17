@@ -1,884 +1,406 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   Box,
   Typography,
   Button,
   Card,
   CardContent,
-  Grid,
-  TextField,
-  Checkbox,
+  FormControl,
+  Select,
+  MenuItem,
   FormControlLabel,
-  IconButton,
-  Stepper,
-  Step,
-  StepLabel,
-  StepContent,
-  LinearProgress,
-  Alert,
-  Switch,
-  Slider,
-  Chip,
-  InputAdornment,
-  CircularProgress,
-  Paper,
-  List,
-  ListItem,
-  ListItemText,
-  ListItemIcon,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
+  Checkbox,
+  FormGroup,
+  Link,
 } from '@mui/material';
 import {
-  Visibility,
-  VisibilityOff,
-  CheckCircle,
-  Cancel,
-  ArrowBack,
-  ArrowForward,
-  PlayArrow,
-  ExpandMore,
-  Category,
-  Inventory,
-  Store as BrandIcon,
-  Tune,
-  Image,
-  Settings,
+  ArrowForward as ArrowForwardIcon,
 } from '@mui/icons-material';
 import { useDashboard } from '../../context/DashboardContext';
-import type { EntityConfiguration, MigrationOptions } from '../../types';
 import { notificationService } from '../../services/notificationService';
 import { getApiService } from '../../services/apiService';
 
-// Define additional types needed for the form
-interface StoreConfiguration {
-  storeUrl: string;
-  storeHash: string;
-  clientId: string;
-  accessToken: string;
-  apiPath: string;
-  name: string;
-}
-
-interface MigrationConfig {
-  name: string;
-  description: string;
-  sourceStore: StoreConfiguration;
-  destinationStore: StoreConfiguration;
-  selectedEntities: Record<string, boolean>;
-  batchSizes: Record<string, number>;
-  options: MigrationOptions & {
-    enableDetailedLogging: boolean;
-    enableRealTimeUpdates: boolean;
-    maxRetries: number;
-    rateLimit: number;
-  };
-}
-
-type EntityType = 'categories' | 'products' | 'brands' | 'variants' | 'images' | 'modifiers';
-
-const StoreConfigurationStep: React.FC<{ 
-  formData: MigrationConfig;
-  onUpdate: (data: Partial<MigrationConfig>) => void;
-}> = ({ formData, onUpdate }) => {
-  const [showSourcePassword, setShowSourcePassword] = useState(false);
-  const [showDestPassword, setShowDestPassword] = useState(false);
-  const [sourceStatus, setSourceStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
-  const [destStatus, setDestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
-
-  const testConnection = async (type: 'source' | 'destination') => {
-    const config = type === 'source' ? formData.sourceStore : formData.destinationStore;
-    const setStatus = type === 'source' ? setSourceStatus : setDestStatus;
+interface MigrationFormData {
+  sourceStore: string;
+  sourceStorefront: string;
+  destinationStore: string;
+  destinationStorefront: string;
+  selectedEntities: {
+    // Design and Content Migration
+    blogPosts: boolean;
+    couponCodes: boolean;
     
-    setStatus('testing');
-    try {
-      const apiService = getApiService();
-      const isValid = await apiService.testConnection();
-      setStatus(isValid ? 'success' : 'error');
-    } catch (error) {
-      setStatus('error');
-    }
+    // Product Data Migration
+    brands: boolean;
+    categories: boolean;
+    priceLists: boolean;
+    promotions: boolean;
+    
+    // Order Data Migration
+    orders: boolean;
+    giftCertificates: boolean;
+    customers: boolean;
+    
+    // Other
+    permanentRedirects: boolean;
+    currencies: boolean;
   };
+}
 
-  const renderStoreConfig = (
-    title: string,
-    config: StoreConfiguration,
-    onConfigUpdate: (update: Partial<StoreConfiguration>) => void,
-    showPassword: boolean,
-    setShowPassword: (show: boolean) => void,
-    status: typeof sourceStatus,
-    onTest: () => void
-  ) => (
-    <Card>
-      <CardContent>
-        <Typography variant="h6" gutterBottom>
-          {title}
-        </Typography>
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-            <Box sx={{ flex: '1 1 300px' }}>
-              <TextField
-                fullWidth
-                label="Store URL"
-                value={config.storeUrl}
-                onChange={(e) => onConfigUpdate({ storeUrl: e.target.value })}
-                placeholder="https://your-store.mybigcommerce.com"
+const EntitySelectionCard: React.FC<{
+  title: string;
+  color: string;
+  entities: { key: keyof MigrationFormData['selectedEntities']; label: string }[];
+  selectedEntities: MigrationFormData['selectedEntities'];
+  onEntityChange: (key: keyof MigrationFormData['selectedEntities'], checked: boolean) => void;
+}> = ({ title, color, entities, selectedEntities, onEntityChange }) => (
+  <Card sx={{ 
+    height: '100%',
+    borderLeft: `4px solid ${color}`,
+    '&:hover': {
+      boxShadow: 2,
+    },
+  }}>
+    <CardContent>
+      <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, color: 'text.primary' }}>
+        {title}
+      </Typography>
+      <FormGroup>
+        {entities.map(entity => (
+          <FormControlLabel
+            key={entity.key}
+            control={
+              <Checkbox
+                checked={selectedEntities[entity.key]}
+                onChange={(e) => onEntityChange(entity.key, e.target.checked)}
+                size="small"
+                sx={{
+                  '&.Mui-checked': {
+                    color: color,
+                  },
+                }}
               />
-            </Box>
-            <Box sx={{ flex: '1 1 300px' }}>
-              <TextField
-                fullWidth
-                label="Store Hash"
-                value={config.storeHash}
-                onChange={(e) => onConfigUpdate({ storeHash: e.target.value })}
-                placeholder="abc123def"
-              />
-            </Box>
-          </Box>
-          
-          <TextField
-            fullWidth
-            label="Client ID"
-            value={config.clientId}
-            onChange={(e) => onConfigUpdate({ clientId: e.target.value })}
-            placeholder="your-client-id"
-          />
-          
-          <TextField
-            fullWidth
-            label="Access Token"
-            type={showPassword ? 'text' : 'password'}
-            value={config.accessToken}
-            onChange={(e) => onConfigUpdate({ accessToken: e.target.value })}
-            placeholder="your-access-token"
-            InputProps={{
-              endAdornment: (
-                <InputAdornment position="end">
-                  <IconButton onClick={() => setShowPassword(!showPassword)} edge="end">
-                    {showPassword ? <VisibilityOff /> : <Visibility />}
-                  </IconButton>
-                </InputAdornment>
-              ),
+            }
+            label={
+              <Typography variant="body2" sx={{ fontSize: '0.875rem' }}>
+                {entity.label}
+              </Typography>
+            }
+            sx={{ 
+              marginBottom: 0.5,
+              '& .MuiFormControlLabel-label': {
+                fontSize: '0.875rem',
+              },
             }}
           />
-          
-          <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-            <Box sx={{ flex: '1 1 200px' }}>
-              <TextField
-                fullWidth
-                label="API Path"
-                value={config.apiPath}
-                onChange={(e) => onConfigUpdate({ apiPath: e.target.value })}
-                placeholder="/stores/{store_hash}/v3/"
-              />
-            </Box>
-            <Box sx={{ flex: '1 1 200px' }}>
-              <TextField
-                fullWidth
-                label="Store Name"
-                value={config.name}
-                onChange={(e) => onConfigUpdate({ name: e.target.value })}
-                placeholder="My Store"
-              />
-            </Box>
-          </Box>
-          
-          <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-            <Button
-              variant="outlined"
-              onClick={onTest}
-              disabled={status === 'testing'}
-              startIcon={status === 'testing' ? <CircularProgress size={16} /> : undefined}
-            >
-              Test Connection
-            </Button>
-            {status === 'success' && <CheckCircle color="success" />}
-            {status === 'error' && <Cancel color="error" />}
-          </Box>
-        </Box>
-      </CardContent>
-    </Card>
-  );
-
-  return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-      <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
-        <Box sx={{ flex: '1 1 400px' }}>
-          {renderStoreConfig(
-            'Source Store',
-            formData.sourceStore,
-            (update) => onUpdate({ sourceStore: { ...formData.sourceStore, ...update } }),
-            showSourcePassword,
-            setShowSourcePassword,
-            sourceStatus,
-            () => testConnection('source')
-          )}
-        </Box>
-        <Box sx={{ flex: '1 1 400px' }}>
-          {renderStoreConfig(
-            'Destination Store',
-            formData.destinationStore,
-            (update) => onUpdate({ destinationStore: { ...formData.destinationStore, ...update } }),
-            showDestPassword,
-            setShowDestPassword,
-            destStatus,
-            () => testConnection('destination')
-          )}
-        </Box>
-      </Box>
-    </Box>
-  );
-};
-
-const EntitySelectionStep: React.FC<{
-  formData: MigrationConfig;
-  onUpdate: (data: Partial<MigrationConfig>) => void;
-}> = ({ formData, onUpdate }) => {
-  const entityTypes = [
-    { key: 'categories' as EntityType, name: 'Categories', icon: Category, count: 150, description: 'Product categories and subcategories' },
-    { key: 'products' as EntityType, name: 'Products', icon: Inventory, count: 2500, description: 'Product catalog with basic information' },
-    { key: 'brands' as EntityType, name: 'Brands', icon: BrandIcon, count: 45, description: 'Brand information and metadata' },
-    { key: 'variants' as EntityType, name: 'Product Variants', icon: Tune, count: 8200, description: 'Product options and variants' },
-    { key: 'images' as EntityType, name: 'Images', icon: Image, count: 12500, description: 'Product and category images' },
-    { key: 'modifiers' as EntityType, name: 'Modifiers', icon: Settings, count: 320, description: 'Product modifiers and options' },
-  ];
-
-  const handleEntityToggle = (entityType: EntityType) => {
-    const newSelected = {
-      ...formData.selectedEntities,
-      [entityType]: !formData.selectedEntities[entityType],
-    };
-    onUpdate({ selectedEntities: newSelected });
-  };
-
-  const handleBatchSizeChange = (entityType: EntityType, value: number) => {
-    const newBatchSizes = {
-      ...formData.batchSizes,
-      [entityType]: value,
-    };
-    onUpdate({ batchSizes: newBatchSizes });
-  };
-
-  return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-      <Typography variant="h6">Select entities to migrate</Typography>
-      
-      <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-        {entityTypes.map((entity) => {
-          const IconComponent = entity.icon;
-          const isSelected = formData.selectedEntities[entity.key];
-          const batchSize = formData.batchSizes[entity.key] || 50;
-          
-          return (
-            <Box key={entity.key} sx={{ flex: '1 1 400px', minWidth: '300px' }}>
-              <Card 
-                variant={isSelected ? 'elevation' : 'outlined'}
-                sx={{ 
-                  borderColor: isSelected ? 'primary.main' : 'divider',
-                  backgroundColor: isSelected ? 'primary.50' : 'background.paper'
-                }}
-              >
-                <CardContent>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
-                    <FormControlLabel
-                      control={
-                        <Checkbox
-                          checked={isSelected}
-                          onChange={() => handleEntityToggle(entity.key)}
-                          color="primary"
-                        />
-                      }
-                      label={
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          <IconComponent color={isSelected ? 'primary' : 'action'} />
-                          <Box>
-                            <Typography variant="h6">{entity.name}</Typography>
-                            <Typography variant="body2" color="text.secondary">
-                              {entity.description}
-                            </Typography>
-                          </Box>
-                        </Box>
-                      }
-                    />
-                  </Box>
-                  
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                    <Typography variant="body2" color="text.secondary">
-                      Available: {entity.count.toLocaleString()} items
-                    </Typography>
-                    <Chip 
-                      label={`Batch: ${batchSize}`}
-                      size="small"
-                      color={isSelected ? 'primary' : 'default'}
-                    />
-                  </Box>
-                  
-                  {isSelected && (
-                    <Box sx={{ mt: 2 }}>
-                      <Typography variant="body2" gutterBottom>
-                        Batch Size: {batchSize}
-                      </Typography>
-                      <Slider
-                        value={batchSize}
-                        onChange={(_, value) => handleBatchSizeChange(entity.key, value as number)}
-                        min={5}
-                        max={200}
-                        step={5}
-                        marks={[
-                          { value: 5, label: '5' },
-                          { value: 50, label: '50' },
-                          { value: 100, label: '100' },
-                          { value: 200, label: '200' }
-                        ]}
-                        sx={{ mt: 1 }}
-                      />
-                      <Typography variant="caption" color="text.secondary">
-                        Smaller batches = more reliable, larger batches = faster
-                      </Typography>
-                    </Box>
-                  )}
-                </CardContent>
-              </Card>
-            </Box>
-          );
-        })}
-      </Box>
-    </Box>
-  );
-};
-
-const MigrationOptionsStep: React.FC<{
-  formData: MigrationConfig;
-  onUpdate: (data: Partial<MigrationConfig>) => void;
-}> = ({ formData, onUpdate }) => {
-  return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-      <Typography variant="h6">Migration Options</Typography>
-      
-      <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
-        <Box sx={{ flex: '1 1 400px' }}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Basic Options
-              </Typography>
-              
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <TextField
-                  fullWidth
-                  label="Migration Name"
-                  value={formData.name}
-                  onChange={(e) => onUpdate({ name: e.target.value })}
-                  placeholder="My Migration"
-                />
-                
-                <TextField
-                  fullWidth
-                  label="Description"
-                  value={formData.description}
-                  onChange={(e) => onUpdate({ description: e.target.value })}
-                  multiline
-                  rows={3}
-                  placeholder="Describe this migration..."
-                />
-                
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={formData.options.continueOnError}
-                      onChange={(e) => onUpdate({ 
-                        options: { ...formData.options, continueOnError: e.target.checked }
-                      })}
-                    />
-                  }
-                  label="Continue on Error"
-                />
-                
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={formData.options.skipExisting}
-                      onChange={(e) => onUpdate({ 
-                        options: { ...formData.options, skipExisting: e.target.checked }
-                      })}
-                    />
-                  }
-                  label="Skip Existing Items"
-                />
-                
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={formData.options.validateData}
-                      onChange={(e) => onUpdate({ 
-                        options: { ...formData.options, validateData: e.target.checked }
-                      })}
-                    />
-                  }
-                  label="Validate Data"
-                />
-              </Box>
-            </CardContent>
-          </Card>
-        </Box>
-        
-        <Box sx={{ flex: '1 1 400px' }}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Advanced Options
-              </Typography>
-              
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={formData.options.enableDetailedLogging}
-                      onChange={(e) => onUpdate({ 
-                        options: { ...formData.options, enableDetailedLogging: e.target.checked }
-                      })}
-                    />
-                  }
-                  label="Enable Detailed Logging"
-                />
-                
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={formData.options.enableRealTimeUpdates}
-                      onChange={(e) => onUpdate({ 
-                        options: { ...formData.options, enableRealTimeUpdates: e.target.checked }
-                      })}
-                    />
-                  }
-                  label="Enable Real-time Updates"
-                />
-                
-                <Box>
-                  <Typography variant="body2" gutterBottom>
-                    Max Retries: {formData.options.maxRetries}
-                  </Typography>
-                  <Slider
-                    value={formData.options.maxRetries}
-                    onChange={(_, value) => onUpdate({ 
-                      options: { ...formData.options, maxRetries: value as number }
-                    })}
-                    min={0}
-                    max={10}
-                    step={1}
-                    marks={[
-                      { value: 0, label: '0' },
-                      { value: 3, label: '3' },
-                      { value: 5, label: '5' },
-                      { value: 10, label: '10' }
-                    ]}
-                  />
-                </Box>
-                
-                <Box>
-                  <Typography variant="body2" gutterBottom>
-                    Rate Limit: {formData.options.rateLimit} req/sec
-                  </Typography>
-                  <Slider
-                    value={formData.options.rateLimit}
-                    onChange={(_, value) => onUpdate({ 
-                      options: { ...formData.options, rateLimit: value as number }
-                    })}
-                    min={1}
-                    max={30}
-                    step={1}
-                    marks={[
-                      { value: 1, label: '1' },
-                      { value: 5, label: '5' },
-                      { value: 10, label: '10' },
-                      { value: 30, label: '30' }
-                    ]}
-                  />
-                </Box>
-              </Box>
-            </CardContent>
-          </Card>
-        </Box>
-      </Box>
-    </Box>
-  );
-};
-
-const ReviewStep: React.FC<{
-  formData: MigrationConfig;
-}> = ({ formData }) => {
-  const selectedEntities = Object.entries(formData.selectedEntities)
-    .filter(([_, selected]) => selected)
-    .map(([key, _]) => key);
-
-  const totalEntities = selectedEntities.length;
-  const avgBatchSize = selectedEntities.reduce((sum, entity) => 
-    sum + (formData.batchSizes[entity as EntityType] || 50), 0) / totalEntities;
-  
-  const estimatedDuration = Math.ceil(totalEntities * avgBatchSize / formData.options.rateLimit / 60);
-
-  return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-      <Typography variant="h6">Review Migration Configuration</Typography>
-      
-      <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
-        <Box sx={{ flex: '1 1 400px' }}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Migration Summary
-              </Typography>
-              
-              <List>
-                <ListItem>
-                  <ListItemText 
-                    primary="Migration Name" 
-                    secondary={formData.name || 'Untitled Migration'} 
-                  />
-                </ListItem>
-                
-                <ListItem>
-                  <ListItemText 
-                    primary="Description" 
-                    secondary={formData.description || 'No description'} 
-                  />
-                </ListItem>
-                
-                <ListItem>
-                  <ListItemText 
-                    primary="Selected Entities" 
-                    secondary={`${selectedEntities.length} entity type(s)`} 
-                  />
-                </ListItem>
-                
-                <ListItem>
-                  <ListItemText 
-                    primary="Estimated Duration" 
-                    secondary={`~${estimatedDuration} minutes`} 
-                  />
-                </ListItem>
-                
-                <ListItem>
-                  <ListItemText 
-                    primary="Rate Limit" 
-                    secondary={`${formData.options.rateLimit} requests/second`} 
-                  />
-                </ListItem>
-              </List>
-            </CardContent>
-          </Card>
-        </Box>
-        
-        <Box sx={{ flex: '1 1 400px' }}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Selected Entities
-              </Typography>
-              
-              <List>
-                {selectedEntities.map((entityType) => (
-                  <ListItem key={entityType}>
-                    <ListItemText 
-                      primary={entityType.charAt(0).toUpperCase() + entityType.slice(1)} 
-                      secondary={`Batch size: ${formData.batchSizes[entityType as EntityType] || 50}`} 
-                    />
-                  </ListItem>
-                ))}
-              </List>
-              
-              {selectedEntities.length === 0 && (
-                <Alert severity="warning">
-                  No entities selected for migration
-                </Alert>
-              )}
-            </CardContent>
-          </Card>
-        </Box>
-      </Box>
-      
-      <Accordion>
-        <AccordionSummary expandIcon={<ExpandMore />}>
-          <Typography variant="h6">Advanced Configuration</Typography>
-        </AccordionSummary>
-        <AccordionDetails>
-          <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-            <Box sx={{ flex: '1 1 400px' }}>
-              <Typography variant="subtitle2">Options</Typography>
-              <List dense>
-                <ListItem>
-                  <ListItemText 
-                    primary="Continue on Error" 
-                    secondary={formData.options.continueOnError ? 'Yes' : 'No'} 
-                  />
-                </ListItem>
-                <ListItem>
-                  <ListItemText 
-                    primary="Skip Existing" 
-                    secondary={formData.options.skipExisting ? 'Yes' : 'No'} 
-                  />
-                </ListItem>
-                <ListItem>
-                  <ListItemText 
-                    primary="Validate Data" 
-                    secondary={formData.options.validateData ? 'Yes' : 'No'} 
-                  />
-                </ListItem>
-                <ListItem>
-                  <ListItemText 
-                    primary="Max Retries" 
-                    secondary={formData.options.maxRetries} 
-                  />
-                </ListItem>
-              </List>
-            </Box>
-            
-            <Box sx={{ flex: '1 1 400px' }}>
-              <Typography variant="subtitle2">Store Configuration</Typography>
-              <List dense>
-                <ListItem>
-                  <ListItemText 
-                    primary="Source Store" 
-                    secondary={formData.sourceStore.name || formData.sourceStore.storeUrl} 
-                  />
-                </ListItem>
-                <ListItem>
-                  <ListItemText 
-                    primary="Destination Store" 
-                    secondary={formData.destinationStore.name || formData.destinationStore.storeUrl} 
-                  />
-                </ListItem>
-              </List>
-            </Box>
-          </Box>
-        </AccordionDetails>
-      </Accordion>
-    </Box>
-  );
-};
+        ))}
+      </FormGroup>
+    </CardContent>
+  </Card>
+);
 
 export const MigrationStartForm: React.FC = () => {
-  const [activeStep, setActiveStep] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [formData, setFormData] = useState<MigrationConfig>({
-    name: '',
-    description: '',
-    sourceStore: {
-      storeUrl: '',
-      storeHash: '',
-      clientId: '',
-      accessToken: '',
-      apiPath: '/stores/{store_hash}/v3/',
-      name: '',
-    },
-    destinationStore: {
-      storeUrl: '',
-      storeHash: '',
-      clientId: '',
-      accessToken: '',
-      apiPath: '/stores/{store_hash}/v3/',
-      name: '',
-    },
+  const [formData, setFormData] = useState<MigrationFormData>({
+    sourceStore: 'Production',
+    sourceStorefront: 'StagingPro StagingApp',
+    destinationStore: 'Staging',
+    destinationStorefront: 'StagingPro StagingApp',
     selectedEntities: {
-      categories: false,
-      products: false,
+      blogPosts: false,
+      couponCodes: false,
       brands: false,
-      variants: false,
-      images: false,
-      modifiers: false,
-    },
-    batchSizes: {
-      categories: 50,
-      products: 50,
-      brands: 50,
-      variants: 50,
-      images: 50,
-      modifiers: 50,
-    },
-    options: {
-      continueOnError: true,
-      skipExisting: true,
-      validateData: true,
-      enableLogging: true,
-      enableDetailedLogging: false,
-      enableRealTimeUpdates: true,
-      maxRetries: 3,
-      rateLimit: 10,
+      categories: false,
+      priceLists: false,
+      promotions: false,
+      orders: false,
+      giftCertificates: false,
+      customers: false,
+      permanentRedirects: false,
+      currencies: false,
     },
   });
 
-  const steps = [
-    { label: 'Store Configuration', content: StoreConfigurationStep },
-    { label: 'Entity Selection', content: EntitySelectionStep },
-    { label: 'Migration Options', content: MigrationOptionsStep },
-    { label: 'Review & Start', content: ReviewStep },
-  ];
-
-  const handleNext = () => {
-    if (activeStep < steps.length - 1) {
-      setActiveStep(activeStep + 1);
-    }
-  };
-
-  const handleBack = () => {
-    if (activeStep > 0) {
-      setActiveStep(activeStep - 1);
-    }
-  };
-
-  const handleUpdateFormData = (update: Partial<MigrationConfig>) => {
-    setFormData(prev => ({ ...prev, ...update }));
+  const handleEntityChange = (key: keyof MigrationFormData['selectedEntities'], checked: boolean) => {
+    setFormData(prev => ({
+      ...prev,
+      selectedEntities: {
+        ...prev.selectedEntities,
+        [key]: checked,
+      },
+    }));
   };
 
   const handleStartMigration = async () => {
     setLoading(true);
     try {
-      // Validate form data
+      // Get selected entities
       const selectedEntities = Object.entries(formData.selectedEntities)
-        .filter(([_, selected]) => selected);
-      
+        .filter(([_, selected]) => selected)
+        .map(([key, _]) => key);
+
       if (selectedEntities.length === 0) {
-        throw new Error('Please select at least one entity type to migrate');
+        notificationService.error('No Entities Selected', 'Please select at least one entity type to migrate');
+        return;
       }
 
-      // Convert form data to API format (matching backend MigrationRequest model)
-      const selectedEntityTypes = selectedEntities
-        .filter(([_, isSelected]) => isSelected)
-        .map(([entityType, _]) => entityType.charAt(0).toUpperCase() + entityType.slice(1));
+      // Map entity names to backend format
+      const entityMapping: Record<string, string> = {
+        blogPosts: 'BlogPosts',
+        couponCodes: 'CouponCodes',
+        brands: 'Brands',
+        categories: 'Categories',
+        priceLists: 'PriceLists',
+        promotions: 'Promotions',
+        orders: 'Orders',
+        giftCertificates: 'GiftCertificates',
+        customers: 'Customers',
+        permanentRedirects: 'PermanentRedirects',
+        currencies: 'Currencies',
+      };
 
       const migrationRequest = {
-        sourceStore: {
-          storeId: formData.sourceStore.storeHash,
-          accessToken: formData.sourceStore.accessToken,
-          channelId: "1" // Default channel for now
-        },
-        destinationStore: {
-          storeId: formData.destinationStore.storeHash,
-          accessToken: formData.destinationStore.accessToken,
-          channelId: "1" // Default channel for now
-        },
-        entities: selectedEntityTypes,
-        settings: {
-          maxApiCallsPerSecond: formData.options.rateLimit || 12,
-          enableAdaptiveBatching: true,
-          logLevel: formData.options.enableLogging ? "DEBUG" : "INFO",
-          requestTimeoutSeconds: 30,
-          maxRetries: formData.options.maxRetries || 3
-        }
+        sourceStoreId: formData.sourceStore.toLowerCase(),
+        destinationStoreId: formData.destinationStore.toLowerCase(),
+        entities: selectedEntities.map(entity => entityMapping[entity] || entity),
       };
 
       const apiService = getApiService();
       const response = await apiService.startMigration(migrationRequest);
       
-      notificationService.success('Migration Started', 'Migration started successfully!');
+      notificationService.success('Migration Started', 'Migration has been started successfully!');
       
-      // Reset form or redirect
-      setFormData({
-        ...formData,
-        name: '',
-        description: '',
+      // Reset selected entities
+      setFormData(prev => ({
+        ...prev,
         selectedEntities: {
-          categories: false,
-          products: false,
+          blogPosts: false,
+          couponCodes: false,
           brands: false,
-          variants: false,
-          images: false,
-          modifiers: false,
+          categories: false,
+          priceLists: false,
+          promotions: false,
+          orders: false,
+          giftCertificates: false,
+          customers: false,
+          permanentRedirects: false,
+          currencies: false,
         },
-      });
+      }));
       
-      setActiveStep(0);
     } catch (error) {
       console.error('Failed to start migration:', error);
-      notificationService.error('Migration Failed', 'Failed to start migration');
+      notificationService.error('Migration Failed', 'Failed to start migration. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
-  const canProceed = () => {
-    switch (activeStep) {
-      case 0:
-        return formData.sourceStore.storeUrl && formData.sourceStore.accessToken &&
-               formData.destinationStore.storeUrl && formData.destinationStore.accessToken;
-      case 1:
-        return Object.values(formData.selectedEntities).some(Boolean);
-      case 2:
-        return formData.name.trim() !== '';
-      case 3:
-        return Object.values(formData.selectedEntities).some(Boolean);
-      default:
-        return false;
-    }
-  };
+  const hasSelectedEntities = Object.values(formData.selectedEntities).some(Boolean);
 
-  const StepComponent = steps[activeStep].content;
+  const entityGroups = [
+    {
+      title: 'Design and Content Migration',
+      color: '#4285f4',
+      entities: [
+        { key: 'blogPosts' as const, label: 'Blog Posts' },
+        { key: 'couponCodes' as const, label: 'Coupon Codes' },
+      ],
+    },
+    {
+      title: 'Product Data Migration',
+      color: '#34a853',
+      entities: [
+        { key: 'brands' as const, label: 'Brands' },
+        { key: 'categories' as const, label: 'Categories' },
+        { key: 'priceLists' as const, label: 'Price Lists' },
+        { key: 'promotions' as const, label: 'Promotions' },
+      ],
+    },
+    {
+      title: 'Order Data Migration',
+      color: '#fbbc04',
+      entities: [
+        { key: 'orders' as const, label: 'Orders' },
+        { key: 'giftCertificates' as const, label: 'Gift Certificates' },
+        { key: 'customers' as const, label: 'Customers' },
+      ],
+    },
+    {
+      title: 'Other',
+      color: '#ea4335',
+      entities: [
+        { key: 'permanentRedirects' as const, label: 'Permanent Redirects' },
+        { key: 'currencies' as const, label: 'Currencies' },
+      ],
+    },
+  ];
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Typography variant="h4" gutterBottom>
-        Start New Migration
-      </Typography>
-      
-      <Paper sx={{ p: 3, mt: 2 }}>
-        <Stepper activeStep={activeStep} orientation="vertical">
-          {steps.map((step, index) => (
-            <Step key={step.label}>
-              <StepLabel>{step.label}</StepLabel>
-              <StepContent>
-                {index === activeStep && (
-                  <Box sx={{ mt: 2 }}>
-                    <StepComponent 
-                      formData={formData} 
-                      onUpdate={handleUpdateFormData}
-                    />
-                    
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 3 }}>
-                      <Button
-                        disabled={activeStep === 0}
-                        onClick={handleBack}
-                        startIcon={<ArrowBack />}
-                      >
-                        Back
-                      </Button>
-                      
-                      {activeStep === steps.length - 1 ? (
-                        <Button
-                          variant="contained"
-                          onClick={handleStartMigration}
-                          disabled={!canProceed() || loading}
-                          startIcon={loading ? <CircularProgress size={16} /> : <PlayArrow />}
-                        >
-                          {loading ? 'Starting...' : 'Start Migration'}
-                        </Button>
-                      ) : (
-                        <Button
-                          variant="contained"
-                          onClick={handleNext}
-                          disabled={!canProceed()}
-                          endIcon={<ArrowForward />}
-                        >
-                          Next
-                        </Button>
-                      )}
-                    </Box>
-                  </Box>
-                )}
-              </StepContent>
-            </Step>
-          ))}
-        </Stepper>
-      </Paper>
-      
-      {loading && (
-        <Box sx={{ mt: 2 }}>
-          <LinearProgress />
-          <Typography variant="body2" sx={{ mt: 1 }}>
-            Starting migration...
+    <Box sx={{ p: { xs: 2, md: 4 }, maxWidth: '1200px', mx: 'auto' }}>
+      {/* Header */}
+      <Box sx={{ 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'flex-start',
+        mb: 4,
+        flexDirection: { xs: 'column', md: 'row' },
+        gap: { xs: 2, md: 0 },
+      }}>
+        <Typography 
+          variant="h5" 
+          component="h1" 
+          sx={{ 
+            fontWeight: 600,
+            color: 'text.primary',
+            fontSize: '1.5rem',
+          }}
+        >
+          Content and Design Migration Settings
+        </Typography>
+        
+        <Box sx={{ textAlign: { xs: 'left', md: 'right' } }}>
+          <Typography variant="body2" color="text.secondary" gutterBottom>
+            Production Website URL:
           </Typography>
+          <Link 
+            href="https://stagingpro-stagingapp-jai-sandbox-01.mybigcommerce.com" 
+            target="_blank"
+            sx={{ 
+              color: 'primary.main',
+              textDecoration: 'none',
+              fontSize: '0.875rem',
+              '&:hover': {
+                textDecoration: 'underline',
+              },
+            }}
+          >
+            https://stagingpro-stagingapp-jai-sandbox-01.mybigcommerce.com
+          </Link>
         </Box>
-      )}
+      </Box>
+
+      {/* Store Configuration */}
+      <Card sx={{ mb: 4 }}>
+        <CardContent sx={{ p: 3 }}>
+          <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 3, alignItems: { md: 'center' } }}>
+            <Box sx={{ flex: '0 0 auto', minWidth: { md: '150px' } }}>
+              <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                Source
+              </Typography>
+              <FormControl fullWidth size="small">
+                <Select
+                  value={formData.sourceStore}
+                  onChange={(e) => setFormData(prev => ({ ...prev, sourceStore: e.target.value }))}
+                  sx={{ 
+                    '& .MuiOutlinedInput-notchedOutline': {
+                      borderColor: 'divider',
+                    },
+                  }}
+                >
+                  <MenuItem value="Production">Production</MenuItem>
+                  <MenuItem value="Staging">Staging</MenuItem>
+                </Select>
+              </FormControl>
+            </Box>
+
+            <Box sx={{ flex: '1 1 auto', minWidth: { md: '200px' } }}>
+              <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                Source Storefront
+              </Typography>
+              <FormControl fullWidth size="small">
+                <Select
+                  value={formData.sourceStorefront}
+                  onChange={(e) => setFormData(prev => ({ ...prev, sourceStorefront: e.target.value }))}
+                  sx={{ 
+                    '& .MuiOutlinedInput-notchedOutline': {
+                      borderColor: 'divider',
+                    },
+                  }}
+                >
+                  <MenuItem value="StagingPro StagingApp">StagingPro StagingApp</MenuItem>
+                </Select>
+              </FormControl>
+            </Box>
+
+            <Box sx={{ flex: '0 0 auto', textAlign: 'center', display: { xs: 'none', md: 'block' } }}>
+              <ArrowForwardIcon sx={{ color: 'text.secondary', fontSize: '2rem' }} />
+            </Box>
+
+            <Box sx={{ flex: '0 0 auto', minWidth: { md: '150px' } }}>
+              <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                Destination
+              </Typography>
+              <FormControl fullWidth size="small">
+                <Select
+                  value={formData.destinationStore}
+                  onChange={(e) => setFormData(prev => ({ ...prev, destinationStore: e.target.value }))}
+                  sx={{ 
+                    '& .MuiOutlinedInput-notchedOutline': {
+                      borderColor: 'divider',
+                    },
+                  }}
+                >
+                  <MenuItem value="Production">Production</MenuItem>
+                  <MenuItem value="Staging">Staging</MenuItem>
+                </Select>
+              </FormControl>
+            </Box>
+
+            <Box sx={{ flex: '1 1 auto', minWidth: { md: '200px' } }}>
+              <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                Destination Storefront
+              </Typography>
+              <FormControl fullWidth size="small">
+                <Select
+                  value={formData.destinationStorefront}
+                  onChange={(e) => setFormData(prev => ({ ...prev, destinationStorefront: e.target.value }))}
+                  sx={{ 
+                    '& .MuiOutlinedInput-notchedOutline': {
+                      borderColor: 'divider',
+                    },
+                  }}
+                >
+                  <MenuItem value="StagingPro StagingApp">StagingPro StagingApp</MenuItem>
+                </Select>
+              </FormControl>
+            </Box>
+
+            <Box sx={{ flex: '0 0 auto', textAlign: { xs: 'center', md: 'right' } }}>
+              <Button
+                variant="contained"
+                startIcon={<ArrowForwardIcon />}
+                onClick={handleStartMigration}
+                disabled={!hasSelectedEntities || loading}
+                sx={{
+                  textTransform: 'none',
+                  fontWeight: 600,
+                  px: 3,
+                  py: 1,
+                  borderRadius: '6px',
+                }}
+              >
+                {loading ? 'Starting...' : 'Start the Migration'}
+              </Button>
+            </Box>
+          </Box>
+        </CardContent>
+      </Card>
+
+      {/* Entity Selection */}
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2, 1fr)', lg: 'repeat(4, 1fr)' }, gap: 3 }}>
+        {entityGroups.map((group, index) => (
+          <Box key={index}>
+            <EntitySelectionCard
+              title={group.title}
+              color={group.color}
+              entities={group.entities}
+              selectedEntities={formData.selectedEntities}
+              onEntityChange={handleEntityChange}
+                          />
+            </Box>
+          ))}
+        </Box>
     </Box>
   );
 }; 

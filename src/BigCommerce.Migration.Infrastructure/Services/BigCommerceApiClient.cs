@@ -1,7 +1,4 @@
-using System.Net;
-using System.Text;
 using System.Text.Json;
-using System.Linq;
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
 using Microsoft.Extensions.Logging;
@@ -9,42 +6,26 @@ using Microsoft.Extensions.Logging;
 namespace BigCommerce.Migration.Infrastructure.Services;
 
 /// <summary>
-/// BigCommerce API client implementation with request-based store credentials
-/// Supports multi-tenant architecture where credentials come from migration requests
+/// BigCommerce API client implementation using delegation pattern
+/// Delegates HTTP concerns to IApiRequestHandler following Single Responsibility Principle
+/// Focuses solely on business logic and API endpoint construction
 /// </summary>
 public class BigCommerceApiClient : IBigCommerceApiClient
 {
-    private readonly BigCommerceConfiguration _globalConfig;
-    private readonly HttpClient _httpClient;
-    private readonly IOpenSearchService _openSearchService;
+    private readonly IApiRequestHandler _apiRequestHandler;
     private readonly ILogger<BigCommerceApiClient> _logger;
-    private readonly SemaphoreSlim _rateLimitSemaphore;
 
     /// <summary>
-    /// Initializes a new instance of the BigCommerceApiClient
+    /// Initializes a new instance of the BigCommerceApiClient with delegation pattern
     /// </summary>
-    /// <param name="globalConfig">BigCommerce global configuration for API access</param>
-    /// <param name="httpClient">HTTP client for making requests</param>
-    /// <param name="openSearchService">OpenSearch service for logging and metrics</param>
+    /// <param name="apiRequestHandler">API request handler for HTTP concerns</param>
     /// <param name="logger">Logger instance for service operations</param>
     public BigCommerceApiClient(
-        BigCommerceConfiguration globalConfig,
-        HttpClient httpClient,
-        IOpenSearchService openSearchService,
+        IApiRequestHandler apiRequestHandler,
         ILogger<BigCommerceApiClient> logger)
     {
-        _globalConfig = globalConfig ?? throw new ArgumentNullException(nameof(globalConfig));
-        _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
-        _openSearchService = openSearchService ?? throw new ArgumentNullException(nameof(openSearchService));
+        _apiRequestHandler = apiRequestHandler ?? throw new ArgumentNullException(nameof(apiRequestHandler));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-
-        if (!_globalConfig.IsValid())
-        {
-            throw new ArgumentException("Invalid BigCommerce global configuration", nameof(globalConfig));
-        }
-
-        // Initialize rate limiting semaphore
-        _rateLimitSemaphore = new SemaphoreSlim(_globalConfig.RateLimitRequestsPerSecond, _globalConfig.RateLimitRequestsPerSecond);
     }
 
     /// <summary>
@@ -54,23 +35,21 @@ public class BigCommerceApiClient : IBigCommerceApiClient
     {
         ValidateStoreConfiguration(storeConfig);
 
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         // Use correct BigCommerce API syntax: channel_id:in for filtering category trees by channel
         var url = $"{storeConfig.GetApiBaseUrl()}/catalog/trees?channel_id:in={storeConfig.ChannelId}";
 
         try
         {
-            var response = await MakeApiRequestAsync(storeConfig, url, HttpMethod.Get, cancellationToken);
-            var result = JsonSerializer.Deserialize<Dictionary<string, object>>(response);
+            var request = ApiRequest.CreateGet(url, storeConfig);
+            var response = await _apiRequestHandler.ExecuteRequestAsync<Dictionary<string, object>>(request, cancellationToken);
             
-            if (result?.TryGetValue("data", out var dataValue) == true && dataValue is JsonElement dataElement)
+            if (response?.TryGetValue("data", out var dataValue) == true && dataValue is JsonElement dataElement)
             {
                 var trees = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(dataElement.GetRawText()) ?? new List<Dictionary<string, object>>();
                 
                 _logger.LogDebug("Retrieved {TreeCount} category trees for store {StoreId}, channel {ChannelId}", 
                     trees.Count, storeConfig.StoreId, storeConfig.ChannelId);
                 
-                await LogPerformanceMetrics("GetCategoryTrees", stopwatch.Elapsed, storeConfig.StoreId!, storeConfig.ChannelId!);
                 return trees;
             }
 
@@ -91,19 +70,16 @@ public class BigCommerceApiClient : IBigCommerceApiClient
     {
         ValidateStoreConfiguration(storeConfig);
 
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var url = $"{storeConfig.GetApiBaseUrl()}/catalog/trees/{categoryTreeId}/categories";
 
         try
         {
-            var response = await MakeApiRequestAsync(storeConfig, url, HttpMethod.Get, cancellationToken);
-            var result = JsonSerializer.Deserialize<Dictionary<string, object>>(response);
+            var request = ApiRequest.CreateGet(url, storeConfig);
+            var response = await _apiRequestHandler.ExecuteRequestAsync<Dictionary<string, object>>(request, cancellationToken);
             
-            if (result?.TryGetValue("data", out var dataValue) == true && dataValue is JsonElement dataElement)
+            if (response?.TryGetValue("data", out var dataValue) == true && dataValue is JsonElement dataElement)
             {
                 var categories = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(dataElement.GetRawText()) ?? new List<Dictionary<string, object>>();
-                
-                await LogPerformanceMetrics("GetCategories", stopwatch.Elapsed, storeConfig.StoreId!, storeConfig.ChannelId!);
                 return categories;
             }
 
@@ -124,8 +100,6 @@ public class BigCommerceApiClient : IBigCommerceApiClient
     {
         ValidateStoreConfiguration(storeConfig);
 
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-        
         // Use the correct BigCommerce API endpoint for creating categories
         var url = $"{storeConfig.GetApiBaseUrl()}/catalog/trees/categories";
         
@@ -134,14 +108,12 @@ public class BigCommerceApiClient : IBigCommerceApiClient
 
         try
         {
-            var response = await MakeApiRequestAsync(storeConfig, url, HttpMethod.Post, cancellationToken, jsonContent);
-            var result = JsonSerializer.Deserialize<Dictionary<string, object>>(response);
+            var request = ApiRequest.CreatePost(url, jsonContent, storeConfig);
+            var response = await _apiRequestHandler.ExecuteRequestAsync<Dictionary<string, object>>(request, cancellationToken);
             
-            if (result?.TryGetValue("data", out var dataValue) == true && dataValue is JsonElement dataElement)
+            if (response?.TryGetValue("data", out var dataValue) == true && dataValue is JsonElement dataElement)
             {
                 var createdCategories = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(dataElement.GetRawText()) ?? new List<Dictionary<string, object>>();
-                
-                await LogPerformanceMetrics("CreateCategories", stopwatch.Elapsed, storeConfig.StoreId!, storeConfig.ChannelId!);
                 return createdCategories;
             }
 
@@ -162,19 +134,16 @@ public class BigCommerceApiClient : IBigCommerceApiClient
     {
         ValidateStoreConfiguration(storeConfig);
 
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var url = $"{storeConfig.GetApiBaseUrl()}/catalog/products?page={page}&limit={limit}&channel_id={storeConfig.ChannelId}";
 
         try
         {
-            var response = await MakeApiRequestAsync(storeConfig, url, HttpMethod.Get, cancellationToken);
-            var result = JsonSerializer.Deserialize<Dictionary<string, object>>(response);
+            var request = ApiRequest.CreateGet(url, storeConfig);
+            var response = await _apiRequestHandler.ExecuteRequestAsync<Dictionary<string, object>>(request, cancellationToken);
             
-            if (result?.TryGetValue("data", out var dataValue) == true && dataValue is JsonElement dataElement)
+            if (response?.TryGetValue("data", out var dataValue) == true && dataValue is JsonElement dataElement)
             {
                 var products = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(dataElement.GetRawText()) ?? new List<Dictionary<string, object>>();
-                
-                await LogPerformanceMetrics("GetProducts", stopwatch.Elapsed, storeConfig.StoreId!, storeConfig.ChannelId!);
                 return products;
             }
 
@@ -195,20 +164,17 @@ public class BigCommerceApiClient : IBigCommerceApiClient
     {
         ValidateStoreConfiguration(storeConfig);
 
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var url = $"{storeConfig.GetApiBaseUrl()}/catalog/products?channel_id={storeConfig.ChannelId}";
         var jsonContent = JsonSerializer.Serialize(products);
 
         try
         {
-            var response = await MakeApiRequestAsync(storeConfig, url, HttpMethod.Post, cancellationToken, jsonContent);
-            var result = JsonSerializer.Deserialize<Dictionary<string, object>>(response);
+            var request = ApiRequest.CreatePost(url, jsonContent, storeConfig);
+            var response = await _apiRequestHandler.ExecuteRequestAsync<Dictionary<string, object>>(request, cancellationToken);
             
-            if (result?.TryGetValue("data", out var dataValue) == true && dataValue is JsonElement dataElement)
+            if (response?.TryGetValue("data", out var dataValue) == true && dataValue is JsonElement dataElement)
             {
                 var createdProducts = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(dataElement.GetRawText()) ?? new List<Dictionary<string, object>>();
-                
-                await LogPerformanceMetrics("CreateProducts", stopwatch.Elapsed, storeConfig.StoreId!, storeConfig.ChannelId!);
                 return createdProducts;
             }
 
@@ -233,7 +199,8 @@ public class BigCommerceApiClient : IBigCommerceApiClient
         {
             // Use v2 API for store information endpoint
             var url = $"{storeConfig.GetApiBaseUrl("v2")}/store";
-            await MakeApiRequestAsync(storeConfig, url, HttpMethod.Get, cancellationToken);
+            var request = ApiRequest.CreateGet(url, storeConfig);
+            await _apiRequestHandler.ExecuteRequestAsync<Dictionary<string, object>>(request, cancellationToken);
             return true;
         }
         catch (Exception ex)
@@ -243,98 +210,6 @@ public class BigCommerceApiClient : IBigCommerceApiClient
         }
     }
 
-    // Duplicate IsHealthyAsync method removed
-
-    private static void ValidateStoreConfiguration(StoreConfiguration storeConfig)
-    {
-        if (storeConfig == null)
-            throw new ArgumentNullException(nameof(storeConfig));
-
-        if (!storeConfig.IsValid())
-            throw new ArgumentException("Invalid store configuration", nameof(storeConfig));
-    }
-
-    private async Task<string> MakeApiRequestAsync(StoreConfiguration storeConfig, string url, HttpMethod method, CancellationToken cancellationToken, string? content = null)
-    {
-        // Apply rate limiting
-        await _rateLimitSemaphore.WaitAsync(cancellationToken);
-
-        try
-        {
-            using var request = new HttpRequestMessage(method, url);
-            
-            // Add authentication headers from store configuration
-            var authHeaders = storeConfig.GetAuthHeaders();
-            foreach (var header in authHeaders)
-            {
-                request.Headers.TryAddWithoutValidation(header.Key, header.Value);
-            }
-
-            // Add global default headers
-            var defaultHeaders = _globalConfig.GetDefaultHeaders();
-            foreach (var header in defaultHeaders)
-            {
-                if (!request.Headers.Contains(header.Key))
-                {
-                    request.Headers.TryAddWithoutValidation(header.Key, header.Value);
-                }
-            }
-
-            if (!string.IsNullOrEmpty(content))
-            {
-                request.Content = new StringContent(content, Encoding.UTF8, "application/json");
-            }
-
-            var response = await _httpClient.SendAsync(request, cancellationToken);
-
-            if (response.IsSuccessStatusCode)
-            {
-                return await response.Content.ReadAsStringAsync(cancellationToken);
-            }
-
-            var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
-            _logger.LogError("API request failed: {StatusCode}, Content: {Content}", response.StatusCode, errorContent);
-
-            throw response.StatusCode switch
-            {
-                HttpStatusCode.Unauthorized => new UnauthorizedAccessException($"Authentication failed for store {storeConfig.StoreId}"),
-                HttpStatusCode.Forbidden => new UnauthorizedAccessException($"Access forbidden for store {storeConfig.StoreId}"),
-                HttpStatusCode.TooManyRequests => new HttpRequestException($"Rate limit exceeded for store {storeConfig.StoreId}"),
-                _ => new HttpRequestException($"API request failed with status {response.StatusCode}: {errorContent}")
-            };
-        }
-        finally
-        {
-            _rateLimitSemaphore.Release();
-        }
-    }
-
-    private async Task LogPerformanceMetrics(string operation, TimeSpan duration, string storeId, string channelId)
-    {
-        try
-        {
-            var metrics = new Dictionary<string, object>
-            {
-                ["operation"] = operation,
-                ["duration_ms"] = duration.TotalMilliseconds,
-                ["store_id"] = storeId,
-                ["channel_id"] = channelId,
-                ["timestamp"] = DateTime.UtcNow
-            };
-
-            await _openSearchService.LogPerformanceMetricsAsync("bigcommerce_api", duration, metrics);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to log performance metrics for operation {Operation}", operation);
-        }
-    }
-
-    // Additional methods for activity functions
-
-    // Legacy GetCategoriesAsync and GetBrandsAsync methods removed - use GetCategoryPageAsync and GetBrandPageAsync instead
-    // Legacy GetProductsAsync with ProductQueryOptions removed - use GetProductPageAsync instead
-
     /// <summary>
     /// Gets product variants for a specific product
     /// </summary>
@@ -342,15 +217,14 @@ public class BigCommerceApiClient : IBigCommerceApiClient
     {
         ValidateStoreConfiguration(storeConfig);
 
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var url = $"{storeConfig.GetApiBaseUrl()}/catalog/products/{productId}/variants";
 
         try
         {
-            var response = await MakeApiRequestAsync(storeConfig, url, HttpMethod.Get, cancellationToken);
-            var result = JsonSerializer.Deserialize<Dictionary<string, object>>(response);
+            var request = ApiRequest.CreateGet(url, storeConfig);
+            var response = await _apiRequestHandler.ExecuteRequestAsync<Dictionary<string, object>>(request, cancellationToken);
             
-            if (result?.TryGetValue("data", out var dataValue) == true && dataValue is JsonElement dataElement)
+            if (response?.TryGetValue("data", out var dataValue) == true && dataValue is JsonElement dataElement)
             {
                 var variants = new List<ProductVariantSummary>();
                 if (dataElement.ValueKind == JsonValueKind.Array)
@@ -369,7 +243,6 @@ public class BigCommerceApiClient : IBigCommerceApiClient
                     }
                 }
                 
-                await LogPerformanceMetrics("GetProductVariants", stopwatch.Elapsed, storeConfig.StoreId!, storeConfig.ChannelId!);
                 return variants;
             }
 
@@ -389,15 +262,14 @@ public class BigCommerceApiClient : IBigCommerceApiClient
     {
         ValidateStoreConfiguration(storeConfig);
 
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var url = $"{storeConfig.GetApiBaseUrl()}/catalog/products/{productId}/images";
 
         try
         {
-            var response = await MakeApiRequestAsync(storeConfig, url, HttpMethod.Get, cancellationToken);
-            var result = JsonSerializer.Deserialize<Dictionary<string, object>>(response);
+            var request = ApiRequest.CreateGet(url, storeConfig);
+            var response = await _apiRequestHandler.ExecuteRequestAsync<Dictionary<string, object>>(request, cancellationToken);
             
-            if (result?.TryGetValue("data", out var dataValue) == true && dataValue is JsonElement dataElement)
+            if (response?.TryGetValue("data", out var dataValue) == true && dataValue is JsonElement dataElement)
             {
                 var images = new List<ProductImageSummary>();
                 if (dataElement.ValueKind == JsonValueKind.Array)
@@ -416,7 +288,6 @@ public class BigCommerceApiClient : IBigCommerceApiClient
                     }
                 }
                 
-                await LogPerformanceMetrics("GetProductImages", stopwatch.Elapsed, storeConfig.StoreId!, storeConfig.ChannelId!);
                 return images;
             }
 
@@ -436,15 +307,14 @@ public class BigCommerceApiClient : IBigCommerceApiClient
     {
         ValidateStoreConfiguration(storeConfig);
 
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var url = $"{storeConfig.GetApiBaseUrl()}/catalog/products/{productId}/modifiers";
 
         try
         {
-            var response = await MakeApiRequestAsync(storeConfig, url, HttpMethod.Get, cancellationToken);
-            var result = JsonSerializer.Deserialize<Dictionary<string, object>>(response);
+            var request = ApiRequest.CreateGet(url, storeConfig);
+            var response = await _apiRequestHandler.ExecuteRequestAsync<Dictionary<string, object>>(request, cancellationToken);
             
-            if (result?.TryGetValue("data", out var dataValue) == true && dataValue is JsonElement dataElement)
+            if (response?.TryGetValue("data", out var dataValue) == true && dataValue is JsonElement dataElement)
             {
                 var modifiers = new List<ProductModifierSummary>();
                 if (dataElement.ValueKind == JsonValueKind.Array)
@@ -463,7 +333,6 @@ public class BigCommerceApiClient : IBigCommerceApiClient
                     }
                 }
                 
-                await LogPerformanceMetrics("GetProductModifiers", stopwatch.Elapsed, storeConfig.StoreId!, storeConfig.ChannelId!);
                 return modifiers;
             }
 
@@ -476,8 +345,6 @@ public class BigCommerceApiClient : IBigCommerceApiClient
         }
     }
 
-    // Pagination methods implementation
-    
     /// <summary>
     /// Detects the BigCommerce API version for a store
     /// </summary>
@@ -510,16 +377,15 @@ public class BigCommerceApiClient : IBigCommerceApiClient
     {
         ValidateStoreConfiguration(storeConfig);
         
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var apiVersion = await DetectApiVersionAsync(storeConfig, cancellationToken);
         
         try
         {
             var url = BuildEntityUrl(storeConfig, entityType, paginationRequest);
-            var response = await MakeApiRequestAsync(storeConfig, url, HttpMethod.Get, cancellationToken);
-            var result = JsonSerializer.Deserialize<Dictionary<string, object>>(response);
+            var request = ApiRequest.CreateGet(url, storeConfig);
+            var response = await _apiRequestHandler.ExecuteRequestAsync<Dictionary<string, object>>(request, cancellationToken);
             
-            return ParsePaginatedResponse(result, apiVersion, paginationRequest, stopwatch.ElapsedMilliseconds);
+            return ParsePaginatedResponse(response, apiVersion, paginationRequest, 0);
         }
         catch (Exception ex)
         {
@@ -688,6 +554,15 @@ public class BigCommerceApiClient : IBigCommerceApiClient
         return v2FirstPage.Data.Count * 100; // Rough estimate
     }
 
+    private static void ValidateStoreConfiguration(StoreConfiguration storeConfig)
+    {
+        if (storeConfig == null)
+            throw new ArgumentNullException(nameof(storeConfig));
+
+        if (!storeConfig.IsValid())
+            throw new ArgumentException("Invalid store configuration", nameof(storeConfig));
+    }
+
     // Helper methods for pagination
     
     /// <summary>
@@ -845,7 +720,9 @@ public class BigCommerceApiClient : IBigCommerceApiClient
             dict[property.Name] = property.Value.ValueKind switch
             {
                 JsonValueKind.String => property.Value.GetString() ?? string.Empty,
-                JsonValueKind.Number => property.Value.GetInt32(),
+                JsonValueKind.Number => property.Value.TryGetInt32(out var intValue) ? intValue : 
+                                      property.Value.TryGetDouble(out var doubleValue) ? doubleValue : 
+                                      property.Value.GetRawText(),
                 JsonValueKind.True => true,
                 JsonValueKind.False => false,
                 JsonValueKind.Null => (object?)null!,

@@ -9,19 +9,19 @@ namespace BigCommerce.Migration.OrchestrationTests.Activities;
 
 /// <summary>
 /// Tests for the DiscoverEntities activity function
-/// These tests define the expected behavior - implementation will follow (TDD)
+/// Tests the new strategy pattern implementation (Task 2.3.3)
 /// </summary>
 public class DiscoverEntitiesActivityTests
 {
-    private readonly Mock<IBigCommerceApiClient> _apiClientMock;
+    private readonly Mock<IEntityDiscoveryStrategyFactory> _strategyFactoryMock;
     private readonly Mock<ILogger<DiscoverEntitiesActivity>> _loggerMock;
     private readonly DiscoverEntitiesActivity _activity;
 
     public DiscoverEntitiesActivityTests()
     {
-        _apiClientMock = new Mock<IBigCommerceApiClient>();
+        _strategyFactoryMock = new Mock<IEntityDiscoveryStrategyFactory>();
         _loggerMock = new Mock<ILogger<DiscoverEntitiesActivity>>();
-        _activity = new DiscoverEntitiesActivity(_apiClientMock.Object, _loggerMock.Object);
+        _activity = new DiscoverEntitiesActivity(_strategyFactoryMock.Object, _loggerMock.Object);
     }
 
     [Fact]

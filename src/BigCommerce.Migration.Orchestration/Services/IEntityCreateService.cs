@@ -5,15 +5,18 @@ namespace BigCommerce.Migration.Orchestration.Services;
 
 /// <summary>
 /// Service responsible for creating entities in destination stores
-/// Single Responsibility: Entity creation only
+/// Implements Strategy Pattern: Uses entity-specific strategies for creation logic
+/// Single Responsibility: Entity creation orchestration only
+/// Open/Closed Principle: New entity types can be added without modifying this interface
 /// </summary>
 public interface IEntityCreateService
 {
     /// <summary>
-    /// Creates entities of the specified type in the destination store
+    /// Creates entities of the specified type in the destination store using Strategy Pattern
+    /// Delegates to appropriate strategy based on entity type
     /// </summary>
     /// <param name="entities">Entities to create</param>
-    /// <param name="request">Batch processing request</param>
+    /// <param name="request">Batch processing request containing entity type and context</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>List of created entities with destination IDs</returns>
     Task<List<Dictionary<string, object>>?> CreateEntitiesAsync(
@@ -21,51 +24,19 @@ public interface IEntityCreateService
         BatchProcessingRequest request,
         CancellationToken cancellationToken);
 
-    /// <summary>
-    /// Creates categories with hierarchical relationships
-    /// </summary>
-    Task<List<Dictionary<string, object>>?> CreateCategoriesAsync(
-        List<Dictionary<string, object>> categories, 
-        BatchProcessingRequest request,
-        CancellationToken cancellationToken);
+    // 🎯 LEGACY METHODS REMOVED - Now handled by Strategy Pattern
+    // All entity-specific creation methods have been replaced by strategies:
+    // - CreateCategoriesAsync() → CategoryCreationStrategy
+    // - CreateProductsAsync() → ProductCreationStrategy  
+    // - CreateBrandsAsync() → BrandCreationStrategy
+    // - CreateVariantsAsync() → VariantCreationStrategy
+    // - CreateImagesAsync() → ImageCreationStrategy
+    // - CreateModifiersAsync() → ModifierCreationStrategy
+    // 
+    // Benefits:
+    // ✅ Open/Closed Principle: New entity types can be added as new strategies
+    // ✅ Single Responsibility: Each strategy handles one entity type
+    // ✅ Testability: Individual strategies can be tested in isolation
+    // ✅ Maintainability: Entity-specific logic is encapsulated and organized
 
-    /// <summary>
-    /// Creates products with variant relationships
-    /// </summary>
-    Task<List<Dictionary<string, object>>?> CreateProductsAsync(
-        List<Dictionary<string, object>> products, 
-        BatchProcessingRequest request,
-        CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Creates brands
-    /// </summary>
-    Task<List<Dictionary<string, object>>?> CreateBrandsAsync(
-        List<Dictionary<string, object>> brands, 
-        BatchProcessingRequest request,
-        CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Creates variants for a specific product
-    /// </summary>
-    Task<List<Dictionary<string, object>>?> CreateVariantsAsync(
-        List<Dictionary<string, object>> variants, 
-        BatchProcessingRequest request,
-        CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Creates images for a specific product
-    /// </summary>
-    Task<List<Dictionary<string, object>>?> CreateImagesAsync(
-        List<Dictionary<string, object>> images, 
-        BatchProcessingRequest request,
-        CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Creates modifiers for a specific product
-    /// </summary>
-    Task<List<Dictionary<string, object>>?> CreateModifiersAsync(
-        List<Dictionary<string, object>> modifiers, 
-        BatchProcessingRequest request,
-        CancellationToken cancellationToken);
 } 

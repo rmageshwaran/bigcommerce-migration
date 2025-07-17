@@ -3,6 +3,8 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Infrastructure.Services;
 using BigCommerce.Migration.Orchestration.Services;
+using BigCommerce.Migration.Orchestration.Services.EntityCreation;
+using BigCommerce.Migration.Orchestration.Strategies;
 using System.Net.Http;
 
 namespace BigCommerce.Migration.Orchestration.Extensions;
@@ -97,6 +99,42 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IEntityCreateService, EntityCreateService>();
         services.TryAddSingleton<IEntityMappingService, EntityMappingService>();
         services.TryAddSingleton<IEntityErrorHandlingService, EntityErrorHandlingService>();
+        
+        // Register entity discovery strategy pattern implementations (Task 2.3.3 - COMPLETED)
+        services.TryAddSingleton<IEntityDiscoveryStrategyFactory, EntityDiscoveryStrategyFactory>();
+        services.TryAddSingleton<V2DirectPaginationStrategy>();
+        services.TryAddSingleton<V3EfficientPaginationStrategy>();
+        services.TryAddSingleton<V3HierarchicalStrategy>();
+        
+        // 🎯 Register entity creation strategy pattern implementations (Task 3.1 - COMPLETED)
+        // Strategy Pattern for Open/Closed Principle compliance
+        services.TryAddScoped<IEntityCreationStrategyFactory, EntityCreationStrategyFactory>();
+        services.TryAddScoped<IEntityCreationStrategy, CategoryCreationStrategy>();
+        services.TryAddScoped<IEntityCreationStrategy, ProductCreationStrategy>();
+        services.TryAddScoped<IEntityCreationStrategy, BrandCreationStrategy>();
+        services.TryAddScoped<IEntityCreationStrategy, VariantCreationStrategy>();
+        services.TryAddScoped<IEntityCreationStrategy, ImageCreationStrategy>();
+        services.TryAddScoped<IEntityCreationStrategy, ModifierCreationStrategy>();
+        
+        // 🎯 Register entity transform strategy pattern implementations (Task 3.2.2 - COMPLETED)
+        // Strategy Pattern for Open/Closed Principle compliance
+        services.TryAddScoped<IEntityTransformStrategyFactory, EntityTransformStrategyFactory>();
+        services.TryAddScoped<IEntityTransformStrategy, CategoryTransformStrategy>();
+        services.TryAddScoped<IEntityTransformStrategy, ProductTransformStrategy>();
+        services.TryAddScoped<IEntityTransformStrategy, BrandTransformStrategy>();
+        services.TryAddScoped<IEntityTransformStrategy, VariantTransformStrategy>();
+        services.TryAddScoped<IEntityTransformStrategy, ImageTransformStrategy>();
+        services.TryAddScoped<IEntityTransformStrategy, ModifierTransformStrategy>();
+        
+        // 🎯 Register entity fetch strategy pattern implementations (Task 3.3.2 - NEW)
+        // Strategy Pattern for Open/Closed Principle compliance
+        services.TryAddScoped<IEntityFetchStrategyFactory, EntityFetchStrategyFactory>();
+        services.TryAddScoped<IEntityFetchStrategy, CategoryFetchStrategy>();
+        services.TryAddScoped<IEntityFetchStrategy, ProductFetchStrategy>();
+        services.TryAddScoped<IEntityFetchStrategy, BrandFetchStrategy>();
+        services.TryAddScoped<IEntityFetchStrategy, VariantFetchStrategy>();
+        services.TryAddScoped<IEntityFetchStrategy, ImageFetchStrategy>();
+        services.TryAddScoped<IEntityFetchStrategy, ModifierFetchStrategy>();
         
         return services;
     }

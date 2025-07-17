@@ -10,18 +10,21 @@ namespace BigCommerce.Migration.UnitTests.Services;
 
 public class EntityCreateServiceTests
 {
-    private readonly Mock<IBigCommerceApiClient> _mockApiClient;
+    private readonly Mock<IEntityCreationStrategyFactory> _mockStrategyFactory;
     private readonly Mock<ILogger<EntityCreateService>> _mockLogger;
     private readonly Mock<IEntityErrorHandlingService> _mockErrorHandlingService;
+    private readonly Mock<IEntityCreationStrategy> _mockStrategy;
     private readonly EntityCreateService _service;
     private readonly StoreConfiguration _testStoreConfig;
 
     public EntityCreateServiceTests()
     {
-        _mockApiClient = new Mock<IBigCommerceApiClient>();
+        _mockStrategyFactory = new Mock<IEntityCreationStrategyFactory>();
         _mockLogger = new Mock<ILogger<EntityCreateService>>();
         _mockErrorHandlingService = new Mock<IEntityErrorHandlingService>();
-        _service = new EntityCreateService(_mockApiClient.Object, _mockLogger.Object, _mockErrorHandlingService.Object);
+        _mockStrategy = new Mock<IEntityCreationStrategy>();
+        
+        _service = new EntityCreateService(_mockStrategyFactory.Object, _mockLogger.Object, _mockErrorHandlingService.Object);
         
         _testStoreConfig = new StoreConfiguration
         {
@@ -29,16 +32,20 @@ public class EntityCreateServiceTests
             AccessToken = "test-token",
             ChannelId = "1"
         };
+
+        // Setup factory to return our mock strategy
+        _mockStrategyFactory.Setup(x => x.GetStrategy(It.IsAny<string>()))
+            .Returns(_mockStrategy.Object);
     }
 
     [Fact]
-    public async Task CreateCategoriesAsync_WhenBatchSucceeds_ShouldReturnCreatedCategories()
+    public async Task CreateEntitiesAsync_WhenEntitiesProvided_ShouldDelegateToStrategy()
     {
         // Arrange
-        var categories = new List<Dictionary<string, object>>
+        var entities = new List<Dictionary<string, object>>
         {
-            new() { ["name"] = "Category1", ["id"] = "1" },
-            new() { ["name"] = "Category2", ["id"] = "2" }
+            new() { ["name"] = "Entity1", ["id"] = "1" },
+            new() { ["name"] = "Entity2", ["id"] = "2" }
         };
 
         var request = new BatchProcessingRequest
@@ -49,229 +56,254 @@ public class EntityCreateServiceTests
             CategoryTreeContext = new CategoryTreeContext { DestinationCategoryTreeId = "1" }
         };
 
-        var createdCategories = new List<Dictionary<string, object>>
+        var expectedResult = new List<Dictionary<string, object>>
         {
-            new() { ["id"] = "101", ["name"] = "Category1" },
-            new() { ["id"] = "102", ["name"] = "Category2" }
+            new() { ["id"] = "101", ["name"] = "Entity1" },
+            new() { ["id"] = "102", ["name"] = "Entity2" }
         };
 
-        _mockApiClient.Setup(x => x.CreateCategoriesAsync(_testStoreConfig, "1", categories, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(createdCategories);
+        _mockStrategy.Setup(x => x.CreateEntitiesAsync(
+                entities, 
+                request.MigrationId, 
+                request.DestinationStore, 
+                request.CategoryTreeContext, 
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(expectedResult);
 
         // Act
-        var result = await _service.CreateCategoriesAsync(categories, request, CancellationToken.None);
+        var result = await _service.CreateEntitiesAsync(entities, request, CancellationToken.None);
 
         // Assert
         Assert.NotNull(result);
         Assert.Equal(2, result.Count);
-        _mockApiClient.Verify(x => x.CreateCategoriesAsync(_testStoreConfig, "1", categories, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Equal("101", result[0]["id"].ToString());
+        Assert.Equal("102", result[1]["id"].ToString());
+        
+        _mockStrategyFactory.Verify(x => x.GetStrategy("categories"), Times.Once);
+        _mockStrategy.Verify(x => x.CreateEntitiesAsync(
+            entities, 
+            request.MigrationId, 
+            request.DestinationStore, 
+            request.CategoryTreeContext, 
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task CreateCategoriesAsync_WhenBatchFails_ShouldFallbackToIndividualCreation()
+    public async Task CreateEntitiesAsync_WhenNullEntities_ShouldReturnEmptyList()
     {
         // Arrange
-        var categories = new List<Dictionary<string, object>>
-        {
-            new() { ["name"] = "Category1", ["id"] = "1" },
-            new() { ["name"] = "Category2", ["id"] = "2" }
-        };
-
         var request = new BatchProcessingRequest
         {
             MigrationId = "test-migration",
             EntityType = "categories",
-            DestinationStore = _testStoreConfig,
-            CategoryTreeContext = new CategoryTreeContext { DestinationCategoryTreeId = "1" }
-        };
-
-        var createdCategory1 = new List<Dictionary<string, object>> { new() { ["id"] = "101", ["name"] = "Category1" } };
-        var createdCategory2 = new List<Dictionary<string, object>> { new() { ["id"] = "102", ["name"] = "Category2" } };
-
-        // Batch creation fails
-        _mockApiClient.Setup(x => x.CreateCategoriesAsync(_testStoreConfig, "1", categories, It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new Exception("Batch creation failed"));
-
-        // Individual creation succeeds for both
-        _mockApiClient.Setup(x => x.CreateCategoriesAsync(_testStoreConfig, "1", It.Is<List<Dictionary<string, object>>>(l => l.Count == 1 && l[0]["name"].ToString() == "Category1"), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(createdCategory1);
-        _mockApiClient.Setup(x => x.CreateCategoriesAsync(_testStoreConfig, "1", It.Is<List<Dictionary<string, object>>>(l => l.Count == 1 && l[0]["name"].ToString() == "Category2"), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(createdCategory2);
-
-        // Act
-        var result = await _service.CreateCategoriesAsync(categories, request, CancellationToken.None);
-
-        // Assert
-        Assert.NotNull(result);
-        Assert.Equal(2, result.Count);
-        _mockApiClient.Verify(x => x.CreateCategoriesAsync(_testStoreConfig, "1", categories, It.IsAny<CancellationToken>()), Times.Once);
-        _mockApiClient.Verify(x => x.CreateCategoriesAsync(_testStoreConfig, "1", It.Is<List<Dictionary<string, object>>>(l => l.Count == 1), It.IsAny<CancellationToken>()), Times.Exactly(2));
-    }
-
-    [Fact]
-    public async Task CreateCategoriesAsync_WhenBatchFailsAndSomeIndividualFail_ShouldReturnSuccessfulOnes()
-    {
-        // Arrange
-        var categories = new List<Dictionary<string, object>>
-        {
-            new() { ["name"] = "Category1", ["id"] = "1" },
-            new() { ["name"] = "Category2", ["id"] = "2" },
-            new() { ["name"] = "Category3", ["id"] = "3" }
-        };
-
-        var request = new BatchProcessingRequest
-        {
-            MigrationId = "test-migration",
-            EntityType = "categories",
-            DestinationStore = _testStoreConfig,
-            CategoryTreeContext = new CategoryTreeContext { DestinationCategoryTreeId = "1" }
-        };
-
-        var createdCategory1 = new List<Dictionary<string, object>> { new() { ["id"] = "101", ["name"] = "Category1" } };
-        var createdCategory3 = new List<Dictionary<string, object>> { new() { ["id"] = "103", ["name"] = "Category3" } };
-
-        // Batch creation fails
-        _mockApiClient.Setup(x => x.CreateCategoriesAsync(_testStoreConfig, "1", categories, It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new Exception("Batch creation failed"));
-
-        // Individual creation: Category1 succeeds, Category2 fails, Category3 succeeds
-        _mockApiClient.Setup(x => x.CreateCategoriesAsync(_testStoreConfig, "1", It.Is<List<Dictionary<string, object>>>(l => l.Count == 1 && l[0]["name"].ToString() == "Category1"), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(createdCategory1);
-        _mockApiClient.Setup(x => x.CreateCategoriesAsync(_testStoreConfig, "1", It.Is<List<Dictionary<string, object>>>(l => l.Count == 1 && l[0]["name"].ToString() == "Category2"), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new Exception("Category2 creation failed"));
-        _mockApiClient.Setup(x => x.CreateCategoriesAsync(_testStoreConfig, "1", It.Is<List<Dictionary<string, object>>>(l => l.Count == 1 && l[0]["name"].ToString() == "Category3"), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(createdCategory3);
-
-        // Act
-        var result = await _service.CreateCategoriesAsync(categories, request, CancellationToken.None);
-
-        // Assert
-        Assert.NotNull(result);
-        Assert.Equal(2, result.Count); // Only Category1 and Category3 should be created
-        _mockApiClient.Verify(x => x.CreateCategoriesAsync(_testStoreConfig, "1", categories, It.IsAny<CancellationToken>()), Times.Once);
-        _mockApiClient.Verify(x => x.CreateCategoriesAsync(_testStoreConfig, "1", It.Is<List<Dictionary<string, object>>>(l => l.Count == 1), It.IsAny<CancellationToken>()), Times.Exactly(3));
-    }
-
-    [Fact]
-    public async Task CreateProductsAsync_WhenBatchSucceeds_ShouldReturnCreatedProducts()
-    {
-        // Arrange
-        var products = new List<Dictionary<string, object>>
-        {
-            new() { ["name"] = "Product1", ["id"] = "1" },
-            new() { ["name"] = "Product2", ["id"] = "2" }
-        };
-
-        var request = new BatchProcessingRequest
-        {
-            MigrationId = "test-migration",
-            EntityType = "products",
             DestinationStore = _testStoreConfig
         };
 
-        var createdProducts = new List<Dictionary<string, object>>
-        {
-            new() { ["id"] = "101", ["name"] = "Product1" },
-            new() { ["id"] = "102", ["name"] = "Product2" }
-        };
-
-        _mockApiClient.Setup(x => x.CreateProductsAsync(_testStoreConfig, products, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(createdProducts);
-
         // Act
-        var result = await _service.CreateProductsAsync(products, request, CancellationToken.None);
+        var result = await _service.CreateEntitiesAsync(null!, request, CancellationToken.None);
 
         // Assert
         Assert.NotNull(result);
-        Assert.Equal(2, result.Count);
-        _mockApiClient.Verify(x => x.CreateProductsAsync(_testStoreConfig, products, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Empty(result);
+        
+        // Strategy should not be called
+        _mockStrategyFactory.Verify(x => x.GetStrategy(It.IsAny<string>()), Times.Never);
+        _mockStrategy.Verify(x => x.CreateEntitiesAsync(
+            It.IsAny<List<Dictionary<string, object>>>(), 
+            It.IsAny<string>(), 
+            It.IsAny<StoreConfiguration>(), 
+            It.IsAny<CategoryTreeContext?>(), 
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
-    public async Task CreateProductsAsync_WhenBatchFails_ShouldFallbackToIndividualCreation()
+    public async Task CreateEntitiesAsync_WhenEmptyEntities_ShouldReturnEmptyList()
     {
         // Arrange
-        var products = new List<Dictionary<string, object>>
-        {
-            new() { ["name"] = "Product1", ["id"] = "1" },
-            new() { ["name"] = "Product2", ["id"] = "2" }
-        };
-
+        var entities = new List<Dictionary<string, object>>();
         var request = new BatchProcessingRequest
         {
             MigrationId = "test-migration",
-            EntityType = "products",
+            EntityType = "categories",
             DestinationStore = _testStoreConfig
         };
 
-        var createdProduct1 = new List<Dictionary<string, object>> { new() { ["id"] = "101", ["name"] = "Product1" } };
-        var createdProduct2 = new List<Dictionary<string, object>> { new() { ["id"] = "102", ["name"] = "Product2" } };
-
-        // Batch creation fails
-        _mockApiClient.Setup(x => x.CreateProductsAsync(_testStoreConfig, products, It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new Exception("Batch creation failed"));
-
-        // Individual creation succeeds for both
-        _mockApiClient.Setup(x => x.CreateProductsAsync(_testStoreConfig, It.Is<List<Dictionary<string, object>>>(l => l.Count == 1 && l[0]["name"].ToString() == "Product1"), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(createdProduct1);
-        _mockApiClient.Setup(x => x.CreateProductsAsync(_testStoreConfig, It.Is<List<Dictionary<string, object>>>(l => l.Count == 1 && l[0]["name"].ToString() == "Product2"), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(createdProduct2);
-
         // Act
-        var result = await _service.CreateProductsAsync(products, request, CancellationToken.None);
+        var result = await _service.CreateEntitiesAsync(entities, request, CancellationToken.None);
 
         // Assert
         Assert.NotNull(result);
-        Assert.Equal(2, result.Count);
-        _mockApiClient.Verify(x => x.CreateProductsAsync(_testStoreConfig, products, It.IsAny<CancellationToken>()), Times.Once);
-        _mockApiClient.Verify(x => x.CreateProductsAsync(_testStoreConfig, It.Is<List<Dictionary<string, object>>>(l => l.Count == 1), It.IsAny<CancellationToken>()), Times.Exactly(2));
+        Assert.Empty(result);
+        
+        // Strategy should not be called
+        _mockStrategyFactory.Verify(x => x.GetStrategy(It.IsAny<string>()), Times.Never);
+        _mockStrategy.Verify(x => x.CreateEntitiesAsync(
+            It.IsAny<List<Dictionary<string, object>>>(), 
+            It.IsAny<string>(), 
+            It.IsAny<StoreConfiguration>(), 
+            It.IsAny<CategoryTreeContext?>(), 
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
-    public async Task CreateCategoriesAsync_WhenMissingCategoryTreeId_ShouldThrowException()
+    public async Task CreateEntitiesAsync_WhenStrategyThrows_ShouldPropagateException()
     {
         // Arrange
-        var categories = new List<Dictionary<string, object>>
+        var entities = new List<Dictionary<string, object>>
         {
-            new() { ["name"] = "Category1", ["id"] = "1" }
+            new() { ["name"] = "Entity1", ["id"] = "1" }
         };
 
         var request = new BatchProcessingRequest
         {
             MigrationId = "test-migration",
             EntityType = "categories",
-            DestinationStore = _testStoreConfig,
-            CategoryTreeContext = new CategoryTreeContext { DestinationCategoryTreeId = null }
+            DestinationStore = _testStoreConfig
         };
+
+        var expectedException = new InvalidOperationException("Strategy failed");
+        _mockStrategy.Setup(x => x.CreateEntitiesAsync(
+                entities, 
+                request.MigrationId, 
+                request.DestinationStore, 
+                request.CategoryTreeContext, 
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(expectedException);
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => _service.CreateCategoriesAsync(categories, request, CancellationToken.None));
-
-        Assert.Contains("Destination category tree ID is required", exception.Message);
+            () => _service.CreateEntitiesAsync(entities, request, CancellationToken.None));
+        
+        Assert.Equal("Strategy failed", exception.Message);
+        
+        _mockStrategyFactory.Verify(x => x.GetStrategy("categories"), Times.Once);
+        _mockStrategy.Verify(x => x.CreateEntitiesAsync(
+            entities, 
+            request.MigrationId, 
+            request.DestinationStore, 
+            request.CategoryTreeContext, 
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task CreateCategoriesAsync_WhenInvalidStoreConfig_ShouldThrowException()
+    public async Task CreateEntitiesAsync_ShouldPassCorrectEntityTypeToFactory()
     {
         // Arrange
-        var categories = new List<Dictionary<string, object>>
+        var entities = new List<Dictionary<string, object>>
         {
-            new() { ["name"] = "Category1", ["id"] = "1" }
+            new() { ["name"] = "Product1" }
+        };
+
+        var request = new BatchProcessingRequest
+        {
+            MigrationId = "test-migration",
+            EntityType = "products",
+            DestinationStore = _testStoreConfig
+        };
+
+        _mockStrategy.Setup(x => x.CreateEntitiesAsync(
+                entities, 
+                request.MigrationId, 
+                request.DestinationStore, 
+                request.CategoryTreeContext, 
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Dictionary<string, object>>());
+
+        // Act
+        await _service.CreateEntitiesAsync(entities, request, CancellationToken.None);
+
+        // Assert
+        _mockStrategyFactory.Verify(x => x.GetStrategy("products"), Times.Once);
+    }
+
+    [Fact]
+    public async Task CreateEntitiesAsync_WhenStrategyReturnsNull_ShouldReturnNull()
+    {
+        // Arrange
+        var entities = new List<Dictionary<string, object>>
+        {
+            new() { ["name"] = "Entity1" }
         };
 
         var request = new BatchProcessingRequest
         {
             MigrationId = "test-migration",
             EntityType = "categories",
-            DestinationStore = null!,
-            CategoryTreeContext = new CategoryTreeContext { DestinationCategoryTreeId = "1" }
+            DestinationStore = _testStoreConfig
         };
 
-        // Act & Assert
-        var exception = await Assert.ThrowsAsync<ArgumentException>(
-            () => _service.CreateCategoriesAsync(categories, request, CancellationToken.None));
+        _mockStrategy.Setup(x => x.CreateEntitiesAsync(
+                entities, 
+                request.MigrationId, 
+                request.DestinationStore, 
+                request.CategoryTreeContext, 
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((List<Dictionary<string, object>>?)null);
 
-        Assert.Contains("Invalid destination store configuration", exception.Message);
+        // Act
+        var result = await _service.CreateEntitiesAsync(entities, request, CancellationToken.None);
+
+        // Assert
+        Assert.Null(result);
+        
+        _mockStrategyFactory.Verify(x => x.GetStrategy("categories"), Times.Once);
+        _mockStrategy.Verify(x => x.CreateEntitiesAsync(
+            entities, 
+            request.MigrationId, 
+            request.DestinationStore, 
+            request.CategoryTreeContext, 
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("categories")]
+    [InlineData("products")]
+    [InlineData("brands")]
+    [InlineData("variants")]
+    [InlineData("images")]
+    [InlineData("modifiers")]
+    public async Task CreateEntitiesAsync_ShouldSupportAllEntityTypes(string entityType)
+    {
+        // Arrange
+        var entities = new List<Dictionary<string, object>>
+        {
+            new() { ["name"] = "TestEntity" }
+        };
+
+        var request = new BatchProcessingRequest
+        {
+            MigrationId = "test-migration",
+            EntityType = entityType,
+            DestinationStore = _testStoreConfig
+        };
+
+        var expectedResult = new List<Dictionary<string, object>>
+        {
+            new() { ["id"] = "123", ["name"] = "TestEntity" }
+        };
+
+        _mockStrategy.Setup(x => x.CreateEntitiesAsync(
+                entities, 
+                request.MigrationId, 
+                request.DestinationStore, 
+                request.CategoryTreeContext, 
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(expectedResult);
+
+        // Act
+        var result = await _service.CreateEntitiesAsync(entities, request, CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Single(result);
+        Assert.Equal("123", result[0]["id"].ToString());
+        
+        _mockStrategyFactory.Verify(x => x.GetStrategy(entityType), Times.Once);
+        _mockStrategy.Verify(x => x.CreateEntitiesAsync(
+            entities, 
+            request.MigrationId, 
+            request.DestinationStore, 
+            request.CategoryTreeContext, 
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 } 

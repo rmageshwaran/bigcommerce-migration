@@ -400,17 +400,11 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IQueueService, QueueService>();
         services.TryAddSingleton<IMigrationStorageService, MigrationStorageService>();
 
-        // Register BigCommerce API client with factory pattern (request-based)
-        services.TryAddSingleton<IBigCommerceApiClient>(serviceProvider =>
-        {
-            var globalConfig = serviceProvider.GetRequiredService<BigCommerceConfiguration>();
-            var httpClientFactory = serviceProvider.GetRequiredService<IHttpClientFactory>();
-            var httpClient = httpClientFactory.CreateClient("BigCommerceApiClient");
-            var openSearchService = serviceProvider.GetRequiredService<IOpenSearchService>();
-            var logger = serviceProvider.GetRequiredService<ILogger<BigCommerceApiClient>>();
+        // Register API request handler for HTTP concerns (delegation pattern)
+        services.TryAddSingleton<IApiRequestHandler, ApiRequestHandler>();
 
-            return new BigCommerceApiClient(globalConfig, httpClient, openSearchService, logger);
-        });
+        // Register BigCommerce API client using delegation pattern
+        services.TryAddSingleton<IBigCommerceApiClient, BigCommerceApiClient>();
 
         // Register orchestration services (from gap analysis - these were missing)
         services.TryAddSingleton<IRateLimitService, RateLimitService>();

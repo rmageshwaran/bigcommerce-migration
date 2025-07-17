@@ -869,7 +869,7 @@ public class MigrationHttpFunctions
                 IncludeFields = null // Include all fields
             };
 
-            _logger.LogInformation("🔍 DEBUG: Searching with explicit MigrationId filter: MigrationId={MigrationId}, SearchTerm={SearchTerm}", migrationId, queryRequest.SearchTerm);
+            _logger.LogInformation("DEBUG: Searching with explicit MigrationId filter: MigrationId={MigrationId}, SearchTerm={SearchTerm}", migrationId, queryRequest.SearchTerm);
             
             var (searchResults, totalCount) = await _openSearchService.SearchLogsOptimizedAsync(queryRequest);
             

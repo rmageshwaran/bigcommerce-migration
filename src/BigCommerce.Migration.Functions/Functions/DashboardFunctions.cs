@@ -17,7 +17,7 @@ namespace BigCommerce.Migration.Functions.Functions
     {
         private readonly ILogger<DashboardFunctions> _logger;
         private readonly IProgressTracker _progressTracker;
-        private readonly IMigrationStorageService _storageService;
+        private readonly IMigrationStorageService _migrationStorageService;
         private readonly IRateLimitService _rateLimitService;
 
         public DashboardFunctions(
@@ -28,7 +28,7 @@ namespace BigCommerce.Migration.Functions.Functions
         {
             _logger = logger;
             _progressTracker = progressTracker;
-            _storageService = storageService;
+            _migrationStorageService = storageService;
             _rateLimitService = rateLimitService;
         }
 
@@ -60,7 +60,7 @@ namespace BigCommerce.Migration.Functions.Functions
                 var progress = await _progressTracker.GetProgressAsync(migrationId, cancellationToken);
                 
                 // Get migration from storage for consistency
-                var migrationEntry = await _storageService.GetMigrationAsync(migrationId);
+                var migrationEntry = await _migrationStorageService.GetMigrationAsync(migrationId);
                 
                 // Check if progress tracker has meaningful data (not just default values from restart)
                 var hasMeaningfulProgress = progress.TotalEntities > 0 || 

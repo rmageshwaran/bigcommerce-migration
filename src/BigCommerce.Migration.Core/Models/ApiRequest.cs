@@ -96,4 +96,23 @@ public class ApiRequest
             ContentType = "application/json"
         };
     }
+
+    /// <summary>
+    /// Creates a PUT request with JSON content
+    /// </summary>
+    /// <param name="url">Request URL</param>
+    /// <param name="content">JSON content</param>
+    /// <param name="storeConfig">Store configuration</param>
+    /// <returns>Configured API request</returns>
+    public static ApiRequest CreatePut(string url, string content, StoreConfiguration storeConfig)
+    {
+        return new ApiRequest
+        {
+            Url = url,
+            Method = HttpMethod.Put,
+            Content = content,
+            StoreConfiguration = storeConfig,
+            ContentType = "application/json"
+        };
+    }
 } 

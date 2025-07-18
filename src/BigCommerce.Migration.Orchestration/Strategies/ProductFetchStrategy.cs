@@ -11,11 +11,11 @@ namespace BigCommerce.Migration.Orchestration.Strategies;
 public class ProductFetchStrategy : IEntityFetchStrategy
 {
     private readonly IBigCommerceApiClient _apiClient;
-    private readonly ILogger<ProductFetchStrategy> _logger;
+    private readonly ILogger _logger;
 
     public string EntityType => "products";
 
-    public ProductFetchStrategy(IBigCommerceApiClient apiClient, ILogger<ProductFetchStrategy> logger)
+    public ProductFetchStrategy(IBigCommerceApiClient apiClient, ILogger logger)
     {
         _apiClient = apiClient ?? throw new ArgumentNullException(nameof(apiClient));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -28,6 +28,11 @@ public class ProductFetchStrategy : IEntityFetchStrategy
         CategoryTreeContext? categoryTreeContext = null,
         CancellationToken cancellationToken = default)
     {
+        // LSP COMPLIANCE: Consistent parameter validation across all strategies
+        if (entityIds == null) throw new ArgumentNullException(nameof(entityIds));
+        if (string.IsNullOrWhiteSpace(migrationId)) throw new ArgumentNullException(nameof(migrationId));
+        if (sourceStore == null) throw new ArgumentNullException(nameof(sourceStore));
+
         _logger.LogInformation("Fetching {Count} specific products for migration {MigrationId}", 
             entityIds.Count, migrationId);
 
@@ -35,6 +40,9 @@ public class ProductFetchStrategy : IEntityFetchStrategy
 
         try
         {
+            // LSP COMPLIANCE: Check for cancellation consistently across all strategies
+            cancellationToken.ThrowIfCancellationRequested();
+
             if (!entityIds.Any())
             {
                 _logger.LogInformation("No specific product IDs provided for migration {MigrationId}", migrationId);

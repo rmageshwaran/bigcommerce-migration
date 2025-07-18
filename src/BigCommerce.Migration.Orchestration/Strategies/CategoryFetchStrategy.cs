@@ -11,11 +11,11 @@ namespace BigCommerce.Migration.Orchestration.Strategies;
 public class CategoryFetchStrategy : IEntityFetchStrategy
 {
     private readonly IBigCommerceApiClient _apiClient;
-    private readonly ILogger<CategoryFetchStrategy> _logger;
+    private readonly ILogger _logger;
 
     public string EntityType => "categories";
 
-    public CategoryFetchStrategy(IBigCommerceApiClient apiClient, ILogger<CategoryFetchStrategy> logger)
+    public CategoryFetchStrategy(IBigCommerceApiClient apiClient, ILogger logger)
     {
         _apiClient = apiClient ?? throw new ArgumentNullException(nameof(apiClient));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -28,6 +28,11 @@ public class CategoryFetchStrategy : IEntityFetchStrategy
         CategoryTreeContext? categoryTreeContext = null,
         CancellationToken cancellationToken = default)
     {
+        // LSP COMPLIANCE: Consistent parameter validation across all strategies
+        if (entityIds == null) throw new ArgumentNullException(nameof(entityIds));
+        if (string.IsNullOrWhiteSpace(migrationId)) throw new ArgumentNullException(nameof(migrationId));
+        if (sourceStore == null) throw new ArgumentNullException(nameof(sourceStore));
+
         _logger.LogInformation("Fetching {Count} specific categories for migration {MigrationId}", 
             entityIds.Count, migrationId);
         
@@ -35,6 +40,9 @@ public class CategoryFetchStrategy : IEntityFetchStrategy
 
         try
         {
+            // LSP COMPLIANCE: Check for cancellation consistently across all strategies
+            cancellationToken.ThrowIfCancellationRequested();
+
             // Determine category tree ID for fetching
             var categoryTreeId = categoryTreeContext?.SourceCategoryTreeId ?? "1"; // Default to tree 1
             

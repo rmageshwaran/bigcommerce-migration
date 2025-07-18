@@ -39,6 +39,9 @@ public class SegregatedInterfaceRegistrationTests
             ["OpenSearch:EnableDebugMode"] = "false"
         });
         _configuration = configBuilder.Build();
+        
+        // Register IConfiguration as a service for dependency injection
+        _services.AddSingleton<IConfiguration>(_configuration);
     }
 
     [Fact]

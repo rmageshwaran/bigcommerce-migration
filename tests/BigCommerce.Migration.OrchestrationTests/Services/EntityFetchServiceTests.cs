@@ -15,6 +15,8 @@ namespace BigCommerce.Migration.OrchestrationTests.Services;
 public class EntityFetchServiceTests
 {
     private readonly Mock<IBigCommerceApiClient> _apiClientMock;
+    private readonly Mock<IEntityFetchStrategyFactory> _strategyFactoryMock;
+    private readonly Mock<IEntityFetchStrategy> _mockStrategy;
     private readonly Mock<ILogger<EntityFetchService>> _loggerMock;
     private readonly EntityFetchService _service;
     private readonly StoreConfiguration _validStoreConfig;
@@ -23,8 +25,24 @@ public class EntityFetchServiceTests
     public EntityFetchServiceTests()
     {
         _apiClientMock = new Mock<IBigCommerceApiClient>();
+        _strategyFactoryMock = new Mock<IEntityFetchStrategyFactory>();
+        _mockStrategy = new Mock<IEntityFetchStrategy>();
         _loggerMock = new Mock<ILogger<EntityFetchService>>();
-        _service = new EntityFetchService(_apiClientMock.Object, _loggerMock.Object);
+        
+        // Setup strategy factory to return mock strategy for any entity type
+        _strategyFactoryMock.Setup(x => x.GetStrategy(It.IsAny<string>()))
+            .Returns(_mockStrategy.Object);
+        
+        // Setup mock strategy to return test data by default
+        _mockStrategy.Setup(x => x.FetchEntitiesAsync(
+                It.IsAny<List<string>>(),
+                It.IsAny<string>(),
+                It.IsAny<StoreConfiguration>(),
+                It.IsAny<CategoryTreeContext?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Dictionary<string, object>>());
+        
+        _service = new EntityFetchService(_apiClientMock.Object, _strategyFactoryMock.Object, _loggerMock.Object);
 
         _validStoreConfig = new StoreConfiguration
         {
@@ -52,7 +70,7 @@ public class EntityFetchServiceTests
     public void Constructor_WithValidParameters_CreatesInstance()
     {
         // Act & Assert
-        var service = new EntityFetchService(_apiClientMock.Object, _loggerMock.Object);
+        var service = new EntityFetchService(_apiClientMock.Object, _strategyFactoryMock.Object, _loggerMock.Object);
         Assert.NotNull(service);
     }
 
@@ -60,14 +78,21 @@ public class EntityFetchServiceTests
     public void Constructor_WithNullApiClient_ThrowsArgumentNullException()
     {
         // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => new EntityFetchService(null!, _loggerMock.Object));
+        Assert.Throws<ArgumentNullException>(() => new EntityFetchService(null!, _strategyFactoryMock.Object, _loggerMock.Object));
+    }
+
+    [Fact]
+    public void Constructor_WithNullStrategyFactory_ThrowsArgumentNullException()
+    {
+        // Act & Assert
+        Assert.Throws<ArgumentNullException>(() => new EntityFetchService(_apiClientMock.Object, null!, _loggerMock.Object));
     }
 
     [Fact]
     public void Constructor_WithNullLogger_ThrowsArgumentNullException()
     {
         // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => new EntityFetchService(_apiClientMock.Object, null!));
+        Assert.Throws<ArgumentNullException>(() => new EntityFetchService(_apiClientMock.Object, _strategyFactoryMock.Object, null!));
     }
 
     [Fact]

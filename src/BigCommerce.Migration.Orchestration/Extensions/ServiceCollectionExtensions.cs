@@ -21,6 +21,9 @@ public static class ServiceCollectionExtensions
     /// <returns>Service collection for chaining</returns>
     public static IServiceCollection AddOrchestrationServices(this IServiceCollection services)
     {
+        // Add logging services (required by many services)
+        services.AddLogging();
+        
         // Add core business services
         services.AddCoreServices();
         
@@ -73,7 +76,16 @@ public static class ServiceCollectionExtensions
         // Register services as singleton for better performance and test consistency
         services.TryAddSingleton<ICategoryTreeResolver, CategoryTreeResolver>();
         services.TryAddSingleton<IOpenSearchService, OpenSearchService>();
+        
+        // Register API request handler for HTTP concerns (required by BigCommerceApiClient)
+        services.TryAddSingleton<IApiRequestHandler, ApiRequestHandler>();
         services.TryAddSingleton<IBigCommerceApiClient, BigCommerceApiClient>();
+        
+        // Register segregated API client interfaces (Interface Segregation Principle)
+        services.TryAddSingleton<ICategoryApiClient, CategoryApiService>();
+        services.TryAddSingleton<IProductApiClient, ProductApiService>();
+        services.TryAddSingleton<IPaginationApiClient, PaginationApiService>();
+        services.TryAddSingleton<IApiHealthClient, HealthApiService>();
         
         // Register Azure Storage services
         services.TryAddSingleton<IBlobService, BlobService>();

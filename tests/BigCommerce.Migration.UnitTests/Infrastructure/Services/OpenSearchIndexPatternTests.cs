@@ -103,7 +103,7 @@ public class OpenSearchIndexPatternTests
         var pattern = BuildOptimizedIndexPattern(fromDate, toDate);
 
         // Assert
-        pattern.Should().Be("bigcommerce-migration-2024-01-15");
+        pattern.Should().Be("bigcommerce-migration-2024-01-15,bigcommerce-migration-errors-2024-01");
     }
 
     #endregion
@@ -121,7 +121,7 @@ public class OpenSearchIndexPatternTests
         var pattern = BuildOptimizedIndexPattern(fromDate, toDate);
 
         // Assert - daysDiff = 1.0, so falls under <= 1 condition
-        pattern.Should().Be("bigcommerce-migration-2024-01-15");
+        pattern.Should().Be("bigcommerce-migration-2024-01-15,bigcommerce-migration-errors-2024-01");
     }
 
     [Fact]
@@ -135,7 +135,7 @@ public class OpenSearchIndexPatternTests
         var pattern = BuildOptimizedIndexPattern(fromDate, toDate);
 
         // Assert
-        pattern.Should().Be("bigcommerce-migration-2024-01-15,bigcommerce-migration-2024-01-16");
+        pattern.Should().Be("bigcommerce-migration-2024-01-15,bigcommerce-migration-2024-01-16,bigcommerce-migration-errors-2024-01");
     }
 
     [Fact]
@@ -149,7 +149,7 @@ public class OpenSearchIndexPatternTests
         var pattern = BuildOptimizedIndexPattern(fromDate, toDate);
 
         // Assert
-        pattern.Should().Be("bigcommerce-migration-2024-01-15,bigcommerce-migration-2024-01-16,bigcommerce-migration-2024-01-17");
+        pattern.Should().Be("bigcommerce-migration-2024-01-15,bigcommerce-migration-2024-01-16,bigcommerce-migration-2024-01-17,bigcommerce-migration-errors-2024-01");
     }
 
     [Fact]
@@ -171,7 +171,8 @@ public class OpenSearchIndexPatternTests
             "bigcommerce-migration-2024-01-18",
             "bigcommerce-migration-2024-01-19",
             "bigcommerce-migration-2024-01-20",
-            "bigcommerce-migration-2024-01-21"
+            "bigcommerce-migration-2024-01-21",
+            "bigcommerce-migration-errors-2024-01"
         };
         pattern.Should().Be(string.Join(",", expectedIndices));
     }
@@ -188,9 +189,10 @@ public class OpenSearchIndexPatternTests
 
         // Assert
         var indices = pattern.Split(',');
-        indices.Should().HaveCount(5);
+        indices.Should().HaveCount(6); // 5 daily indices + 1 error index
         indices[0].Should().Be("bigcommerce-migration-2024-01-15");
         indices[4].Should().Be("bigcommerce-migration-2024-01-19");
+        indices[5].Should().Be("bigcommerce-migration-errors-2024-01");
     }
 
     [Fact]
@@ -205,9 +207,10 @@ public class OpenSearchIndexPatternTests
 
         // Assert
         var indices = pattern.Split(',');
-        indices.Should().HaveCount(4);
+        indices.Should().HaveCount(5); // 4 daily indices + 1 error index
         indices.Should().Contain("bigcommerce-migration-2024-01-20"); // Saturday
         indices.Should().Contain("bigcommerce-migration-2024-01-21"); // Sunday
+        indices.Should().Contain("bigcommerce-migration-errors-2024-01"); // Error index
     }
 
     #endregion
@@ -225,7 +228,7 @@ public class OpenSearchIndexPatternTests
         var pattern = BuildOptimizedIndexPattern(fromDate, toDate);
 
         // Assert
-        pattern.Should().Be("bigcommerce-migration-2024-01*");
+        pattern.Should().Be("bigcommerce-migration-2024-01*,bigcommerce-migration-errors-2024-01");
     }
 
     [Fact]
@@ -239,7 +242,7 @@ public class OpenSearchIndexPatternTests
         var pattern = BuildOptimizedIndexPattern(fromDate, toDate);
 
         // Assert
-        pattern.Should().Be("bigcommerce-migration-2024-01*");
+        pattern.Should().Be("bigcommerce-migration-2024-01*,bigcommerce-migration-errors-2024-01");
     }
 
     [Fact]
@@ -253,7 +256,7 @@ public class OpenSearchIndexPatternTests
         var pattern = BuildOptimizedIndexPattern(fromDate, toDate);
 
         // Assert
-        pattern.Should().Be("bigcommerce-migration-2024-01-15,bigcommerce-migration-2024-01-16,bigcommerce-migration-2024-01-17,bigcommerce-migration-2024-01-18,bigcommerce-migration-2024-01-19,bigcommerce-migration-2024-01-20,bigcommerce-migration-2024-01-21,bigcommerce-migration-2024-01-22");
+        pattern.Should().Be("bigcommerce-migration-2024-01-15,bigcommerce-migration-2024-01-16,bigcommerce-migration-2024-01-17,bigcommerce-migration-2024-01-18,bigcommerce-migration-2024-01-19,bigcommerce-migration-2024-01-20,bigcommerce-migration-2024-01-21,bigcommerce-migration-2024-01-22,bigcommerce-migration-errors-2024-01");
     }
 
     [Fact]
@@ -267,7 +270,7 @@ public class OpenSearchIndexPatternTests
         var pattern = BuildOptimizedIndexPattern(fromDate, toDate);
 
         // Assert
-        pattern.Should().Be("bigcommerce-migration-2024-01*");
+        pattern.Should().Be("bigcommerce-migration-2024-01*,bigcommerce-migration-errors-2024-01");
     }
 
     [Fact]
@@ -281,7 +284,7 @@ public class OpenSearchIndexPatternTests
         var pattern = BuildOptimizedIndexPattern(fromDate, toDate);
 
         // Assert
-        pattern.Should().Be("bigcommerce-migration-2024-02*");
+        pattern.Should().Be("bigcommerce-migration-2024-02*,bigcommerce-migration-errors-2024-02");
     }
 
     #endregion
@@ -346,7 +349,7 @@ public class OpenSearchIndexPatternTests
         var pattern = BuildOptimizedIndexPattern(fromDate, toDate, customIndex);
 
         // Assert
-        pattern.Should().Be("custom-migration-logs-2024-01-15");
+        pattern.Should().Be("custom-migration-logs-2024-01-15,custom-migration-logs-errors-2024-01");
     }
 
     [Fact]
@@ -360,7 +363,7 @@ public class OpenSearchIndexPatternTests
         var pattern = BuildOptimizedIndexPattern(fromDate, toDate);
 
         // Assert
-        pattern.Should().Be("bigcommerce-migration-2024-02-29");
+        pattern.Should().Be("bigcommerce-migration-2024-02-29,bigcommerce-migration-errors-2024-02");
     }
 
     [Fact]
@@ -389,9 +392,10 @@ public class OpenSearchIndexPatternTests
 
         // Assert
         var indices = pattern.Split(',');
-        indices.Should().HaveCount(7);
+        indices.Should().HaveCount(8); // 7 daily indices + 1 error index
         pattern.Should().StartWith("bigcommerce-migration-2024-01-15");
-        pattern.Should().EndWith("bigcommerce-migration-2024-01-21");
+        pattern.Should().EndWith("bigcommerce-migration-errors-2024-01");
+        indices.Should().Contain("bigcommerce-migration-2024-01-21");
     }
 
     [Fact]
@@ -405,7 +409,7 @@ public class OpenSearchIndexPatternTests
         var pattern = BuildOptimizedIndexPattern(fromDate, toDate);
 
         // Assert
-        pattern.Should().Be("bigcommerce-migration-2024-01-15");
+        pattern.Should().Be("bigcommerce-migration-2024-01-15,bigcommerce-migration-errors-2024-01");
     }
 
     #endregion
@@ -432,23 +436,13 @@ public class OpenSearchIndexPatternTests
         switch (expectedStrategy)
         {
             case "daily":
-                if (daysBack == 1)
-                {
-                    pattern.Should().NotContain(",");
-                    pattern.Should().NotContain("*");
-                    pattern.Should().MatchRegex(@".*-\d{4}-\d{2}-\d{2}$");
-                }
-                else
-                {
-                    pattern.Should().Contain(",");
-                    pattern.Should().NotContain("*");
-                }
+                pattern.Should().Contain(","); // Always contains error indices
+                pattern.Should().NotContain("*");
                 break;
                 
             case "monthly":
-                pattern.Should().NotContain(",");
+                pattern.Should().Contain(","); // Contains base pattern + error pattern
                 pattern.Should().Contain("*");
-                pattern.Should().MatchRegex(@".*-\d{4}-\d{2}\*$");
                 break;
                 
             case "full":
@@ -473,11 +467,11 @@ public class OpenSearchIndexPatternTests
 
         // Assert
         broadPattern.Should().Be("bigcommerce-migration-*"); // Searches all indices
-        specificPattern.Should().Be("bigcommerce-migration-2024-01-15"); // Searches only 1 index
+        specificPattern.Should().Be("bigcommerce-migration-2024-01-15,bigcommerce-migration-errors-2024-01"); // Searches 2 specific indices
 
-        // Demonstrate 365:1 optimization ratio for daily vs yearly searches
-        var optimizationRatio = 365; // 365 daily indices vs 1 specific index
-        optimizationRatio.Should().BeGreaterThan(300); // Significant optimization
+        // Demonstrate significant optimization ratio for daily vs yearly searches
+        var optimizationRatio = 365; // 365 daily indices vs 2 specific indices
+        optimizationRatio.Should().BeGreaterThan(100); // Significant optimization
     }
 
     [Fact]
@@ -494,15 +488,15 @@ public class OpenSearchIndexPatternTests
         var monthPattern = BuildOptimizedIndexPattern(monthRange.Item1, monthRange.Item2);
 
         // Assert - Index specificity should decrease with range size
-        // Single day: 1 specific index
-        singleDayPattern.Should().NotContain(",");
+        // Single day: 2 specific indices (base + error)
+        singleDayPattern.Should().Contain(",");
         singleDayPattern.Should().NotContain("*");
 
-        // Week: 7 specific indices (more specific than wildcard)
+        // Week: 7 daily indices + 1 error index (more specific than wildcard)
         if (weekPattern.Contains(","))
         {
             var weekIndices = weekPattern.Split(',');
-            weekIndices.Should().HaveCountLessOrEqualTo(7);
+            weekIndices.Should().HaveCountLessOrEqualTo(8); // 7 daily + 1 error index
         }
 
         // Month: Wildcard (less specific but more efficient for large ranges)

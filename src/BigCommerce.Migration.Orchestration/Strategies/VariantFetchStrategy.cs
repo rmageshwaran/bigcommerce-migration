@@ -11,11 +11,11 @@ namespace BigCommerce.Migration.Orchestration.Strategies;
 public class VariantFetchStrategy : IEntityFetchStrategy
 {
     private readonly IBigCommerceApiClient _apiClient;
-    private readonly ILogger<VariantFetchStrategy> _logger;
+    private readonly ILogger _logger;
 
     public string EntityType => "variants";
 
-    public VariantFetchStrategy(IBigCommerceApiClient apiClient, ILogger<VariantFetchStrategy> logger)
+    public VariantFetchStrategy(IBigCommerceApiClient apiClient, ILogger logger)
     {
         _apiClient = apiClient ?? throw new ArgumentNullException(nameof(apiClient));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -28,6 +28,11 @@ public class VariantFetchStrategy : IEntityFetchStrategy
         CategoryTreeContext? categoryTreeContext = null,
         CancellationToken cancellationToken = default)
     {
+        // LSP COMPLIANCE: Consistent parameter validation across all strategies
+        if (entityIds == null) throw new ArgumentNullException(nameof(entityIds));
+        if (string.IsNullOrWhiteSpace(migrationId)) throw new ArgumentNullException(nameof(migrationId));
+        if (sourceStore == null) throw new ArgumentNullException(nameof(sourceStore));
+
         _logger.LogInformation("Fetching {Count} specific variants for migration {MigrationId}", 
             entityIds.Count, migrationId);
 
@@ -35,6 +40,9 @@ public class VariantFetchStrategy : IEntityFetchStrategy
 
         try
         {
+            // LSP COMPLIANCE: Check for cancellation consistently across all strategies
+            cancellationToken.ThrowIfCancellationRequested();
+
             if (!entityIds.Any())
             {
                 _logger.LogInformation("No specific variant IDs provided for migration {MigrationId}", migrationId);

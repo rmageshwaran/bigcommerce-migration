@@ -36,6 +36,9 @@ public static class ServiceCollectionExtensions
         if (configuration == null)
             throw new ArgumentNullException(nameof(configuration));
 
+        // Add configuration abstraction (DIP compliance)
+        services.AddSingleton<IMigrationConfigurationProvider, MigrationConfigurationProvider>();
+
         // Add configuration bindings
         services.AddConfiguration(configuration);
 

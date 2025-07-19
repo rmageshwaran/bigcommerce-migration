@@ -1,4 +1,5 @@
 import * as signalR from '@microsoft/signalr';
+import config from '../config/environment';
 import type { 
   SignalRConnection, 
   SignalRMessage, 
@@ -12,37 +13,63 @@ export class SignalRService {
   private connection: signalR.HubConnection | null = null;
   private connectionState: ConnectionState = 'Disconnected';
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
+  private maxReconnectAttempts: number;
   private reconnectInterval = 5000; // 5 seconds
   private listeners: Map<string, Set<(data: any) => void>> = new Map();
+  private hubUrl: string;
 
-  constructor(private hubUrl: string) {
+  constructor(hubUrl?: string) {
+    // Use environment configuration with optional override
+    this.hubUrl = hubUrl || `${config.signalR.hubUrl}/signalr`;
+    this.maxReconnectAttempts = config.signalR.reconnectAttempts;
+    
+    if (config.features.enableDebugLogging) {
+      console.log('🔌 SignalR Service initialized:', {
+        hubUrl: this.hubUrl,
+        maxReconnectAttempts: this.maxReconnectAttempts,
+        hasApiKey: !!config.auth.apiKey
+      });
+    }
+    
     this.initializeConnection();
   }
 
   /**
-   * Initialize SignalR connection with configuration
+   * Initialize SignalR connection with backend integration
    */
   private initializeConnection(): void {
     this.connection = new signalR.HubConnectionBuilder()
       .withUrl(this.hubUrl, {
-        skipNegotiation: false, // Azure SignalR requires negotiation
+        skipNegotiation: true, // Azure Functions SignalR setup
         transport: signalR.HttpTransportType.WebSockets,
         accessTokenFactory: () => {
-          // Add authentication token if needed
-          return '';
+          // Return API key for Azure Functions authentication
+          return config.auth.apiKey || '';
+        },
+        headers: {
+          // Add additional headers for Azure Functions
+          ...(config.auth.apiKey && {
+            'Authorization': `Bearer ${config.auth.apiKey}`,
+            'x-functions-key': config.auth.apiKey
+          })
         }
       })
       .withAutomaticReconnect({
         nextRetryDelayInMilliseconds: retryContext => {
-          if (retryContext.elapsedMilliseconds < 60000) {
-            return Math.random() * 10000;
-          } else {
-            return null; // Stop retrying after 1 minute
+          // Exponential backoff with max retry limit
+          const delay = Math.min(1000 * Math.pow(2, retryContext.previousRetryCount), 30000);
+          
+          if (retryContext.previousRetryCount >= this.maxReconnectAttempts) {
+            if (config.features.enableDebugLogging) {
+              console.warn(`🔄 SignalR max reconnect attempts (${this.maxReconnectAttempts}) reached`);
+            }
+            return null; // Stop retrying
           }
+          
+          return delay;
         }
       })
-      .configureLogging(signalR.LogLevel.Information)
+      .configureLogging(config.features.enableDebugLogging ? signalR.LogLevel.Debug : signalR.LogLevel.Warning)
       .build();
 
     this.setupEventHandlers();

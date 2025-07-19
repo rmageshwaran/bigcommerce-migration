@@ -20,8 +20,10 @@ services:
       timeout: 10s
       retries: 3
     restart: unless-stopped
+    networks:
+      - bigcommerce-network
 
-  # BigCommerce Migration Functions
+  # BigCommerce Migration Functions (Main API Service)
   bigcommerce-functions:
     build:
       context: .
@@ -88,6 +90,8 @@ services:
       timeout: 10s
       retries: 5
     restart: unless-stopped
+    networks:
+      - bigcommerce-network
 
   # Migration Dashboard (React App)
   bigcommerce-dashboard:
@@ -98,8 +102,8 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - REACT_APP_API_BASE_URL=http://localhost:7071/api/dashboard
-      - REACT_APP_SIGNALR_URL=http://localhost:7071/api
+      - REACT_APP_API_BASE_URL=http://bigcommerce-functions/api/dashboard
+      - REACT_APP_SIGNALR_URL=http://bigcommerce-functions/api
       - REACT_APP_ENVIRONMENT=development
       - CHOKIDAR_USEPOLLING=true
     volumes:
@@ -107,8 +111,11 @@ services:
       - ./src/BigCommerce.Migration.Dashboard/public:/app/public
       - /app/node_modules
     depends_on:
-      - bigcommerce-functions
+      bigcommerce-functions:
+        condition: service_healthy
     restart: unless-stopped
+    networks:
+      - bigcommerce-network
 
   # Optional: SignalR Service (for real-time updates)
   signalr-emulator:
@@ -119,13 +126,135 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
     restart: unless-stopped
+    networks:
+      - bigcommerce-network
+
+  # Test Services - Unit Tests
+  unit-tests:
+    build:
+      context: .
+      dockerfile: Dockerfile.tests
+      target: unit-tests
+    container_name: bigcommerce-unit-tests
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Testing
+      - ConnectionStrings__AzureStorage=DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;QueueEndpoint=http://azurite:10001/devstoreaccount1;TableEndpoint=http://azurite:10002/devstoreaccount1;
+    volumes:
+      - test-results:/testresults
+    depends_on:
+      azurite:
+        condition: service_healthy
+    profiles:
+      - testing
+      - unit-tests
+    networks:
+      - bigcommerce-network
+
+  # Test Services - Orchestration Tests
+  orchestration-tests:
+    build:
+      context: .
+      dockerfile: Dockerfile.tests
+      target: orchestration-tests
+    container_name: bigcommerce-orchestration-tests
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Testing
+      - ConnectionStrings__AzureStorage=DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;QueueEndpoint=http://azurite:10001/devstoreaccount1;TableEndpoint=http://azurite:10002/devstoreaccount1;
+    volumes:
+      - test-results:/testresults
+    depends_on:
+      azurite:
+        condition: service_healthy
+    profiles:
+      - testing
+      - orchestration-tests
+    networks:
+      - bigcommerce-network
+
+  # Test Services - Integration Tests
+  integration-tests:
+    build:
+      context: .
+      dockerfile: Dockerfile.tests
+      target: integration-tests
+    container_name: bigcommerce-integration-tests
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Testing
+      - ConnectionStrings__AzureStorage=DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;QueueEndpoint=http://azurite:10001/devstoreaccount1;TableEndpoint=http://azurite:10002/devstoreaccount1;
+      - BigCommerce__BaseUrl=https://api.bigcommerce.com
+    volumes:
+      - test-results:/testresults
+    depends_on:
+      azurite:
+        condition: service_healthy
+      bigcommerce-functions:
+        condition: service_healthy
+    profiles:
+      - testing
+      - integration-tests
+    networks:
+      - bigcommerce-network
+
+  # Test Services - Performance Tests
+  performance-tests:
+    build:
+      context: .
+      dockerfile: Dockerfile.tests
+      target: performance-tests
+    container_name: bigcommerce-performance-tests
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Testing
+      - ConnectionStrings__AzureStorage=DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;QueueEndpoint=http://azurite:10001/devstoreaccount1;TableEndpoint=http://azurite:10002/devstoreaccount1;
+      - BigCommerce__BaseUrl=https://api.bigcommerce.com
+    volumes:
+      - test-results:/testresults
+    depends_on:
+      azurite:
+        condition: service_healthy
+      bigcommerce-functions:
+        condition: service_healthy
+    profiles:
+      - testing
+      - performance-tests
+    networks:
+      - bigcommerce-network
+
+  # Test Services - All Tests (run all test suites)
+  all-tests:
+    build:
+      context: .
+      dockerfile: Dockerfile.tests
+      target: all-tests
+    container_name: bigcommerce-all-tests
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Testing
+      - ConnectionStrings__AzureStorage=DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;QueueEndpoint=http://azurite:10001/devstoreaccount1;TableEndpoint=http://azurite:10002/devstoreaccount1;
+      - BigCommerce__BaseUrl=https://api.bigcommerce.com
+    volumes:
+      - test-results:/testresults
+    depends_on:
+      azurite:
+        condition: service_healthy
+      bigcommerce-functions:
+        condition: service_healthy
+    profiles:
+      - testing
+      - all-tests
+    networks:
+      - bigcommerce-network
 
 volumes:
   azurite-data:
     driver: local
+    name: bigcommerce-azurite-data
   functions-logs:
     driver: local
+    name: bigcommerce-functions-logs
+  test-results:
+    driver: local
+    name: bigcommerce-test-results
 
 networks:
-  default:
-    name: bigcommerce-migration-network 
+  bigcommerce-network:
+    name: bigcommerce-migration-network
+    driver: bridge 

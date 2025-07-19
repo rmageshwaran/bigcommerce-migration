@@ -1,5 +1,6 @@
 import axios from 'axios';
 import type { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
+import config from '../config/environment';
 import type {
   MigrationProgress,
   SystemHealthData,
@@ -20,23 +21,39 @@ export class ApiService {
   private client: AxiosInstance;
   private config: ApiConfig;
 
-  constructor(config: Partial<ApiConfig> = {}) {
+  constructor(apiConfig: Partial<ApiConfig> = {}) {
+    // Use environment configuration with override options
     this.config = {
-      baseURL: config.baseURL || '/api',
-      timeout: config.timeout || 10000, // 10 seconds
-      maxRetries: config.maxRetries || 3,
-      retryDelay: config.retryDelay || 1000 // 1 second
+      baseURL: apiConfig.baseURL || config.api.baseUrl,
+      timeout: apiConfig.timeout || config.api.timeout,
+      maxRetries: apiConfig.maxRetries || config.api.retryAttempts,
+      retryDelay: apiConfig.retryDelay || 1000 // 1 second
     };
 
+    // Create axios instance with backend-specific configuration
     this.client = axios.create({
       baseURL: this.config.baseURL,
       timeout: this.config.timeout,
       headers: {
         'Content-Type': 'application/json',
+        // Add Azure Functions authentication if API key is available
+        ...(config.auth.apiKey && {
+          'Authorization': `Bearer ${config.auth.apiKey}`,
+          'x-functions-key': config.auth.apiKey
+        })
       },
     });
 
     this.setupInterceptors();
+    
+    // Log configuration in development
+    if (config.features.enableDebugLogging) {
+      console.log('🔌 API Service initialized:', {
+        baseURL: this.config.baseURL,
+        hasApiKey: !!config.auth.apiKey,
+        timeout: this.config.timeout
+      });
+    }
   }
 
   /**
@@ -45,38 +62,47 @@ export class ApiService {
   private setupInterceptors(): void {
     // Request interceptor
     this.client.interceptors.request.use(
-      (config) => {
-        // Add authentication headers if needed
-        // const token = getAuthToken();
-        // if (token) {
-        //   config.headers.Authorization = `Bearer ${token}`;
-        // }
-        
-        console.log(`API Request: ${config.method?.toUpperCase()} ${config.url}`);
-        return config;
+      (requestConfig) => {
+        if (config.features.enableDebugLogging) {
+          console.log(`🔍 API Request: ${requestConfig.method?.toUpperCase()} ${requestConfig.url}`);
+        }
+        return requestConfig;
       },
       (error) => {
-        console.error('API Request Error:', error);
+        console.error('❌ API Request Error:', error);
         return Promise.reject(error);
       }
     );
 
-    // Response interceptor
+    // Response interceptor with Azure Functions error handling
     this.client.interceptors.response.use(
       (response) => {
-        console.log(`API Response: ${response.status} ${response.config.url}`);
+        if (config.features.enableDebugLogging) {
+          console.log(`✅ API Response: ${response.status} ${response.config.url}`);
+        }
         return response;
       },
       async (error) => {
-        console.error('API Response Error:', error);
+        if (config.features.enableDebugLogging) {
+          console.error('❌ API Response Error:', error);
+        }
         
-        // Retry logic for failed requests
+        // Handle Azure Functions specific errors
+        if (error.response?.status === 401) {
+          console.error('🔒 Authentication failed - check API key configuration');
+        }
+        
+        if (error.response?.status === 403) {
+          console.error('🚫 Authorization failed - API key may lack required permissions');
+        }
+        
+        // Retry logic for failed requests (but not for auth errors)
         if (error.config && !error.config._retry && this.shouldRetry(error)) {
           error.config._retry = true;
           error.config._retryCount = (error.config._retryCount || 0) + 1;
           
           if (error.config._retryCount <= this.config.maxRetries) {
-            console.log(`Retrying request (${error.config._retryCount}/${this.config.maxRetries})`);
+            console.log(`🔄 Retrying request (${error.config._retryCount}/${this.config.maxRetries})`);
             
             // Wait before retrying
             await this.delay(this.config.retryDelay * error.config._retryCount);
@@ -94,6 +120,11 @@ export class ApiService {
    * Determine if a request should be retried
    */
   private shouldRetry(error: any): boolean {
+    // Don't retry authentication or authorization errors
+    if (error.response?.status === 401 || error.response?.status === 403) {
+      return false;
+    }
+    
     return (
       error.code === 'ECONNABORTED' || // Timeout
       error.code === 'ENOTFOUND' || // Network error
@@ -108,13 +139,13 @@ export class ApiService {
   private formatError(error: any): Error {
     if (error.response) {
       // Server responded with error status
-      const message = error.response.data?.message || error.response.statusText || 'API Error';
-      return new Error(`HTTP ${error.response.status}: ${message}`);
+      const message = error.response.data?.message || error.response.statusText || 'Server Error';
+      return new Error(`API Error (${error.response.status}): ${message}`);
     } else if (error.request) {
       // Request was made but no response received
       return new Error('Network Error: No response from server');
     } else {
-      // Error in request setup
+      // Something else happened
       return new Error(`Request Error: ${error.message}`);
     }
   }
@@ -158,95 +189,100 @@ export class ApiService {
     return response.data;
   }
 
-  // Migration API methods
+  // ===== BACKEND INTEGRATION API METHODS =====
   
   /**
-   * Get migration status by ID
-   */
-  public async getMigrationStatus(migrationId: string): Promise<MigrationProgress> {
-    return this.get<MigrationProgress>(`/dashboard/migrations/${migrationId}/status`);
-  }
-
-  /**
-   * Get list of active migrations
-   */
-  public async getActiveMigrations(): Promise<PaginatedResponse<MigrationProgress>> {
-    return this.get<PaginatedResponse<MigrationProgress>>('/dashboard/migrations');
-  }
-
-  /**
    * Start a new migration
+   * Maps to: POST /api/migrations/start
    */
   public async startMigration(migrationRequest: any): Promise<ApiResponse<string>> {
-    return this.post<ApiResponse<string>>('/migrations', migrationRequest);
+    return this.post<ApiResponse<string>>('/api/migrations/start', migrationRequest);
+  }
+
+  /**
+   * Get migration status by ID  
+   * Maps to: GET /api/migrations/{id}/status
+   */
+  public async getMigrationStatus(migrationId: string): Promise<MigrationProgress> {
+    return this.get<MigrationProgress>(`/api/migrations/${migrationId}/status`);
+  }
+
+  /**
+   * Get detailed migration progress
+   * Maps to: GET /api/migrations/{id}/progress
+   */
+  public async getMigrationProgress(migrationId: string): Promise<MigrationProgress> {
+    return this.get<MigrationProgress>(`/api/migrations/${migrationId}/progress`);
   }
 
   /**
    * Cancel a migration
+   * Maps to: POST /api/migrations/{id}/cancel  
    */
   public async cancelMigration(migrationId: string): Promise<ApiResponse<void>> {
-    return this.post<ApiResponse<void>>(`/migrations/${migrationId}/cancel`);
+    return this.post<ApiResponse<void>>(`/api/migrations/${migrationId}/cancel`);
   }
 
   /**
-   * Pause a migration
+   * Get list of active migrations
+   * Maps to: GET /api/dashboard/active-migrations
    */
-  public async pauseMigration(migrationId: string): Promise<ApiResponse<void>> {
-    return this.post<ApiResponse<void>>(`/migrations/${migrationId}/pause`);
+  public async getActiveMigrations(): Promise<PaginatedResponse<MigrationProgress>> {
+    return this.get<PaginatedResponse<MigrationProgress>>('/api/dashboard/active-migrations');
   }
 
   /**
-   * Resume a migration
-   */
-  public async resumeMigration(migrationId: string): Promise<ApiResponse<void>> {
-    return this.post<ApiResponse<void>>(`/migrations/${migrationId}/resume`);
-  }
-
-  // System Health API methods
-
-  /**
-   * Get system health status
+   * Get system health data
+   * Maps to: GET /api/dashboard/system-health
    */
   public async getSystemHealth(): Promise<SystemHealthData> {
-    return this.get<SystemHealthData>('/dashboard/health');
+    return this.get<SystemHealthData>('/api/dashboard/system-health');
   }
 
   /**
-   * Get queue status and metrics
+   * Get performance statistics
+   * Maps to: GET /api/dashboard/performance-stats
+   */
+  public async getPerformanceStats(): Promise<any> {
+    return this.get<any>('/api/dashboard/performance-stats');
+  }
+
+  /**
+   * Get queue status data
+   * Maps to: GET /api/dashboard/queue-status  
    */
   public async getQueueStatus(): Promise<QueueStatusData> {
-    return this.get<QueueStatusData>('/dashboard/queues');
+    return this.get<QueueStatusData>('/api/dashboard/queue-status');
   }
 
   /**
    * Get migration statistics
+   * Maps to: GET /api/dashboard/migration-stats
    */
-  public async getMigrationStatistics(timeRange?: { startDate: Date; endDate: Date }): Promise<MigrationStatistics> {
-    const params = timeRange ? {
-      startDate: timeRange.startDate.toISOString(),
-      endDate: timeRange.endDate.toISOString()
-    } : {};
-    
-    return this.get<MigrationStatistics>('/dashboard/statistics', { params });
+  public async getMigrationStatistics(): Promise<MigrationStatistics> {
+    return this.get<MigrationStatistics>('/api/dashboard/migration-stats');
   }
 
-  // Configuration and utility methods
+  // ===== SIGNALR INTEGRATION HELPERS =====
 
   /**
-   * Test API connectivity
+   * Test SignalR connectivity
+   * Maps to: POST /api/signalr/negotiate
    */
-  public async testConnection(): Promise<boolean> {
-    try {
-      await this.get('/dashboard/health');
-      return true;
-    } catch (error) {
-      console.error('API connection test failed:', error);
-      return false;
-    }
+  public async testSignalRConnection(): Promise<any> {
+    return this.post<any>('/api/signalr/negotiate');
   }
 
   /**
-   * Update API configuration
+   * Manually trigger progress broadcast (for testing)
+   * Maps to: POST /api/signalr/migration-progress
+   */
+  public async broadcastProgress(migrationId: string, progressData: any): Promise<void> {
+    return this.post<void>('/api/signalr/migration-progress', { migrationId, ...progressData });
+  }
+
+  /**
+   * Update API configuration dynamically
    */
   public updateConfig(newConfig: Partial<ApiConfig>): void {
     this.config = { ...this.config, ...newConfig };
@@ -267,29 +303,31 @@ export class ApiService {
    * Clear any cached data or reset state
    */
   public reset(): void {
-    // Clear any internal caches if implemented
-    console.log('API Service reset');
+    console.log('🔄 API Service reset');
   }
 }
 
-// Singleton instance
+// Singleton instance with backend configuration
 let apiServiceInstance: ApiService | null = null;
 
 /**
- * Get API service singleton instance
+ * Get API service singleton instance configured for backend integration
  */
-export const getApiService = (config?: Partial<ApiConfig>): ApiService => {
+export const getApiService = (apiConfig?: Partial<ApiConfig>): ApiService => {
   if (!apiServiceInstance) {
-    apiServiceInstance = new ApiService(config);
-  } else if (config) {
-    apiServiceInstance.updateConfig(config);
+    apiServiceInstance = new ApiService(apiConfig);
+  } else if (apiConfig) {
+    apiServiceInstance.updateConfig(apiConfig);
   }
   return apiServiceInstance;
 };
 
 /**
- * Initialize API service with configuration
+ * Initialize API service with backend configuration
  */
-export const initializeApiService = (config?: Partial<ApiConfig>): ApiService => {
-  return getApiService(config);
-}; 
+export const initializeApiService = (apiConfig?: Partial<ApiConfig>): ApiService => {
+  return getApiService(apiConfig);
+};
+
+// Export configured instance for easy access
+export const apiService = getApiService(); 

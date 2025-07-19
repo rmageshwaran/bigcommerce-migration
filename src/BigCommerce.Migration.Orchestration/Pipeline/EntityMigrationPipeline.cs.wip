@@ -1,0 +1,614 @@
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Channels;
+using System.Threading.Tasks;
+using BigCommerce.Migration.Core.Interfaces;
+using BigCommerce.Migration.Core.Models;
+using BigCommerce.Migration.Orchestration.Services;
+using BigCommerce.Migration.Orchestration.Models;
+using Microsoft.Extensions.Logging;
+using System.Diagnostics;
+using System.Linq;
+
+namespace BigCommerce.Migration.Orchestration.Pipeline
+{
+    /// <summary>
+    /// Migration context containing configuration and state information
+    /// </summary>
+    public class MigrationContext
+    {
+        /// <summary>
+        /// Migration identifier
+        /// </summary>
+        public string MigrationId { get; set; } = string.Empty;
+        
+        /// <summary>
+        /// Source store configuration
+        /// </summary>
+        public string SourceStore { get; set; } = string.Empty;
+        
+        /// <summary>
+        /// Destination store configuration
+        /// </summary>
+        public string DestinationStore { get; set; } = string.Empty;
+        
+        /// <summary>
+        /// Additional configuration properties
+        /// </summary>
+        public Dictionary<string, object> Properties { get; set; } = new();
+    }
+
+    /// <summary>
+    /// Pipeline execution result with metrics
+    /// </summary>
+    public class PipelineExecutionResult
+    {
+        /// <summary>
+        /// Whether the pipeline execution was successful
+        /// </summary>
+        public bool IsSuccess { get; set; }
+        
+        /// <summary>
+        /// Total entities processed
+        /// </summary>
+        public int TotalProcessed { get; set; }
+        
+        /// <summary>
+        /// Total entities that failed
+        /// </summary>
+        public int TotalFailed { get; set; }
+        
+        /// <summary>
+        /// Pipeline execution duration
+        /// </summary>
+        public TimeSpan Duration { get; set; }
+        
+        /// <summary>
+        /// Error message if execution failed
+        /// </summary>
+        public string ErrorMessage { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// Pipeline item representing an entity in the migration pipeline
+    /// </summary>
+    public class PipelineItem
+    {
+        /// <summary>
+        /// Entity identifier
+        /// </summary>
+        public string EntityId { get; set; } = string.Empty;
+        
+        /// <summary>
+        /// Entity type
+        /// </summary>
+        public string EntityType { get; set; } = string.Empty;
+        
+        /// <summary>
+        /// Source data from fetch stage
+        /// </summary>
+        public Dictionary<string, object>? SourceData { get; set; }
+        
+        /// <summary>
+        /// Transformed data from transform stage
+        /// </summary>
+        public Dictionary<string, object>? TransformedData { get; set; }
+        
+        /// <summary>
+        /// Created entity ID from destination system
+        /// </summary>
+        public string? CreatedEntityId { get; set; }
+        
+        /// <summary>
+        /// Processing start time
+        /// </summary>
+        public DateTime StartTime { get; set; }
+        
+        /// <summary>
+        /// Fetch completion time
+        /// </summary>
+        public DateTime? FetchCompleted { get; set; }
+        
+        /// <summary>
+        /// Transform completion time
+        /// </summary>
+        public DateTime? TransformCompleted { get; set; }
+        
+        /// <summary>
+        /// Create completion time
+        /// </summary>
+        public DateTime? CreateCompleted { get; set; }
+        
+        /// <summary>
+        /// Processing errors
+        /// </summary>
+        public List<string> Errors { get; set; } = new();
+        
+        /// <summary>
+        /// Whether the item was processed successfully
+        /// </summary>
+        public bool IsSuccess => !Errors.Any();
+    }
+
+    /// <summary>
+    /// Stage metrics for performance tracking
+    /// </summary>
+    public class StageMetrics
+    {
+        /// <summary>
+        /// Number of items processed successfully
+        /// </summary>
+        public long ProcessedItems { get; set; }
+        
+        /// <summary>
+        /// Number of items that failed processing
+        /// </summary>
+        public long FailedItems { get; set; }
+    }
+
+    /// <summary>
+    /// High-performance channel-based entity migration pipeline
+    /// Implements producer-consumer pattern with three stages: Fetch → Transform → Create
+    /// Optimizes resource utilization and throughput through parallel pipeline processing
+    /// </summary>
+    public interface IEntityMigrationPipeline
+    {
+        /// <summary>
+        /// Process entities through the complete migration pipeline
+        /// </summary>
+        /// <param name="migrationId">Migration identifier</param>
+        /// <param name="entityType">Type of entities to process</param>
+        /// <param name="entityIds">List of entity IDs to migrate</param>
+        /// <param name="migrationContext">Migration context with configuration</param>
+        /// <param name="cancellationToken">Cancellation token</param>
+        /// <returns>Pipeline execution result with metrics</returns>
+        Task<PipelineExecutionResult> ExecutePipelineAsync(
+            string migrationId,
+            string entityType,
+            List<string> entityIds,
+            MigrationContext migrationContext,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Get real-time pipeline performance metrics
+        /// </summary>
+        /// <returns>Current pipeline performance metrics</returns>
+        Task<PipelinePerformanceMetrics> GetPerformanceMetricsAsync();
+    }
+
+
+
+    /// <summary>
+    /// Performance metrics for individual pipeline stage
+    /// </summary>
+    public class PipelineStageMetrics
+    {
+        public string StageName { get; set; } = string.Empty;
+        public int ProcessedItems { get; set; }
+        public int FailedItems { get; set; }
+        public TimeSpan TotalTime { get; set; }
+        public double AverageLatencyMs { get; set; }
+        public double ItemsPerSecond { get; set; }
+        public long MemoryUsageMB { get; set; }
+    }
+
+    /// <summary>
+    /// Real-time pipeline performance metrics
+    /// </summary>
+    public class PipelinePerformanceMetrics
+    {
+        public int ActiveFetchOperations { get; set; }
+        public int ActiveTransformOperations { get; set; }
+        public int ActiveCreateOperations { get; set; }
+        public int FetchChannelSize { get; set; }
+        public int TransformChannelSize { get; set; }
+        public double OverallThroughput { get; set; }
+        public TimeSpan OverallLatency { get; set; }
+        public DateTime CapturedAt { get; set; } = DateTime.UtcNow;
+    }
+
+
+
+    /// <summary>
+    /// Channel-based entity migration pipeline implementation
+    /// </summary>
+    public class EntityMigrationPipeline : IEntityMigrationPipeline
+    {
+        private readonly IEntityFetchService _fetchService;
+        private readonly IEntityTransformService _transformService;
+        private readonly IEntityCreateService _createService;
+        private readonly ILogger<EntityMigrationPipeline> _logger;
+
+        // Performance tracking
+        private int _activeFetchOperations = 0;
+        private int _activeTransformOperations = 0;
+        private int _activeCreateOperations = 0;
+        private readonly Stopwatch _pipelineStopwatch = new();
+
+        public EntityMigrationPipeline(
+            IEntityFetchService fetchService,
+            IEntityTransformService transformService,
+            IEntityCreateService createService,
+            ILogger<EntityMigrationPipeline> logger)
+        {
+            _fetchService = fetchService ?? throw new ArgumentNullException(nameof(fetchService));
+            _transformService = transformService ?? throw new ArgumentNullException(nameof(transformService));
+            _createService = createService ?? throw new ArgumentNullException(nameof(createService));
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        }
+
+        public async Task<PipelineExecutionResult> ExecutePipelineAsync(
+            string migrationId,
+            string entityType,
+            List<string> entityIds,
+            MigrationContext migrationContext,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrEmpty(migrationId))
+                throw new ArgumentException("Migration ID cannot be null or empty", nameof(migrationId));
+            if (string.IsNullOrEmpty(entityType))
+                throw new ArgumentException("Entity type cannot be null or empty", nameof(entityType));
+            if (entityIds == null || !entityIds.Any())
+                throw new ArgumentException("Entity IDs cannot be null or empty", nameof(entityIds));
+
+            _logger.LogInformation("Starting pipeline execution for {EntityCount} {EntityType} entities in migration {MigrationId}",
+                entityIds.Count, entityType, migrationId);
+
+            _pipelineStopwatch.Restart();
+
+            // Configure channels with appropriate buffer sizes
+            var fetchChannelOptions = new BoundedChannelOptions(Math.Min(100, entityIds.Count))
+            {
+                FullMode = BoundedChannelFullMode.Wait,
+                SingleReader = false,
+                SingleWriter = true,
+                AllowSynchronousContinuations = false
+            };
+
+            var transformChannelOptions = new BoundedChannelOptions(Math.Min(50, entityIds.Count))
+            {
+                FullMode = BoundedChannelFullMode.Wait,
+                SingleReader = false,
+                SingleWriter = false,
+                AllowSynchronousContinuations = false
+            };
+
+            // Create channels for pipeline stages
+            var fetchChannel = Channel.CreateBounded<PipelineItem>(fetchChannelOptions);
+            var transformChannel = Channel.CreateBounded<PipelineItem>(transformChannelOptions);
+
+            var result = new PipelineExecutionResult
+            {
+                MigrationId = migrationId,
+                EntityType = entityType,
+                TotalEntities = entityIds.Count
+            };
+
+            try
+            {
+                // Start pipeline stages
+                var fetchTask = StartFetchStage(entityIds, entityType, migrationContext, fetchChannel.Writer, cancellationToken);
+                var transformTask = StartTransformStage(fetchChannel.Reader, transformChannel.Writer, migrationContext, cancellationToken);
+                var createTask = StartCreateStage(transformChannel.Reader, migrationContext, cancellationToken);
+
+                // Wait for all stages to complete
+                await Task.WhenAll(fetchTask, transformTask, createTask);
+
+                // Collect results from create stage
+                var createResults = await createTask;
+                PopulateExecutionResult(result, createResults);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogInformation("Pipeline execution was cancelled for migration {MigrationId}", migrationId);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Pipeline execution failed for migration {MigrationId}", migrationId);
+                result.Errors.Add($"Pipeline execution failed: {ex.Message}");
+            }
+            finally
+            {
+                _pipelineStopwatch.Stop();
+                result.TotalExecutionTime = _pipelineStopwatch.Elapsed;
+                result.EntitiesPerSecond = result.TotalExecutionTime.TotalSeconds > 0 
+                    ? result.ProcessedEntities / result.TotalExecutionTime.TotalSeconds 
+                    : 0;
+            }
+
+            _logger.LogInformation("Pipeline execution completed for migration {MigrationId}. " +
+                                 "Processed: {Processed}, Failed: {Failed}, Duration: {Duration:F2}s, Throughput: {Throughput:F2} entities/sec",
+                migrationId, result.ProcessedEntities, result.FailedEntities, 
+                result.TotalExecutionTime.TotalSeconds, result.EntitiesPerSecond);
+
+            return result;
+        }
+
+        public async Task<PipelinePerformanceMetrics> GetPerformanceMetricsAsync()
+        {
+            await Task.CompletedTask; // Make method async for interface compliance
+
+            return new PipelinePerformanceMetrics
+            {
+                ActiveFetchOperations = _activeFetchOperations,
+                ActiveTransformOperations = _activeTransformOperations,
+                ActiveCreateOperations = _activeCreateOperations,
+                OverallLatency = _pipelineStopwatch.Elapsed,
+                CapturedAt = DateTime.UtcNow
+            };
+        }
+
+        private async Task<PipelineStageMetrics> StartFetchStage(
+            List<string> entityIds,
+            string entityType,
+            MigrationContext migrationContext,
+            ChannelWriter<PipelineItem> writer,
+            CancellationToken cancellationToken)
+        {
+            var stageMetrics = new PipelineStageMetrics { StageName = "Fetch" };
+            var stageStopwatch = Stopwatch.StartNew();
+
+            try
+            {
+                var concurrency = Math.Min(5, entityIds.Count); // Limit fetch concurrency
+                var semaphore = new SemaphoreSlim(concurrency, concurrency);
+
+                var fetchTasks = entityIds.Select(async entityId =>
+                {
+                    await semaphore.WaitAsync(cancellationToken);
+                    Interlocked.Increment(ref _activeFetchOperations);
+
+                    try
+                    {
+                        var item = new PipelineItem
+                        {
+                            EntityId = entityId,
+                            EntityType = entityType,
+                            StartTime = DateTime.UtcNow
+                        };
+
+                        var fetchRequest = new BatchProcessingRequest
+                        {
+                            EntityIds = new List<string> { entityId },
+                            EntityType = entityType,
+                            MigrationId = migrationContext.MigrationId,
+                            SourceStoreId = migrationContext.SourceStore
+                        };
+
+                        var fetchResult = await _fetchService.FetchEntitiesAsync(fetchRequest, cancellationToken);
+
+                        if (fetchResult != null && fetchResult.Any())
+                        {
+                            item.SourceData = fetchResult.First();
+                            item.FetchCompleted = DateTime.UtcNow;
+                            stageMetrics.ProcessedItems++;
+                        }
+                        else
+                        {
+                            item.Errors.Add("Fetch failed: No entities returned");
+                            stageMetrics.FailedItems++;
+                        }
+
+                        await writer.WriteAsync(item, cancellationToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error in fetch stage for entity {EntityId}", entityId);
+                        stageMetrics.FailedItems++;
+                    }
+                    finally
+                    {
+                        Interlocked.Decrement(ref _activeFetchOperations);
+                        semaphore.Release();
+                    }
+                });
+
+                await Task.WhenAll(fetchTasks);
+                writer.Complete();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Critical error in fetch stage");
+                writer.Complete(ex);
+                throw;
+            }
+            finally
+            {
+                stageStopwatch.Stop();
+                stageMetrics.TotalTime = stageStopwatch.Elapsed;
+                stageMetrics.ItemsPerSecond = stageMetrics.TotalTime.TotalSeconds > 0 
+                    ? stageMetrics.ProcessedItems / stageMetrics.TotalTime.TotalSeconds 
+                    : 0;
+            }
+
+            return stageMetrics;
+        }
+
+        private async Task<PipelineStageMetrics> StartTransformStage(
+            ChannelReader<PipelineItem> reader,
+            ChannelWriter<PipelineItem> writer,
+            MigrationContext migrationContext,
+            CancellationToken cancellationToken)
+        {
+            var stageMetrics = new PipelineStageMetrics { StageName = "Transform" };
+            var stageStopwatch = Stopwatch.StartNew();
+
+            try
+            {
+                var concurrency = 3; // Transform operations can be CPU intensive
+                var semaphore = new SemaphoreSlim(concurrency, concurrency);
+                var transformTasks = new List<Task>();
+
+                await foreach (var item in reader.ReadAllAsync(cancellationToken))
+                {
+                    var transformTask = ProcessTransformItem(item, writer, migrationContext, semaphore, stageMetrics, cancellationToken);
+                    transformTasks.Add(transformTask);
+                }
+
+                await Task.WhenAll(transformTasks);
+                writer.Complete();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Critical error in transform stage");
+                writer.Complete(ex);
+                throw;
+            }
+            finally
+            {
+                stageStopwatch.Stop();
+                stageMetrics.TotalTime = stageStopwatch.Elapsed;
+                stageMetrics.ItemsPerSecond = stageMetrics.TotalTime.TotalSeconds > 0 
+                    ? stageMetrics.ProcessedItems / stageMetrics.TotalTime.TotalSeconds 
+                    : 0;
+            }
+
+            return stageMetrics;
+        }
+
+        private async Task ProcessTransformItem(
+            PipelineItem item,
+            ChannelWriter<PipelineItem> writer,
+            MigrationContext migrationContext,
+            SemaphoreSlim semaphore,
+            PipelineStageMetrics stageMetrics,
+            CancellationToken cancellationToken)
+        {
+            await semaphore.WaitAsync(cancellationToken);
+            Interlocked.Increment(ref _activeTransformOperations);
+
+            try
+            {
+                if (item.SourceData != null && !item.Errors.Any())
+                {
+                    var transformRequest = new BatchProcessingRequest
+                    {
+                        EntityType = item.EntityType,
+                        MigrationId = migrationContext.MigrationId,
+                        SourceStoreId = migrationContext.SourceStore
+                    };
+
+                    var transformResult = await _transformService.TransformEntityAsync(item.SourceData, transformRequest);
+
+                    if (transformResult != null)
+                    {
+                        item.TransformedData = transformResult;
+                        item.TransformCompleted = DateTime.UtcNow;
+                        stageMetrics.ProcessedItems++;
+                    }
+                    else
+                    {
+                        item.Errors.Add("Transform failed: No result returned");
+                        stageMetrics.FailedItems++;
+                    }
+                }
+                else
+                {
+                    item.Errors.Add("No source data available for transformation");
+                    stageMetrics.FailedItems++;
+                }
+
+                await writer.WriteAsync(item, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in transform stage for entity {EntityId}", item.EntityId);
+                item.Errors.Add($"Transform exception: {ex.Message}");
+                Interlocked.Increment(ref stageMetrics.FailedItems);
+                await writer.WriteAsync(item, cancellationToken);
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _activeTransformOperations);
+                semaphore.Release();
+            }
+        }
+
+        private async Task<List<PipelineItem>> StartCreateStage(
+            ChannelReader<PipelineItem> reader,
+            MigrationContext migrationContext,
+            CancellationToken cancellationToken)
+        {
+            var results = new List<PipelineItem>();
+            var concurrency = 4; // Create operations involve API calls
+            var semaphore = new SemaphoreSlim(concurrency, concurrency);
+            var createTasks = new List<Task>();
+
+            await foreach (var item in reader.ReadAllAsync(cancellationToken))
+            {
+                var createTask = ProcessCreateItem(item, migrationContext, semaphore, cancellationToken);
+                createTasks.Add(createTask.ContinueWith(t => results.Add(item), TaskScheduler.Default));
+            }
+
+            await Task.WhenAll(createTasks);
+            return results;
+        }
+
+        private async Task ProcessCreateItem(
+            PipelineItem item,
+            MigrationContext migrationContext,
+            SemaphoreSlim semaphore,
+            CancellationToken cancellationToken)
+        {
+            await semaphore.WaitAsync(cancellationToken);
+            Interlocked.Increment(ref _activeCreateOperations);
+
+            try
+            {
+                if (item.TransformedData != null && !item.Errors.Any())
+                {
+                    var createRequest = new BatchProcessingRequest
+                    {
+                        EntityType = item.EntityType,
+                        MigrationId = migrationContext.MigrationId,
+                        DestinationStoreId = migrationContext.DestinationStore
+                    };
+
+                    var createResult = await _createService.CreateEntitiesAsync(
+                        new List<Dictionary<string, object>> { item.TransformedData }, 
+                        createRequest, 
+                        cancellationToken);
+
+                    if (createResult != null && createResult.Any())
+                    {
+                        item.CreateCompleted = DateTime.UtcNow;
+                    }
+                    else
+                    {
+                        item.Errors.Add("Create failed: No result returned");
+                    }
+                }
+                else
+                {
+                    item.Errors.Add("No transformed data available for creation");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in create stage for entity {EntityId}", item.EntityId);
+                item.Errors.Add($"Create exception: {ex.Message}");
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _activeCreateOperations);
+                semaphore.Release();
+            }
+        }
+
+        private void PopulateExecutionResult(PipelineExecutionResult result, List<PipelineItem> items)
+        {
+            result.ProcessedEntities = items.Count(i => i.IsSuccess);
+            result.FailedEntities = items.Count(i => !i.IsSuccess);
+
+            foreach (var item in items.Where(i => !i.IsSuccess))
+            {
+                result.Errors.AddRange(item.Errors);
+            }
+
+            // Calculate stage metrics if needed
+            // This could be enhanced to provide detailed stage-specific metrics
+        }
+    }
+} 

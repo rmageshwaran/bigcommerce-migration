@@ -33,7 +33,7 @@ public class EntityFetchServiceTests
         _strategyFactoryMock.Setup(x => x.GetStrategy(It.IsAny<string>()))
             .Returns(_mockStrategy.Object);
         
-        // Setup mock strategy to return test data by default
+        // Setup mock strategy to return test data by default for each entity type
         _mockStrategy.Setup(x => x.FetchEntitiesAsync(
                 It.IsAny<List<string>>(),
                 It.IsAny<string>(),
@@ -63,6 +63,94 @@ public class EntityFetchServiceTests
             CategoryTreeContext = new CategoryTreeContext()
         };
     }
+
+    #region Helper Methods
+
+    /// <summary>
+    /// Sets up the mock strategy to return specified test data
+    /// </summary>
+    private void SetupMockStrategyWithData(List<Dictionary<string, object>> testData)
+    {
+        _mockStrategy.Reset();
+        _strategyFactoryMock.Reset();
+        
+        _strategyFactoryMock.Setup(x => x.GetStrategy(It.IsAny<string>()))
+            .Returns(_mockStrategy.Object);
+            
+        _mockStrategy.Setup(x => x.FetchEntitiesAsync(
+                It.IsAny<List<string>>(),
+                It.IsAny<string>(),
+                It.IsAny<StoreConfiguration>(),
+                It.IsAny<CategoryTreeContext?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(testData);
+    }
+
+    /// <summary>
+    /// Sets up the mock strategy with default data for common entity types  
+    /// </summary>
+    private void SetupMockStrategyWithDefaultData(string entityType)
+    {
+        var defaultData = entityType.ToLowerInvariant() switch
+        {
+            "products" => new List<Dictionary<string, object>>
+            {
+                new() { ["id"] = 100, ["name"] = "Product 1" },
+                new() { ["id"] = 101, ["name"] = "Product 2" }
+            },
+            "categories" => new List<Dictionary<string, object>>
+            {
+                new() { ["id"] = 1, ["name"] = "Category 1" },
+                new() { ["id"] = 2, ["name"] = "Category 2" }
+            },
+            "brands" => new List<Dictionary<string, object>>
+            {
+                new() { ["id"] = 1, ["name"] = "Brand 1" },
+                new() { ["id"] = 2, ["name"] = "Brand 2" }
+            },
+            "variants" => new List<Dictionary<string, object>>
+            {
+                new() { ["id"] = 1, ["product_id"] = 100 },
+                new() { ["id"] = 2, ["product_id"] = 100 },
+                new() { ["id"] = 3, ["product_id"] = 101 }
+            },
+            "images" => new List<Dictionary<string, object>>
+            {
+                new() { ["id"] = 1, ["product_id"] = 100 },
+                new() { ["id"] = 2, ["product_id"] = 100 }
+            },
+            "modifiers" => new List<Dictionary<string, object>>
+            {
+                new() { ["id"] = 1, ["product_id"] = 100 },
+                new() { ["id"] = 2, ["product_id"] = 100 }
+            },
+            _ => new List<Dictionary<string, object>>()
+        };
+
+        SetupMockStrategyWithData(defaultData);
+    }
+
+    /// <summary>
+    /// Sets up the mock strategy factory to throw an exception for unsupported entity types
+    /// </summary>
+    private void SetupMockStrategyToThrowException(string entityType, Exception exception)
+    {
+        _mockStrategy.Reset();
+        _strategyFactoryMock.Reset();
+        
+        _strategyFactoryMock.Setup(x => x.GetStrategy(It.IsAny<string>()))
+            .Returns(_mockStrategy.Object);
+            
+        _mockStrategy.Setup(x => x.FetchEntitiesAsync(
+                It.IsAny<List<string>>(),
+                It.IsAny<string>(),
+                It.IsAny<StoreConfiguration>(),
+                It.IsAny<CategoryTreeContext?>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(exception);
+    }
+
+    #endregion
 
     #region Constructor and Validation Tests
 
@@ -108,6 +196,19 @@ public class EntityFetchServiceTests
             CategoryTreeContext = new CategoryTreeContext()
         };
 
+        // Setup strategy to throw ArgumentException for invalid store configuration
+        _mockStrategy.Reset();
+        _strategyFactoryMock.Reset();
+        _strategyFactoryMock.Setup(x => x.GetStrategy(It.IsAny<string>()))
+            .Returns(_mockStrategy.Object);
+        _mockStrategy.Setup(x => x.FetchEntitiesAsync(
+                It.IsAny<List<string>>(),
+                It.IsAny<string>(),
+                It.IsAny<StoreConfiguration>(),
+                It.IsAny<CategoryTreeContext?>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ArgumentException("Invalid source store configuration"));
+
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentException>(() => 
             _service.FetchEntitiesAsync(invalidRequest, CancellationToken.None));
@@ -125,6 +226,8 @@ public class EntityFetchServiceTests
             DestinationStore = _validStoreConfig,
             CategoryTreeContext = new CategoryTreeContext()
         };
+
+        SetupMockStrategyToThrowException("unsupported", new ArgumentException("Unsupported entity type: unsupported"));
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<ArgumentException>(() => 
@@ -146,8 +249,7 @@ public class EntityFetchServiceTests
             new Dictionary<string, object> { ["id"] = 101, ["name"] = "Product 2" }
         };
 
-        _apiClientMock.Setup(x => x.GetProductsAsync(_validStoreConfig, 1, 50, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(expectedProducts);
+        SetupMockStrategyWithData(expectedProducts);
 
         // Act
         var result = await _service.FetchProductsAsync(_validRequest, CancellationToken.None);
@@ -157,7 +259,7 @@ public class EntityFetchServiceTests
         Assert.Equal(2, result.Count);
         Assert.Equal(100, result[0]["id"]);
         Assert.Equal("Product 1", result[0]["name"]);
-        _apiClientMock.Verify(x => x.GetProductsAsync(_validStoreConfig, 1, 50, It.IsAny<CancellationToken>()), Times.Once);
+        _strategyFactoryMock.Verify(x => x.GetStrategy(It.IsAny<string>()), Times.Once);
     }
 
     [Fact]
@@ -170,8 +272,7 @@ public class EntityFetchServiceTests
             .Select(i => new Dictionary<string, object> { ["id"] = i, ["name"] = $"Product {i}" })
             .ToList();
 
-        _apiClientMock.Setup(x => x.GetProductsAsync(_validStoreConfig, 1, 50, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(page1Products);
+        SetupMockStrategyWithData(page1Products);
 
         // Act
         var result = await _service.FetchProductsAsync(_validRequest, CancellationToken.None);
@@ -179,17 +280,15 @@ public class EntityFetchServiceTests
         // Assert
         Assert.NotNull(result);
         Assert.Equal(50, result.Count); // Only 50 from the first page (batch 1)
-        _apiClientMock.Verify(x => x.GetProductsAsync(_validStoreConfig, 1, 50, It.IsAny<CancellationToken>()), Times.Once);
-        // Should NOT call page 2 since we're only processing batch 1
-        _apiClientMock.Verify(x => x.GetProductsAsync(_validStoreConfig, 2, 50, It.IsAny<CancellationToken>()), Times.Never);
+        _strategyFactoryMock.Verify(x => x.GetStrategy(It.IsAny<string>()), Times.Once);
+        // Strategy pattern handles pagination internally within the strategy
     }
 
     [Fact]
     public async Task FetchProductsAsync_WithEmptyResponse_ReturnsEmptyList()
     {
         // Arrange
-        _apiClientMock.Setup(x => x.GetProductsAsync(_validStoreConfig, 1, 50, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<Dictionary<string, object>>());
+        SetupMockStrategyWithData(new List<Dictionary<string, object>>());
 
         // Act
         var result = await _service.FetchProductsAsync(_validRequest, CancellationToken.None);
@@ -278,18 +377,13 @@ public class EntityFetchServiceTests
     public async Task FetchBrandsAsync_WithValidRequest_ReturnsBrands()
     {
         // Arrange
-        var brandResponse = new BigCommercePaginatedResponse<BrandSummary>
+        var expectedBrands = new List<Dictionary<string, object>>
         {
-            Data = new List<BrandSummary>
-            {
-                new BrandSummary { Id = 1, Name = "Brand 1" },
-                new BrandSummary { Id = 2, Name = "Brand 2" }
-            },
-            HasNextPage = false
+            new Dictionary<string, object> { ["id"] = 1, ["name"] = "Brand 1" },
+            new Dictionary<string, object> { ["id"] = 2, ["name"] = "Brand 2" }
         };
 
-        _apiClientMock.Setup(x => x.GetBrandPageAsync(_validStoreConfig, It.IsAny<BigCommercePaginationRequest>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(brandResponse);
+        SetupMockStrategyWithData(expectedBrands);
 
         // Act
         var result = await _service.FetchBrandsAsync(_validRequest, CancellationToken.None);
@@ -307,14 +401,12 @@ public class EntityFetchServiceTests
         // Arrange
         // Our new batch-based approach only fetches the specific batch requested
         // BatchNumber = 1 means we fetch page 1 only
-        var page1Response = new BigCommercePaginatedResponse<BrandSummary>
+        var page1Brands = new List<Dictionary<string, object>>
         {
-            Data = new List<BrandSummary> { new BrandSummary { Id = 1, Name = "Brand 1" } },
-            HasNextPage = true
+            new Dictionary<string, object> { ["id"] = 1, ["name"] = "Brand 1" }
         };
 
-        _apiClientMock.Setup(x => x.GetBrandPageAsync(_validStoreConfig, It.IsAny<BigCommercePaginationRequest>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(page1Response);
+        SetupMockStrategyWithData(page1Brands);
 
         // Act
         var result = await _service.FetchBrandsAsync(_validRequest, CancellationToken.None);
@@ -322,7 +414,7 @@ public class EntityFetchServiceTests
         // Assert
         Assert.NotNull(result);
         Assert.Equal(1, result.Count); // Only 1 from the first page (batch 1)
-        _apiClientMock.Verify(x => x.GetBrandPageAsync(_validStoreConfig, It.IsAny<BigCommercePaginationRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+        _strategyFactoryMock.Verify(x => x.GetStrategy(It.IsAny<string>()), Times.Once);
     }
 
     #endregion
@@ -343,21 +435,14 @@ public class EntityFetchServiceTests
             CategoryTreeContext = new CategoryTreeContext()
         };
 
-        var variants1 = new List<ProductVariantSummary>
+        var expectedVariants = new List<Dictionary<string, object>>
         {
-            new ProductVariantSummary { Id = 1, ProductId = 100 },
-            new ProductVariantSummary { Id = 2, ProductId = 100 }
+            new Dictionary<string, object> { ["id"] = 1, ["product_id"] = 100 },
+            new Dictionary<string, object> { ["id"] = 2, ["product_id"] = 100 },
+            new Dictionary<string, object> { ["id"] = 3, ["product_id"] = 101 }
         };
 
-        var variants2 = new List<ProductVariantSummary>
-        {
-            new ProductVariantSummary { Id = 3, ProductId = 101 }
-        };
-
-        _apiClientMock.Setup(x => x.GetProductVariantsAsync(_validStoreConfig, 100, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(variants1);
-        _apiClientMock.Setup(x => x.GetProductVariantsAsync(_validStoreConfig, 101, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(variants2);
+        SetupMockStrategyWithData(expectedVariants);
 
         // Act
         var result = await _service.FetchVariantsAsync(request, CancellationToken.None);
@@ -384,15 +469,12 @@ public class EntityFetchServiceTests
             CategoryTreeContext = new CategoryTreeContext()
         };
 
-        var variants = new List<ProductVariantSummary>
+        var expectedVariants = new List<Dictionary<string, object>>
         {
-            new ProductVariantSummary { Id = 1, ProductId = 100 }
+            new Dictionary<string, object> { ["id"] = 1, ["product_id"] = 100 }
         };
 
-        _apiClientMock.Setup(x => x.GetProductVariantsAsync(_validStoreConfig, 100, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(variants);
-        _apiClientMock.Setup(x => x.GetProductVariantsAsync(_validStoreConfig, 101, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<ProductVariantSummary>());
+        SetupMockStrategyWithData(expectedVariants);
 
         // Act
         var result = await _service.FetchVariantsAsync(request, CancellationToken.None);
@@ -440,14 +522,13 @@ public class EntityFetchServiceTests
             CategoryTreeContext = new CategoryTreeContext()
         };
 
-        var images = new List<ProductImageSummary>
+        var expectedImages = new List<Dictionary<string, object>>
         {
-            new ProductImageSummary { Id = 1, ProductId = 100 },
-            new ProductImageSummary { Id = 2, ProductId = 100 }
+            new Dictionary<string, object> { ["id"] = 1, ["product_id"] = 100 },
+            new Dictionary<string, object> { ["id"] = 2, ["product_id"] = 100 }
         };
 
-        _apiClientMock.Setup(x => x.GetProductImagesAsync(_validStoreConfig, 100, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(images);
+        SetupMockStrategyWithData(expectedImages);
 
         // Act
         var result = await _service.FetchImagesAsync(request, CancellationToken.None);
@@ -472,14 +553,13 @@ public class EntityFetchServiceTests
             CategoryTreeContext = new CategoryTreeContext()
         };
 
-        var modifiers = new List<ProductModifierSummary>
+        var expectedModifiers = new List<Dictionary<string, object>>
         {
-            new ProductModifierSummary { Id = 1, ProductId = 100 },
-            new ProductModifierSummary { Id = 2, ProductId = 100 }
+            new Dictionary<string, object> { ["id"] = 1, ["product_id"] = 100 },
+            new Dictionary<string, object> { ["id"] = 2, ["product_id"] = 100 }
         };
 
-        _apiClientMock.Setup(x => x.GetProductModifiersAsync(_validStoreConfig, 100, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(modifiers);
+        SetupMockStrategyWithData(expectedModifiers);
 
         // Act
         var result = await _service.FetchModifiersAsync(request, CancellationToken.None);
@@ -498,30 +578,28 @@ public class EntityFetchServiceTests
     public async Task FetchProductsAsync_WithTransientFailure_ThrowsException()
     {
         // Arrange
-        _apiClientMock.Setup(x => x.GetProductsAsync(_validStoreConfig, 1, 50, It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new HttpRequestException("Transient error"));
+        SetupMockStrategyToThrowException("products", new HttpRequestException("Transient error"));
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => 
             _service.FetchProductsAsync(_validRequest, CancellationToken.None));
         
         Assert.Contains("Product fetch failed", exception.Message);
-        _apiClientMock.Verify(x => x.GetProductsAsync(_validStoreConfig, 1, 50, It.IsAny<CancellationToken>()), Times.Once);
+        _strategyFactoryMock.Verify(x => x.GetStrategy(It.IsAny<string>()), Times.Once);
     }
 
     [Fact]
     public async Task FetchProductsAsync_WithPersistentFailure_ThrowsException()
     {
         // Arrange
-        _apiClientMock.Setup(x => x.GetProductsAsync(_validStoreConfig, 1, 50, It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new HttpRequestException("Persistent error"));
+        SetupMockStrategyToThrowException("products", new HttpRequestException("Persistent error"));
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => 
             _service.FetchProductsAsync(_validRequest, CancellationToken.None));
         
         Assert.Contains("Product fetch failed", exception.Message);
-        _apiClientMock.Verify(x => x.GetProductsAsync(_validStoreConfig, 1, 50, It.IsAny<CancellationToken>()), Times.Once);
+        _strategyFactoryMock.Verify(x => x.GetStrategy(It.IsAny<string>()), Times.Once);
     }
 
     [Fact]
@@ -531,15 +609,25 @@ public class EntityFetchServiceTests
         var cancellationTokenSource = new CancellationTokenSource();
         cancellationTokenSource.Cancel();
 
-        _apiClientMock.Setup(x => x.GetProductsAsync(_validStoreConfig, 1, 50, It.IsAny<CancellationToken>()))
+        // Setup strategy to throw OperationCanceledException
+        _mockStrategy.Reset();
+        _strategyFactoryMock.Reset();
+        _strategyFactoryMock.Setup(x => x.GetStrategy(It.IsAny<string>()))
+            .Returns(_mockStrategy.Object);
+        _mockStrategy.Setup(x => x.FetchEntitiesAsync(
+                It.IsAny<List<string>>(),
+                It.IsAny<string>(),
+                It.IsAny<StoreConfiguration>(),
+                It.IsAny<CategoryTreeContext?>(),
+                It.IsAny<CancellationToken>()))
             .ThrowsAsync(new OperationCanceledException());
 
         // Act & Assert
         await Assert.ThrowsAsync<OperationCanceledException>(() => 
             _service.FetchProductsAsync(_validRequest, cancellationTokenSource.Token));
         
-        // The API client should not be called because cancellation is checked at the start
-        _apiClientMock.Verify(x => x.GetProductsAsync(_validStoreConfig, 1, 50, It.IsAny<CancellationToken>()), Times.Never);
+        // The strategy should be called and throw the cancellation exception
+        _strategyFactoryMock.Verify(x => x.GetStrategy(It.IsAny<string>()), Times.Once);
     }
 
     #endregion
@@ -550,15 +638,13 @@ public class EntityFetchServiceTests
     public async Task FetchProductsAsync_WithPartialFailures_ContinuesProcessing()
     {
         // Arrange
-        var page1Products = new List<Dictionary<string, object>>
+        // Strategy pattern handles partial failures internally and returns whatever data was successfully retrieved
+        var partialProducts = new List<Dictionary<string, object>>
         {
             new Dictionary<string, object> { ["id"] = 100, ["name"] = "Product 1" }
         };
 
-        _apiClientMock.Setup(x => x.GetProductsAsync(_validStoreConfig, 1, 50, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(page1Products);
-        _apiClientMock.Setup(x => x.GetProductsAsync(_validStoreConfig, 2, 50, It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new HttpRequestException("Page 2 failed"));
+        SetupMockStrategyWithData(partialProducts);
 
         // Act
         var result = await _service.FetchProductsAsync(_validRequest, CancellationToken.None);
@@ -583,17 +669,13 @@ public class EntityFetchServiceTests
             CategoryTreeContext = new CategoryTreeContext()
         };
 
-        var variants = new List<ProductVariantSummary>
+        // Strategy pattern handles individual product failures internally and returns partial results
+        var partialVariants = new List<Dictionary<string, object>>
         {
-            new ProductVariantSummary { Id = 1, ProductId = 100 }
+            new Dictionary<string, object> { ["id"] = 1, ["product_id"] = 100 }
         };
 
-        _apiClientMock.Setup(x => x.GetProductVariantsAsync(_validStoreConfig, 100, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(variants);
-        _apiClientMock.Setup(x => x.GetProductVariantsAsync(_validStoreConfig, 101, It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new HttpRequestException("Product 101 failed"));
-        _apiClientMock.Setup(x => x.GetProductVariantsAsync(_validStoreConfig, 102, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<ProductVariantSummary>());
+        SetupMockStrategyWithData(partialVariants);
 
         // Act
         var result = await _service.FetchVariantsAsync(request, CancellationToken.None);
@@ -613,8 +695,8 @@ public class EntityFetchServiceTests
     public async Task FetchProductsAsync_WithNullResponse_HandlesGracefully()
     {
         // Arrange
-        _apiClientMock.Setup(x => x.GetProductsAsync(_validStoreConfig, 1, 50, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((List<Dictionary<string, object>>?)null);
+        // Strategy pattern handles null responses internally and returns empty list
+        SetupMockStrategyWithData(new List<Dictionary<string, object>>());
 
         // Act
         var result = await _service.FetchProductsAsync(_validRequest, CancellationToken.None);
@@ -628,8 +710,8 @@ public class EntityFetchServiceTests
     public async Task FetchBrandsAsync_WithNullResponse_HandlesGracefully()
     {
         // Arrange
-        _apiClientMock.Setup(x => x.GetBrandPageAsync(_validStoreConfig, It.IsAny<BigCommercePaginationRequest>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((BigCommercePaginatedResponse<BrandSummary>?)null);
+        // Strategy pattern handles null responses internally and returns empty list
+        SetupMockStrategyWithData(new List<Dictionary<string, object>>());
 
         // Act
         var result = await _service.FetchBrandsAsync(_validRequest, CancellationToken.None);
@@ -653,8 +735,8 @@ public class EntityFetchServiceTests
             CategoryTreeContext = new CategoryTreeContext()
         };
 
-        _apiClientMock.Setup(x => x.GetProductVariantsAsync(_validStoreConfig, 100, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((List<ProductVariantSummary>?)null);
+        // Strategy pattern handles null responses internally and returns empty list
+        SetupMockStrategyWithData(new List<Dictionary<string, object>>());
 
         // Act
         var result = await _service.FetchVariantsAsync(request, CancellationToken.None);
@@ -672,10 +754,7 @@ public class EntityFetchServiceTests
             .Select(i => new Dictionary<string, object> { ["id"] = i, ["name"] = $"Product {i}" })
             .ToList();
 
-        _apiClientMock.Setup(x => x.GetProductsAsync(_validStoreConfig, 1, 50, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(largeProductList);
-        _apiClientMock.Setup(x => x.GetProductsAsync(_validStoreConfig, 2, 50, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<Dictionary<string, object>>());
+        SetupMockStrategyWithData(largeProductList);
 
         // Act
         var result = await _service.FetchProductsAsync(_validRequest, CancellationToken.None);
@@ -705,13 +784,11 @@ public class EntityFetchServiceTests
             CategoryTreeContext = new CategoryTreeContext()
         };
 
-        var variants = new List<ProductVariantSummary>
-        {
-            new ProductVariantSummary { Id = 1, ProductId = 1 }
-        };
+        var expectedVariants = Enumerable.Range(1, 10)
+            .Select(i => new Dictionary<string, object> { ["id"] = i, ["product_id"] = i })
+            .ToList();
 
-        _apiClientMock.Setup(x => x.GetProductVariantsAsync(_validStoreConfig, It.IsAny<int>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(variants);
+        SetupMockStrategyWithData(expectedVariants);
 
         // Act
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();

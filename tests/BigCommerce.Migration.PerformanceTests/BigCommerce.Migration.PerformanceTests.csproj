@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
@@ -23,6 +23,7 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="8.0.0" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.0" />
     <PackageReference Include="FluentAssertions" Version="6.12.0" />
+    <PackageReference Include="Moq" Version="4.20.69" />
     <PackageReference Include="System.Diagnostics.PerformanceCounter" Version="8.0.0" />
   </ItemGroup>
 
@@ -30,6 +31,7 @@
     <ProjectReference Include="..\..\src\BigCommerce.Migration.Core\BigCommerce.Migration.Core.csproj" />
     <ProjectReference Include="..\..\src\BigCommerce.Migration.Infrastructure\BigCommerce.Migration.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\BigCommerce.Migration.Orchestration\BigCommerce.Migration.Orchestration.csproj" />
+    <ProjectReference Include="..\..\src\BigCommerce.Migration.Functions\BigCommerce.Migration.Functions.csproj" />
   </ItemGroup>
 
 </Project> 

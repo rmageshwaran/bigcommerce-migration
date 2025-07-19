@@ -35,7 +35,7 @@ namespace BigCommerce.Migration.Functions.Hubs
             try
             {
                 var groupName = GetMigrationGroupName(migrationId);
-                await _hubContext.Groups.AddToGroupAsync(connectionId, groupName, cancellationToken);
+                await _hubContext.Groups.AddToGroupAsync(connectionId, groupName, cancellationToken).ConfigureAwait(false);
                 
                 // Track connection
                 _connections.TryAdd(connectionId, new UserConnection
@@ -50,13 +50,13 @@ namespace BigCommerce.Migration.Functions.Hubs
                     connectionId, migrationId);
 
                 // Send initial confirmation
-                await _hubContext.Clients.Client(connectionId).SendAsync("JoinedMigrationGroup", migrationId, cancellationToken);
+                await _hubContext.Clients.Client(connectionId).SendAsync("JoinedMigrationGroup", migrationId, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error joining migration group {MigrationId} for connection {ConnectionId}", 
                     migrationId, connectionId);
-                await _hubContext.Clients.Client(connectionId).SendAsync("Error", "Failed to join migration group", cancellationToken);
+                await _hubContext.Clients.Client(connectionId).SendAsync("Error", "Failed to join migration group", cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -71,18 +71,18 @@ namespace BigCommerce.Migration.Functions.Hubs
             try
             {
                 var groupName = GetMigrationGroupName(migrationId);
-                await _hubContext.Groups.RemoveFromGroupAsync(connectionId, groupName, cancellationToken);
+                await _hubContext.Groups.RemoveFromGroupAsync(connectionId, groupName, cancellationToken).ConfigureAwait(false);
 
                 _logger.LogInformation("Connection {ConnectionId} left migration group {MigrationId}", 
                     connectionId, migrationId);
 
-                await _hubContext.Clients.Client(connectionId).SendAsync("LeftMigrationGroup", migrationId, cancellationToken);
+                await _hubContext.Clients.Client(connectionId).SendAsync("LeftMigrationGroup", migrationId, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error leaving migration group {MigrationId} for connection {ConnectionId}", 
                     migrationId, connectionId);
-                await _hubContext.Clients.Client(connectionId).SendAsync("Error", "Failed to leave migration group", cancellationToken);
+                await _hubContext.Clients.Client(connectionId).SendAsync("Error", "Failed to leave migration group", cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -103,7 +103,7 @@ namespace BigCommerce.Migration.Functions.Hubs
             try
             {
                 var groupName = GetMigrationGroupName(migrationId);
-                await _hubContext.Clients.Group(groupName).SendAsync("MigrationProgress", progress, cancellationToken);
+                await _hubContext.Clients.Group(groupName).SendAsync("MigrationProgress", progress, cancellationToken).ConfigureAwait(false);
                 
                 _logger.LogDebug("Sent migration progress update for {MigrationId}", migrationId);
             }
@@ -130,7 +130,7 @@ namespace BigCommerce.Migration.Functions.Hubs
             try
             {
                 var groupName = GetMigrationGroupName(migrationId);
-                await _hubContext.Clients.Group(groupName).SendAsync("MigrationStatus", status, cancellationToken);
+                await _hubContext.Clients.Group(groupName).SendAsync("MigrationStatus", status, cancellationToken).ConfigureAwait(false);
                 
                 _logger.LogDebug("Sent migration status update for {MigrationId}", migrationId);
             }
@@ -149,7 +149,7 @@ namespace BigCommerce.Migration.Functions.Hubs
         {
             try
             {
-                await _hubContext.Clients.All.SendAsync("SystemHealth", healthData, cancellationToken);
+                await _hubContext.Clients.All.SendAsync("SystemHealth", healthData, cancellationToken).ConfigureAwait(false);
                 
                 _logger.LogDebug("Sent system health update to all clients");
             }
@@ -169,7 +169,7 @@ namespace BigCommerce.Migration.Functions.Hubs
         {
             try
             {
-                await _hubContext.Clients.Client(connectionId).SendAsync("Error", error, cancellationToken);
+                await _hubContext.Clients.Client(connectionId).SendAsync("Error", error, cancellationToken).ConfigureAwait(false);
                 
                 _logger.LogDebug("Sent error notification to connection {ConnectionId}", connectionId);
             }
@@ -188,7 +188,7 @@ namespace BigCommerce.Migration.Functions.Hubs
         {
             try
             {
-                await _hubContext.Clients.Client(connectionId).SendAsync("Connected", connectionId, cancellationToken);
+                await _hubContext.Clients.Client(connectionId).SendAsync("Connected", connectionId, cancellationToken).ConfigureAwait(false);
                 
                 _logger.LogInformation("Client connected: {ConnectionId}", connectionId);
             }

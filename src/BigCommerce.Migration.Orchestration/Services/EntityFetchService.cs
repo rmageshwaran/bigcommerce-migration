@@ -3,6 +3,7 @@ using BigCommerce.Migration.Core.Models;
 using BigCommerce.Migration.Orchestration.Models;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
+using System.Net.Http;
 
 namespace BigCommerce.Migration.Orchestration.Services;
 
@@ -73,6 +74,14 @@ public class EntityFetchService : IEntityFetchService
         BatchProcessingRequest request, 
         CancellationToken cancellationToken)
     {
+        // 🎯 CACHED DATA HANDLING: Check for cached data first (common for category tree scenarios)
+        if (request.CachedEntityData != null && request.CachedEntityData.Count > 0)
+        {
+            _logger.LogDebug("Using cached category data for migration {MigrationId}, count: {Count}", 
+                request.MigrationId, request.CachedEntityData.Count);
+            return request.CachedEntityData;
+        }
+
         // 🎯 REFACTORED: Delegate to strategy pattern instead of duplicating logic
         // This method is kept for backward compatibility with existing tests and interface
         _logger.LogDebug("FetchCategoriesAsync called - delegating to strategy pattern for migration {MigrationId}", 
@@ -90,7 +99,16 @@ public class EntityFetchService : IEntityFetchService
         _logger.LogDebug("FetchProductsAsync called - delegating to strategy pattern for migration {MigrationId}", 
             request.MigrationId);
         
-        return await FetchEntitiesAsync(request, cancellationToken);
+        try
+        {
+            return await FetchEntitiesAsync(request, cancellationToken);
+        }
+        catch (HttpRequestException ex)
+        {
+            var message = "Product fetch failed";
+            _logger.LogError(ex, "{Message} for migration {MigrationId}", message, request.MigrationId);
+            throw new InvalidOperationException(message, ex);
+        }
     }
 
     public async Task<List<Dictionary<string, object>>> FetchBrandsAsync(

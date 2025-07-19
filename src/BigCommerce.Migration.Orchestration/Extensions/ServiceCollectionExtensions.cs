@@ -141,12 +141,12 @@ public static class ServiceCollectionExtensions
         // 🎯 Register entity fetch strategy pattern implementations (Task 3.3.2 - NEW)
         // Strategy Pattern for Open/Closed Principle compliance
         services.TryAddScoped<IEntityFetchStrategyFactory, EntityFetchStrategyFactory>();
-        services.TryAddScoped<IEntityFetchStrategy, CategoryFetchStrategy>();
-        services.TryAddScoped<IEntityFetchStrategy, ProductFetchStrategy>();
-        services.TryAddScoped<IEntityFetchStrategy, BrandFetchStrategy>();
-        services.TryAddScoped<IEntityFetchStrategy, VariantFetchStrategy>();
-        services.TryAddScoped<IEntityFetchStrategy, ImageFetchStrategy>();
-        services.TryAddScoped<IEntityFetchStrategy, ModifierFetchStrategy>();
+        services.TryAddScoped<CategoryFetchStrategy>();
+        services.TryAddScoped<ProductFetchStrategy>();
+        services.TryAddScoped<BrandFetchStrategy>();
+        services.TryAddScoped<VariantFetchStrategy>();
+        services.TryAddScoped<ImageFetchStrategy>();
+        services.TryAddScoped<ModifierFetchStrategy>();
         
         return services;
     }

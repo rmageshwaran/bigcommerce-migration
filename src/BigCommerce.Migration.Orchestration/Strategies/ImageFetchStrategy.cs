@@ -11,11 +11,11 @@ namespace BigCommerce.Migration.Orchestration.Strategies;
 public class ImageFetchStrategy : IEntityFetchStrategy
 {
     private readonly IBigCommerceApiClient _apiClient;
-    private readonly ILogger _logger;
+    private readonly ILogger<ImageFetchStrategy> _logger;
 
     public string EntityType => "images";
 
-    public ImageFetchStrategy(IBigCommerceApiClient apiClient, ILogger logger)
+    public ImageFetchStrategy(IBigCommerceApiClient apiClient, ILogger<ImageFetchStrategy> logger)
     {
         _apiClient = apiClient ?? throw new ArgumentNullException(nameof(apiClient));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));

@@ -11,11 +11,11 @@ namespace BigCommerce.Migration.Orchestration.Strategies;
 public class VariantFetchStrategy : IEntityFetchStrategy
 {
     private readonly IBigCommerceApiClient _apiClient;
-    private readonly ILogger _logger;
+    private readonly ILogger<VariantFetchStrategy> _logger;
 
     public string EntityType => "variants";
 
-    public VariantFetchStrategy(IBigCommerceApiClient apiClient, ILogger logger)
+    public VariantFetchStrategy(IBigCommerceApiClient apiClient, ILogger<VariantFetchStrategy> logger)
     {
         _apiClient = apiClient ?? throw new ArgumentNullException(nameof(apiClient));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));

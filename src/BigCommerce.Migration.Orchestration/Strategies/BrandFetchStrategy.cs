@@ -11,11 +11,11 @@ namespace BigCommerce.Migration.Orchestration.Strategies;
 public class BrandFetchStrategy : IEntityFetchStrategy
 {
     private readonly IBigCommerceApiClient _apiClient;
-    private readonly ILogger _logger;
+    private readonly ILogger<BrandFetchStrategy> _logger;
 
     public string EntityType => "brands";
 
-    public BrandFetchStrategy(IBigCommerceApiClient apiClient, ILogger logger)
+    public BrandFetchStrategy(IBigCommerceApiClient apiClient, ILogger<BrandFetchStrategy> logger)
     {
         _apiClient = apiClient ?? throw new ArgumentNullException(nameof(apiClient));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));

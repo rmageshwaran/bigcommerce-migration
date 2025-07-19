@@ -11,11 +11,11 @@ namespace BigCommerce.Migration.Orchestration.Strategies;
 public class ModifierFetchStrategy : IEntityFetchStrategy
 {
     private readonly IBigCommerceApiClient _apiClient;
-    private readonly ILogger _logger;
+    private readonly ILogger<ModifierFetchStrategy> _logger;
 
     public string EntityType => "modifiers";
 
-    public ModifierFetchStrategy(IBigCommerceApiClient apiClient, ILogger logger)
+    public ModifierFetchStrategy(IBigCommerceApiClient apiClient, ILogger<ModifierFetchStrategy> logger)
     {
         _apiClient = apiClient ?? throw new ArgumentNullException(nameof(apiClient));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));

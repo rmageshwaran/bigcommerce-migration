@@ -20,7 +20,8 @@ export class SignalRService {
 
   constructor(hubUrl?: string) {
     // Use environment configuration with optional override
-    this.hubUrl = hubUrl || `${config.signalR.hubUrl}/signalr`;
+    // For Azure SignalR Service, we need to use the negotiate endpoint
+    this.hubUrl = hubUrl || `${config.api.baseUrl}/negotiate`;
     this.maxReconnectAttempts = config.signalR.reconnectAttempts;
     
     if (config.features.enableDebugLogging) {
@@ -40,18 +41,11 @@ export class SignalRService {
   private initializeConnection(): void {
     this.connection = new signalR.HubConnectionBuilder()
       .withUrl(this.hubUrl, {
-        skipNegotiation: true, // Azure Functions SignalR setup
+        skipNegotiation: false, // Use negotiate endpoint
         transport: signalR.HttpTransportType.WebSockets,
         accessTokenFactory: () => {
           // Return API key for Azure Functions authentication
           return config.auth.apiKey || '';
-        },
-        headers: {
-          // Add additional headers for Azure Functions
-          ...(config.auth.apiKey && {
-            'Authorization': `Bearer ${config.auth.apiKey}`,
-            'x-functions-key': config.auth.apiKey
-          })
         }
       })
       .withAutomaticReconnect({

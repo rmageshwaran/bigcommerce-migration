@@ -148,14 +148,14 @@ public class MigrationQueryFunctions
     /// <param name="req">HTTP request</param>
     /// <param name="context">Function execution context</param>
     /// <returns>HTTP response with list of migrations</returns>
-    [Function("GetMigrations")]
-    [OpenApiOperation(operationId: "GetMigrations", tags: new[] { "Migration Queries" },
-        Summary = "Get migrations list",
+    [Function("QueryMigrations")]
+    [OpenApiOperation(operationId: "QueryMigrations", tags: new[] { "Migration Queries" },
+        Summary = "Query migrations list",
         Description = "Retrieves a list of migrations with optional filtering by status, store, and date range.")]
     [OpenApiResponseWithBody(statusCode: HttpStatusCode.OK, contentType: "application/json",
         bodyType: typeof(object), Description = "Migrations list retrieved successfully")]
     public async Task<HttpResponseData> GetMigrations(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "migrations")] HttpRequestData req,
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "query/migrations")] HttpRequestData req,
         FunctionContext context)
     {
         try
@@ -229,7 +229,7 @@ public class MigrationQueryFunctions
     [OpenApiResponseWithBody(statusCode: HttpStatusCode.NotFound, contentType: "application/json",
         bodyType: typeof(object), Description = "Migration not found")]
     public async Task<HttpResponseData> GetMigration(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "migrations/{migrationId}")] HttpRequestData req,
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "migrations/{migrationId}/details")] HttpRequestData req,
         FunctionContext context)
     {
         var migrationId = req.Url.Segments.LastOrDefault(s => s != "/")?.Trim('/') ?? string.Empty;

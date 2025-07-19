@@ -73,7 +73,8 @@
       "Content-Type",
       "x-requested-with",
       "x-signalr-user-agent",
-      "x-ms-signalr-connectionid"
+      "x-ms-signalr-connectionid",
+      "x-functions-key"
     ]
   }
 } 

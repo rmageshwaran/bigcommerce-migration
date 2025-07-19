@@ -29,21 +29,28 @@ export const config = {
   
   // Backend API Configuration
   api: {
-    baseUrl: getEnvVar('VITE_API_BASE_URL', 'http://localhost:7071'),
+    // In development, use relative URLs to work with Vite proxy
+    // In production, use the actual Azure Functions URL
+    baseUrl: import.meta.env.DEV 
+      ? '/api'  // Relative URL for Vite proxy in development
+      : getEnvVar('VITE_API_BASE_URL', 'https://your-production-functions.azurewebsites.net/api'),
     timeout: getEnvNumber('VITE_CONNECTION_TIMEOUT', 30000),
     retryAttempts: getEnvNumber('VITE_RETRY_ATTEMPTS', 3),
   },
 
   // SignalR Configuration
   signalR: {
+    // Use Azure SignalR Service for both development and production
+    // The Azure Functions backend handles the SignalR service connection
     hubUrl: getEnvVar('VITE_SIGNALR_HUB_URL', 'https://vortexiq-migration-signalr-dev.service.signalr.net'),
+    hubName: 'migration', // SignalR hub name
     reconnectAttempts: getEnvNumber('VITE_RECONNECT_ATTEMPTS', 5),
     connectionTimeout: getEnvNumber('VITE_CONNECTION_TIMEOUT', 30000),
   },
 
   // Authentication
   auth: {
-    apiKey: getEnvVar('VITE_API_KEY', ''),
+    apiKey: getEnvVar('VITE_API_KEY', 'your-azure-functions-api-key-here'),
     // For development, allow empty API key
     requireApiKey: !import.meta.env.DEV || getEnvBoolean('VITE_REQUIRE_API_KEY', false),
   },

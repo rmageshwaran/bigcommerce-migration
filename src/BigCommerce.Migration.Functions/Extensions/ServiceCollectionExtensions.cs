@@ -5,6 +5,7 @@ using BigCommerce.Migration.Functions.Services;
 using BigCommerce.Migration.Functions.Middleware;
 using BigCommerce.Migration.Functions.Hubs;
 using BigCommerce.Migration.Orchestration.Services;
+using BigCommerce.Migration.Orchestration.Extensions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -47,6 +48,9 @@ public static class ServiceCollectionExtensions
 
         // Add core services
         services.AddCoreServices();
+
+        // Add orchestration services (Strategy Pattern and Activity implementations)
+        services.AddOrchestrationServices();
 
         // Add SignalR services
         services.AddSignalRServices(configuration);

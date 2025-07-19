@@ -46,9 +46,9 @@ public class MigrationManagementFunctions : BaseFunction
     /// <param name="req">HTTP request containing migration parameters</param>
     /// <param name="context">Function execution context</param>
     /// <returns>HTTP response with migration ID and status</returns>
-    [Function("StartMigration")]
-    [OpenApiOperation(operationId: "StartMigration", tags: new[] { "Migration Management" },
-        Summary = "Start a new migration",
+    [Function("StartMigrationManagement")]
+    [OpenApiOperation(operationId: "StartMigrationManagement", tags: new[] { "Migration Management" },
+        Summary = "Start a new migration (Management API)",
         Description = "Creates and queues a new migration between BigCommerce stores. Validates store credentials and queues the migration for processing.")]
     [OpenApiRequestBody(contentType: "application/json", bodyType: typeof(MigrationRequest),
         Description = "Migration configuration specifying source store, destination store, and entities to migrate")]
@@ -59,7 +59,7 @@ public class MigrationManagementFunctions : BaseFunction
     [OpenApiResponseWithBody(statusCode: HttpStatusCode.InternalServerError, contentType: "application/json",
         bodyType: typeof(object), Description = "Internal server error")]
     public async Task<HttpResponseData> StartMigration(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "migrations")] HttpRequestData req,
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "management/migrations")] HttpRequestData req,
         FunctionContext context)
     {
         var migrationId = Guid.NewGuid().ToString();
@@ -175,16 +175,16 @@ public class MigrationManagementFunctions : BaseFunction
     /// <param name="req">HTTP request</param>
     /// <param name="context">Function execution context</param>
     /// <returns>HTTP response confirming cancellation</returns>
-    [Function("CancelMigration")]
-    [OpenApiOperation(operationId: "CancelMigration", tags: new[] { "Migration Management" },
-        Summary = "Cancel an active migration",
+    [Function("CancelMigrationManagement")]
+    [OpenApiOperation(operationId: "CancelMigrationManagement", tags: new[] { "Migration Management" },
+        Summary = "Cancel an active migration (Management API)",
         Description = "Cancels an active migration and updates its status.")]
     [OpenApiResponseWithBody(statusCode: HttpStatusCode.OK, contentType: "application/json",
         bodyType: typeof(object), Description = "Migration cancelled successfully")]
     [OpenApiResponseWithBody(statusCode: HttpStatusCode.NotFound, contentType: "application/json",
         bodyType: typeof(object), Description = "Migration not found")]
     public async Task<HttpResponseData> CancelMigration(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "delete", Route = "migrations/{migrationId}")] HttpRequestData req,
+        [HttpTrigger(AuthorizationLevel.Anonymous, "delete", Route = "management/migrations/{migrationId}")] HttpRequestData req,
         FunctionContext context)
     {
         var migrationId = req.Url.Segments.LastOrDefault()?.Trim('/') ?? string.Empty;

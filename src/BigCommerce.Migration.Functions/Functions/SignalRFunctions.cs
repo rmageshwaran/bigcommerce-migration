@@ -33,38 +33,39 @@ namespace BigCommerce.Migration.Functions.Functions
         {
             try
             {
-                // Get origin from request headers
-                var origin = GetOriginFromRequest(req);
-                _logger.LogInformation("SignalR negotiate request - Method: {Method}, Origin: {Origin}", req.Method, origin ?? "null");
+                _logger.LogInformation("SignalR negotiate request - Method: {Method}, Headers: {Headers}", 
+                    req.Method, string.Join(", ", req.Headers.Select(h => $"{h.Key}: {string.Join(", ", h.Value)}")));
                 
-                // Handle CORS preflight requests
+                // Handle CORS preflight requests explicitly
                 if (req.Method.Equals("OPTIONS", StringComparison.OrdinalIgnoreCase))
                 {
                     var optionsResponse = req.CreateResponse(System.Net.HttpStatusCode.OK);
                     
-                    // Always set CORS headers for allowed origins, fallback to localhost:5173 for dev
-                    var corsOrigin = origin ?? "http://localhost:5173";
-                    optionsResponse.Headers.Add("Access-Control-Allow-Origin", corsOrigin);
+                    // Get origin from request or use default
+                    var origin = GetOriginFromRequest(req) ?? "http://localhost:5173";
+                    
+                    // Add CORS headers for preflight response
+                    optionsResponse.Headers.Add("Access-Control-Allow-Origin", origin);
                     optionsResponse.Headers.Add("Access-Control-Allow-Credentials", "true");
                     optionsResponse.Headers.Add("Access-Control-Allow-Methods", "POST, OPTIONS");
-                    optionsResponse.Headers.Add("Access-Control-Allow-Headers", "Content-Type, Authorization, x-requested-with, x-signalr-user-agent, x-ms-signalr-connectionid");
+                    optionsResponse.Headers.Add("Access-Control-Allow-Headers", "Content-Type, Authorization, x-requested-with, x-signalr-user-agent, x-ms-signalr-connectionid, x-functions-key");
+                    optionsResponse.Headers.Add("Access-Control-Max-Age", "86400"); // Cache preflight for 24 hours
                     
-                    _logger.LogInformation("CORS preflight response sent with origin: {Origin}", corsOrigin);
+                    _logger.LogInformation("CORS preflight response sent with origin: {Origin}", origin);
                     return optionsResponse;
                 }
-
-                _logger.LogInformation("SignalR negotiate request processed successfully");
                 
                 var response = req.CreateResponse();
                 
-                // Always set CORS headers for allowed origins, fallback to localhost:5173 for dev
-                var responseOrigin = origin ?? "http://localhost:5173";
+                // Add CORS headers for actual response
+                var responseOrigin = GetOriginFromRequest(req) ?? "http://localhost:5173";
                 response.Headers.Add("Access-Control-Allow-Origin", responseOrigin);
                 response.Headers.Add("Access-Control-Allow-Credentials", "true");
                 response.Headers.Add("Content-Type", "application/json");
                 await response.WriteStringAsync(connectionInfo);
                 
-                _logger.LogInformation("SignalR negotiate response sent with origin: {Origin}", responseOrigin);
+                _logger.LogInformation("SignalR negotiate response sent with headers: {Headers}", 
+                    string.Join(", ", response.Headers.Select(h => $"{h.Key}: {string.Join(", ", h.Value)}")));
                 return response;
             }
             catch (Exception ex)
@@ -72,10 +73,11 @@ namespace BigCommerce.Migration.Functions.Functions
                 _logger.LogError(ex, "Error processing SignalR negotiate request");
                 var errorResponse = req.CreateResponse(System.Net.HttpStatusCode.BadRequest);
                 
-                var origin = GetOriginFromRequest(req);
-                var errorOrigin = origin ?? "http://localhost:5173";
+                // Add CORS headers to error response too
+                var errorOrigin = GetOriginFromRequest(req) ?? "http://localhost:5173";
                 errorResponse.Headers.Add("Access-Control-Allow-Origin", errorOrigin);
                 errorResponse.Headers.Add("Access-Control-Allow-Credentials", "true");
+                
                 await errorResponse.WriteStringAsync("Failed to negotiate SignalR connection");
                 return errorResponse;
             }
@@ -161,28 +163,6 @@ namespace BigCommerce.Migration.Functions.Functions
         {
             try
             {
-                // Get origin from request headers
-                var origin = GetOriginFromRequest(req);
-                _logger.LogInformation("Send migration status request - Method: {Method}, Origin: {Origin}", req.Method, origin ?? "null");
-                
-                // Handle CORS preflight requests
-                if (req.Method.Equals("OPTIONS", StringComparison.OrdinalIgnoreCase))
-                {
-                    var optionsResponse = req.CreateResponse(System.Net.HttpStatusCode.OK);
-                    
-                    // Always set CORS headers for allowed origins, fallback to localhost:5173 for dev
-                    var statusOptionsCorsOrigin = origin ?? "http://localhost:5173";
-                    optionsResponse.Headers.Add("Access-Control-Allow-Origin", statusOptionsCorsOrigin);
-                    optionsResponse.Headers.Add("Access-Control-Allow-Credentials", "true");
-                    optionsResponse.Headers.Add("Access-Control-Allow-Methods", "POST, OPTIONS");
-                    optionsResponse.Headers.Add("Access-Control-Allow-Headers", "Content-Type, Authorization, x-requested-with");
-                    
-                    return new MultiResponse
-                    {
-                        HttpResponse = optionsResponse
-                    };
-                }
-
                 var requestBody = await req.ReadAsStringAsync();
                 var statusData = System.Text.Json.JsonSerializer.Deserialize<object>(requestBody ?? "{}") ?? new { message = "Empty status data" };
 
@@ -191,11 +171,6 @@ namespace BigCommerce.Migration.Functions.Functions
                 // Create HTTP response
                 var response = req.CreateResponse(System.Net.HttpStatusCode.OK);
                 response.Headers.Add("Content-Type", "application/json");
-                
-                // Add CORS headers to response
-                var statusResponseCorsOrigin = origin ?? "http://localhost:5173";
-                response.Headers.Add("Access-Control-Allow-Origin", statusResponseCorsOrigin);
-                response.Headers.Add("Access-Control-Allow-Credentials", "true");
                 
                 await response.WriteStringAsync(System.Text.Json.JsonSerializer.Serialize(new { success = true, message = "Migration status sent via SignalR" }));
 
@@ -219,12 +194,6 @@ namespace BigCommerce.Migration.Functions.Functions
                 
                 var errorResponse = req.CreateResponse(System.Net.HttpStatusCode.InternalServerError);
                 errorResponse.Headers.Add("Content-Type", "application/json");
-                
-                // Add CORS headers to error response too
-                var statusErrorOrigin = GetOriginFromRequest(req);
-                var statusErrorCorsOrigin = statusErrorOrigin ?? "http://localhost:5173";
-                errorResponse.Headers.Add("Access-Control-Allow-Origin", statusErrorCorsOrigin);
-                errorResponse.Headers.Add("Access-Control-Allow-Credentials", "true");
                 
                 await errorResponse.WriteStringAsync(System.Text.Json.JsonSerializer.Serialize(new { error = ex.Message }));
                 
@@ -271,6 +240,7 @@ namespace BigCommerce.Migration.Functions.Functions
             }
         }
 
+
         /// <summary>
         /// Get the origin from the request headers if it's in the allowed list
         /// </summary>
@@ -286,27 +256,24 @@ namespace BigCommerce.Migration.Functions.Functions
 
             try
             {
-                // Log all headers for debugging
-                _logger.LogDebug("Request headers: {Headers}", string.Join(", ", req.Headers.Select(h => $"{h.Key}: {string.Join(", ", h.Value)}")));
-
                 if (req.Headers.TryGetValues("Origin", out var origins))
                 {
                     var origin = origins.FirstOrDefault();
-                    _logger.LogInformation("Found Origin header: {Origin}", origin);
+                    _logger.LogDebug("Found Origin header: {Origin}", origin);
                     
-                    if (!string.IsNullOrEmpty(origin) && allowedOrigins.Contains(origin))
+                    if (!string.IsNullOrEmpty(origin) && allowedOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase))
                     {
-                        _logger.LogInformation("Origin {Origin} is allowed", origin);
+                        _logger.LogDebug("Origin {Origin} is allowed", origin);
                         return origin;
                     }
                     else
                     {
-                        _logger.LogWarning("Origin {Origin} is not in allowed origins list", origin);
+                        _logger.LogDebug("Origin {Origin} is not in allowed origins list", origin);
                     }
                 }
                 else
                 {
-                    _logger.LogWarning("No Origin header found in request");
+                    _logger.LogDebug("No Origin header found in request");
                 }
             }
             catch (Exception ex)

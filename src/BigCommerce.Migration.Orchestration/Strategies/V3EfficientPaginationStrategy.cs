@@ -80,12 +80,12 @@ public class V3EfficientPaginationStrategy : IEntityDiscoveryStrategy
             _logger.LogInformation("V3 efficient pagination discovery completed for {EntityType}: {TotalCount} entities across {TotalPages} pages", 
                 request.EntityType, totalCount, totalPages);
 
-            // ✅ CORRECT APPROACH: Return EMPTY EntityIds for batch processing
-            // Batch processing will use direct pagination (page 1, 2, 3...) instead of entity IDs
+            // ✅ MEMORY EFFICIENT: Return pagination metadata instead of all entity IDs
+            // Batch processing will use page-based fetching during processing
             return new EntityDiscoveryResult
             {
                 EntityType = request.EntityType,
-                EntityIds = new List<string>(), // ✅ Empty - batch processing uses page numbers
+                EntityIds = new List<string>(), // ✅ Empty - will use pagination-based batching
                 EntityData = new List<Dictionary<string, object>>(), // ✅ NO caching for scalability
                 TotalCount = totalCount,
                 ApiVersion = BigCommerceApiVersion.V3,
@@ -94,14 +94,14 @@ public class V3EfficientPaginationStrategy : IEntityDiscoveryStrategy
                 PaginationMetadata = new Dictionary<string, object>
                 {
                     { "ApiVersion", "V3" },
-                    { "Strategy", "DirectPagination" },
+                    { "Strategy", "EfficientPagination" },
                     { "TotalPages", totalPages },
                     { "PageSize", pageSize },
                     { "TotalCount", totalCount },
                     { "HierarchicallySorted", false },
                     { "CachingDisabled", true },
                     { "MemoryOptimized", true },
-                    { "UseDirectPagination", true }
+                    { "UsePaginationBatching", true }
                 }
             };
         }

@@ -136,8 +136,11 @@ public static class EntityMigrationDurableOrchestrator
             var entityIds = discoverResult.EntityIds;
             var totalBatches = CalculateBatchCount(discoverResult.TotalCount, batchSize);
             
+            // Handle efficient pagination strategy (empty EntityIds but has TotalCount)
+            var useDirectPagination = !entityIds.Any() && discoverResult.TotalCount > 0;
+            
             logger.LogInformation("Processing {EntityCount} {EntityType} entities in {BatchCount} batches for MigrationId: {MigrationId}", 
-                entityIds.Count, entityType, totalBatches, migrationId);
+                useDirectPagination ? discoverResult.TotalCount : entityIds.Count, entityType, totalBatches, migrationId);
 
             for (int batchNumber = 1; batchNumber <= totalBatches; batchNumber++)
             {
@@ -163,10 +166,22 @@ public static class EntityMigrationDurableOrchestrator
                         EntityType = entityType
                     });
 
-                // Calculate entity IDs for this batch
-                var startIndex = (batchNumber - 1) * batchSize;
-                var endIndex = Math.Min(startIndex + batchSize, entityIds.Count);
-                var batchEntityIds = entityIds.Skip(startIndex).Take(endIndex - startIndex).ToList();
+                List<string> batchEntityIds;
+                
+                if (useDirectPagination)
+                {
+                    // For efficient pagination strategies: use page-based processing
+                    // Calculate which page this batch corresponds to
+                    var pageNumber = batchNumber; // Each batch = one page for efficient pagination
+                    batchEntityIds = new List<string> { $"page-{pageNumber}" }; // Placeholder for page-based processing
+                }
+                else
+                {
+                    // For hierarchical strategies: use traditional entity ID batching
+                    var startIndex = (batchNumber - 1) * batchSize;
+                    var endIndex = Math.Min(startIndex + batchSize, entityIds.Count);
+                    batchEntityIds = entityIds.Skip(startIndex).Take(endIndex - startIndex).ToList();
+                }
 
                 logger.LogInformation("Processing {EntityType} batch {BatchNumber}/{TotalBatches} ({EntityCount} entities) for MigrationId: {MigrationId}", 
                     entityType, batchNumber, totalBatches, batchEntityIds.Count, migrationId);
@@ -183,7 +198,10 @@ public static class EntityMigrationDurableOrchestrator
                         EntityIds = batchEntityIds,
                         SourceStore = input.SourceStore ?? new StoreConfiguration(),
                         DestinationStore = input.DestinationStore ?? new StoreConfiguration(),
-                        CategoryTreeContext = input.CategoryTreeContext ?? new CategoryTreeContext()
+                        CategoryTreeContext = input.CategoryTreeContext ?? new CategoryTreeContext(),
+                        // Pass discovery metadata for efficient pagination
+                        PaginationMetadata = discoverResult.PaginationMetadata,
+                        UseDirectPagination = useDirectPagination
                     };
 
                     var batchResult = await context.CallActivityAsync<BatchProcessingResult>(

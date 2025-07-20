@@ -64,6 +64,10 @@ public class V3HierarchicalStrategy : IEntityDiscoveryStrategy
                 SortDirection = "asc"
             };
 
+            // ✅ DEBUG: Log the category tree ID being used for discovery
+            _logger.LogInformation("🔍 DEBUG: Using category tree ID '{CategoryTreeId}' for discovery of {EntityType} in migration {MigrationId}", 
+                paginationRequest.CategoryTreeId ?? "DEFAULT", request.EntityType, request.MigrationId);
+
             var allEntities = new List<Dictionary<string, object>>();
             var currentPage = 1;
             BigCommerceV3Pagination? v3Metadata = null;
@@ -118,18 +122,19 @@ public class V3HierarchicalStrategy : IEntityDiscoveryStrategy
             // Sort entities hierarchically
             var sortedEntities = SortEntitiesHierarchically(allEntities);
             
-            // Extract entity IDs in hierarchical order
-            var hierarchicalEntityIds = ExtractEntityIds(sortedEntities);
-
-            _logger.LogInformation("Hierarchical sorting completed for {EntityType}: {EntityCount} entities sorted and cached", 
-                request.EntityType, sortedEntities.Count);
+            // ✅ FIX: Extract ALL entity IDs (not just hierarchically sorted ones)
+            // The hierarchical sorting is for the cached data only, not for filtering which entities to process
+            var allEntityIds = ExtractEntityIds(allEntities); // Use original unsorted list for complete entity IDs
+            
+            _logger.LogInformation("Hierarchical sorting completed for {EntityType}: {TotalEntities} entities discovered, {SortedEntities} entities sorted and cached", 
+                request.EntityType, allEntityIds.Count, sortedEntities.Count);
 
             return new EntityDiscoveryResult
             {
                 EntityType = request.EntityType,
-                EntityIds = hierarchicalEntityIds,
+                EntityIds = allEntityIds, // ✅ Return ALL entity IDs, not just hierarchically sorted ones
                 EntityData = sortedEntities, // Store hierarchically sorted entity data
-                TotalCount = sortedEntities.Count,
+                TotalCount = allEntityIds.Count, // ✅ Use total count of all entities
                 ApiVersion = BigCommerceApiVersion.V3,
                 SkipDiscovery = false,
                 V3PaginationMetadata = v3Metadata,
@@ -141,7 +146,8 @@ public class V3HierarchicalStrategy : IEntityDiscoveryStrategy
                     { "PageSize", paginationRequest.Limit },
                     { "HierarchicallySorted", true },
                     { "DataCached", true },
-                    { "OptimizedForHierarchy", true }
+                    { "OptimizedForHierarchy", true },
+                    { "AllEntitiesIncluded", true } // ✅ Indicate all entities are included
                 }
             };
         }

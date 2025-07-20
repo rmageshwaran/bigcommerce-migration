@@ -100,11 +100,29 @@ public class BigCommerceApiClient : IBigCommerceApiClient
     {
         ValidateStoreConfiguration(storeConfig);
 
-        // Use the correct BigCommerce API endpoint for creating categories
+        // Use the correct BigCommerce V3 Category Trees API endpoint for creating categories
+        // BigCommerce V3 Category Trees API: POST /catalog/trees/categories (per official documentation)
+        // Reference: https://developer.bigcommerce.com/docs/rest-catalog/category-trees/categories#create-categories
         var url = $"{storeConfig.GetApiBaseUrl()}/catalog/trees/categories";
         
         // Categories are already properly formatted by the transformation layer
         var jsonContent = JsonSerializer.Serialize(categories);
+        
+        // 🔍 DEBUG: Log the exact JSON payload being sent to BigCommerce
+        _logger.LogInformation("🔍 DEBUG: Sending category creation payload to BigCommerce: {JsonPayload}", jsonContent);
+        
+        // Also log individual category details for debugging
+        for (int i = 0; i < categories.Count; i++)
+        {
+            var category = categories[i];
+            var hasUrl = category.ContainsKey("url");
+            var urlDetails = hasUrl ? category["url"]?.ToString() : "MISSING";
+            var hasTreeId = category.ContainsKey("tree_id");
+            var treeIdValue = hasTreeId ? category["tree_id"]?.ToString() : "MISSING";
+            
+            _logger.LogInformation("🔍 DEBUG: Category[{Index}] - name: {Name}, url: {UrlDetails}, tree_id: {TreeId}, hasUrl: {HasUrl}, hasTreeId: {HasTreeId}", 
+                i, category.GetValueOrDefault("name", "UNKNOWN"), urlDetails, treeIdValue, hasUrl, hasTreeId);
+        }
 
         try
         {
@@ -382,9 +400,14 @@ public class BigCommerceApiClient : IBigCommerceApiClient
         try
         {
             var url = BuildEntityUrl(storeConfig, entityType, paginationRequest);
+            
+            // ✅ DEBUG: Log the exact URL being called during discovery
+            _logger.LogInformation("🔍 DEBUG: GetPaginatedEntitiesAsync calling URL: {Url} for {EntityType} with CategoryTreeId: {CategoryTreeId}", 
+                url, entityType, paginationRequest.CategoryTreeId ?? "NULL");
+            
             var request = ApiRequest.CreateGet(url, storeConfig);
             var response = await _apiRequestHandler.ExecuteRequestAsync<Dictionary<string, object>>(request, cancellationToken);
-            
+    
             return ParsePaginatedResponse(response, apiVersion, paginationRequest, 0);
         }
         catch (Exception ex)

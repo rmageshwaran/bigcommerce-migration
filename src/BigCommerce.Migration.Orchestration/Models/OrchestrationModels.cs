@@ -290,6 +290,17 @@ public class BatchProcessingRequest
     public List<Dictionary<string, object>>? CachedEntityData { get; set; }
     
     /// <summary>
+    /// Pagination metadata from discovery phase for efficient pagination strategies
+    /// </summary>
+    public Dictionary<string, object>? PaginationMetadata { get; set; }
+    
+    /// <summary>
+    /// Indicates whether to use direct pagination instead of entity ID batching
+    /// Used for efficient pagination strategies that return empty EntityIds
+    /// </summary>
+    public bool UseDirectPagination { get; set; }
+    
+    /// <summary>
     /// Validates the batch processing request
     /// </summary>
     /// <returns>True if valid, false otherwise</returns>

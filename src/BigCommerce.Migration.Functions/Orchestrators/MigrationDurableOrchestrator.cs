@@ -391,7 +391,7 @@ public static class MigrationDurableOrchestrator
                         }
                     });
             }
-            else
+            else if (totalSuccessful == 0 && totalFailed > 0)
             {
                 result.Status = "Failed";
                 result.ErrorMessage = $"All {totalFailed} entities failed to migrate";
@@ -416,6 +416,15 @@ public static class MigrationDurableOrchestrator
                             EntityResults = result.EntityResults
                         }
                     });
+            }
+            else
+            {
+                // Fallback case - should not normally reach here, but handle gracefully
+                result.Status = "CompletedWithErrors";
+                result.ErrorMessage = $"Migration completed with unexpected status: {totalProcessed} processed, {totalSuccessful} successful, {totalFailed} failed";
+                logger.LogWarning("Migration completed with unexpected status for MigrationId: {MigrationId}. " +
+                                "Processed: {ProcessedCount}, Successful: {SuccessfulCount}, Failed: {FailedCount}", 
+                    migrationId, totalProcessed, totalSuccessful, totalFailed);
             }
 
             return result;

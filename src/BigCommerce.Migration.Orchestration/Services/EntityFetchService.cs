@@ -38,10 +38,35 @@ public class EntityFetchService : IEntityFetchService
         _logger.LogInformation("Fetching entities of type {EntityType} for batch {BatchNumber} in migration {MigrationId}", 
             request.EntityType, request.BatchNumber, request.MigrationId);
 
+        // ✅ DEBUG: Log the decision-making process for debugging
+        _logger.LogInformation("🔍 DEBUG: EntityFetchService decision - UseDirectPagination: {UseDirectPagination}, HasEntityIds: {HasEntityIds}, CachedDataCount: {CachedDataCount}",
+            request.UseDirectPagination, request.EntityIds?.Any() ?? false, request.CachedEntityData?.Count ?? 0);
+
         try
         {
-            // 🎯 STRATEGY PATTERN: Delegate to appropriate strategy instead of switch statement
+            // Handle direct pagination for efficient strategies (empty EntityIds but has UseDirectPagination)
+            if (request.UseDirectPagination && (!request.EntityIds.Any() || request.EntityIds.First().StartsWith("page-")))
+            {
+                _logger.LogDebug("Using direct pagination for {EntityType} batch {BatchNumber} in migration {MigrationId}", 
+                    request.EntityType, request.BatchNumber, request.MigrationId);
+                
+                return await FetchEntitiesWithDirectPaginationAsync(request, cancellationToken);
+            }
+            
+            // Handle cached entity data (hierarchical strategies like categories)
+            if (request.CachedEntityData != null && request.CachedEntityData.Any())
+            {
+                _logger.LogInformation("✅ Using cached entity data for {EntityType} batch {BatchNumber} in migration {MigrationId}", 
+                    request.EntityType, request.BatchNumber, request.MigrationId);
+                
+                return GetCachedEntitiesForBatch(request);
+            }
+
+            // 🎯 STRATEGY PATTERN: Delegate to appropriate strategy for entity ID-based fetching
             // This eliminates OCP violation - new entity types can be added without modifying this code
+            _logger.LogInformation("❌ Using fetch strategy for {EntityType} batch {BatchNumber} in migration {MigrationId} (no cached data available)", 
+                request.EntityType, request.BatchNumber, request.MigrationId);
+            
             var strategy = _strategyFactory.GetStrategy(request.EntityType);
             
             var result = await strategy.FetchEntitiesAsync(
@@ -160,6 +185,122 @@ public class EntityFetchService : IEntityFetchService
     }
 
     #region Private Helper Methods
+
+    /// <summary>
+    /// Fetches entities using direct pagination (batch number = page number)
+    /// Used for efficient pagination strategies that don't cache entity IDs
+    /// </summary>
+    private async Task<List<Dictionary<string, object>>> FetchEntitiesWithDirectPaginationAsync(
+        BatchProcessingRequest request, 
+        CancellationToken cancellationToken)
+    {
+        var pageNumber = request.BatchNumber; // Direct mapping: batch 1 = page 1, batch 2 = page 2, etc.
+        var batchSize = 10; // Default batch size, could be configurable
+        
+        _logger.LogDebug("Fetching page {PageNumber} for {EntityType} using direct pagination in migration {MigrationId}", 
+            pageNumber, request.EntityType, request.MigrationId);
+
+        try
+        {
+            var paginationRequest = new BigCommercePaginationRequest
+            {
+                Page = pageNumber,
+                Limit = batchSize,
+                SortBy = "id",
+                SortDirection = "asc"
+            };
+
+            // Add entity-specific parameters
+            if (request.EntityType.ToLowerInvariant() == "categories" && request.CategoryTreeContext != null)
+            {
+                paginationRequest.CategoryTreeId = request.CategoryTreeContext.SourceCategoryTreeId;
+            }
+
+            var response = await _apiClient.GetPaginatedEntitiesAsync(
+                request.SourceStore,
+                request.EntityType,
+                paginationRequest,
+                cancellationToken);
+
+            var entities = response.Data ?? new List<Dictionary<string, object>>();
+            
+            // Add original entity ID tracking for error reporting
+            foreach (var entity in entities)
+            {
+                var entityId = entity.TryGetValue("id", out var id) ? id.ToString() : null;
+                entity["_original_entity_id"] = entityId;
+            }
+
+            _logger.LogDebug("Direct pagination fetched {Count} {EntityType} entities from page {PageNumber} in migration {MigrationId}", 
+                entities.Count, request.EntityType, pageNumber, request.MigrationId);
+
+            return entities;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to fetch {EntityType} entities using direct pagination (page {PageNumber}) in migration {MigrationId}", 
+                request.EntityType, pageNumber, request.MigrationId);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Gets cached entities for the current batch from pre-loaded entity data
+    /// Used for hierarchical strategies that cache all entity data during discovery
+    /// </summary>
+    private List<Dictionary<string, object>> GetCachedEntitiesForBatch(BatchProcessingRequest request)
+    {
+        if (request.CachedEntityData == null || !request.CachedEntityData.Any())
+        {
+            _logger.LogWarning("Cached entity data is null or empty for {EntityType} batch {BatchNumber} in migration {MigrationId}", 
+                request.EntityType, request.BatchNumber, request.MigrationId);
+            return new List<Dictionary<string, object>>();
+        }
+
+        // ✅ FIX: For hierarchical entities like categories, preserve the hierarchical order from cached data
+        // Instead of filtering by EntityIds (which may not be hierarchically sorted), 
+        // use the cached data order which IS hierarchically sorted by V3HierarchicalStrategy
+        if (request.EntityType.Equals("categories", StringComparison.OrdinalIgnoreCase))
+        {
+            // Filter cached data to get only entities for this batch, preserving hierarchical order
+            var batchEntities = request.CachedEntityData
+                .Where(entity =>
+                {
+                    var entityId = entity.TryGetValue("id", out var id) ? id.ToString() : null;
+                    return entityId != null && request.EntityIds.Contains(entityId);
+                })
+                .ToList(); // Preserves the hierarchical order from cached data
+            
+            _logger.LogInformation("🔍 DEBUG: Retrieved {Count} cached {EntityType} entities in hierarchical order for batch {BatchNumber} in migration {MigrationId}", 
+                batchEntities.Count, request.EntityType, request.BatchNumber, request.MigrationId);
+            
+            // ✅ DEBUG: Log the hierarchical processing order
+            foreach (var entity in batchEntities)
+            {
+                var categoryId = entity.TryGetValue("id", out var id) ? id.ToString() : "UNKNOWN";
+                var categoryName = entity.TryGetValue("name", out var name) ? name.ToString() : "UNKNOWN";
+                var parentId = entity.TryGetValue("parent_id", out var parent) ? parent.ToString() : "UNKNOWN";
+                _logger.LogInformation("🔍 DEBUG: - Hierarchical order: Category {CategoryId} ({CategoryName}), Parent: {ParentId}", 
+                    categoryId, categoryName, parentId);
+            }
+
+            return batchEntities;
+        }
+        
+        // For non-hierarchical entities, use the original logic
+        var standardBatchEntities = request.CachedEntityData
+            .Where(entity =>
+            {
+                var entityId = entity.TryGetValue("id", out var id) ? id.ToString() : null;
+                return entityId != null && request.EntityIds.Contains(entityId);
+            })
+            .ToList();
+
+        _logger.LogDebug("Retrieved {Count} cached {EntityType} entities for batch {BatchNumber} in migration {MigrationId}", 
+            standardBatchEntities.Count, request.EntityType, request.BatchNumber, request.MigrationId);
+
+        return standardBatchEntities;
+    }
 
     private StoreConfiguration ValidateStoreConfiguration(StoreConfiguration? storeConfig)
     {

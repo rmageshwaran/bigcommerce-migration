@@ -170,22 +170,21 @@ public class EntityMappingService : IEntityMappingService
             _logger.LogDebug("Getting destination ID for migration {MigrationId}, entity type {EntityType}, source ID {SourceId}", 
                 migrationId, entityType, sourceId);
             
-            // This would need to be implemented in the storage service
-            // For now, return null as placeholder
-            string? destinationId = null;
+            // Retrieve the entity mapping from storage
+            var mapping = await _migrationStorageService.GetEntityMappingAsync(migrationId, entityType, sourceId);
             
-            if (destinationId != null)
+            if (mapping != null && !string.IsNullOrEmpty(mapping.DestinationId))
             {
                 _logger.LogDebug("Found destination ID {DestinationId} for migration {MigrationId}, entity type {EntityType}, source ID {SourceId}", 
-                    destinationId, migrationId, entityType, sourceId);
+                    mapping.DestinationId, migrationId, entityType, sourceId);
+                return mapping.DestinationId;
             }
             else
             {
                 _logger.LogDebug("No destination ID found for migration {MigrationId}, entity type {EntityType}, source ID {SourceId}", 
                     migrationId, entityType, sourceId);
+                return null;
             }
-            
-            return destinationId;
         }
         catch (Exception ex)
         {
@@ -265,6 +264,10 @@ public class EntityMappingService : IEntityMappingService
         if (entity == null || entity.Count == 0)
             throw new ArgumentException("Entity cannot be null or empty");
 
+        // 🔍 DEBUG: Log the entity structure for troubleshooting
+        var availableKeys = string.Join(", ", entity.Keys);
+        Console.WriteLine($"🔍 DEBUG: ExtractId for {entityType} - Available keys: [{availableKeys}]");
+
         // Define entity-specific ID field names
         var idFieldMappings = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
         {
@@ -302,10 +305,12 @@ public class EntityMappingService : IEntityMappingService
         {
             if (entity.TryGetValue(field, out var id) && id != null)
             {
+                Console.WriteLine($"🔍 DEBUG: ExtractId for {entityType} - Found ID field '{field}' = '{id}'");
                 return id.ToString()!;
             }
         }
 
+        Console.WriteLine($"🔍 DEBUG: ExtractId for {entityType} - No ID field found! Tried: [{string.Join(", ", possibleIdFields)}]");
         throw new InvalidOperationException($"Entity is missing ID field for entity type '{entityType}'. Available keys: {string.Join(", ", entity.Keys)}");
     }
 } 

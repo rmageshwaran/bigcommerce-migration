@@ -36,64 +36,116 @@ public class CategoryFetchStrategy : IEntityFetchStrategy
         _logger.LogInformation("Fetching {Count} specific categories for migration {MigrationId}", 
             entityIds.Count, migrationId);
         
-        var fetchedCategories = new List<Dictionary<string, object>>();
+        // 🔍 DEBUG: Show requested entity IDs for troubleshooting
+        _logger.LogInformation("🔍 DEBUG: Requested category IDs: [{EntityIds}] for migration {MigrationId}",
+            string.Join(", ", entityIds), migrationId);
 
-        try
+        // Determine category tree ID for fetching
+        var categoryTreeId = categoryTreeContext?.SourceCategoryTreeId ?? "1"; // Default to tree 1
+        
+        _logger.LogDebug("Using category tree ID {CategoryTreeId} for fetching categories", categoryTreeId);
+
+        // Get all categories from the tree to ensure proper hierarchical sorting
+        var paginationRequest = new BigCommercePaginationRequest
         {
-            // LSP COMPLIANCE: Check for cancellation consistently across all strategies
-            cancellationToken.ThrowIfCancellationRequested();
+            Page = 1,
+            Limit = 250, // Large limit to get all categories in one call
+            CategoryTreeId = categoryTreeId,
+            SortBy = "id",
+            SortDirection = "asc"
+        };
 
-            // Determine category tree ID for fetching
-            var categoryTreeId = categoryTreeContext?.SourceCategoryTreeId ?? "1"; // Default to tree 1
-            
-            _logger.LogDebug("Using category tree ID {CategoryTreeId} for fetching categories", categoryTreeId);
+        var response = await _apiClient.GetPaginatedEntitiesAsync(
+            sourceStore,
+            "categories",
+            paginationRequest,
+            cancellationToken);
 
-            // OPTIMIZATION: Fetch ALL categories once instead of making multiple API calls
-            // This matches the original EntityFetchService approach and is much more efficient
-            var allCategories = await _apiClient.GetCategoriesAsync(sourceStore, categoryTreeId, cancellationToken);
-            
-            if (allCategories?.Any() == true)
-            {
-                // Filter to get only the requested categories
-                var filteredCategories = allCategories
-                    .Where(category => 
-                    {
-                        var categoryId = category.TryGetValue("id", out var id) ? id.ToString() : null;
-                        return categoryId != null && entityIds.Contains(categoryId);
-                    })
-                    .ToList();
+        var allCategories = response.Data ?? new List<Dictionary<string, object>>();
 
-                // Add original entity ID tracking for error reporting
-                foreach (var category in filteredCategories)
-                {
-                    var categoryId = category.TryGetValue("id", out var id) ? id.ToString() : null;
-                    category["_original_entity_id"] = categoryId;
-                }
-
-                fetchedCategories.AddRange(filteredCategories);
-                
-                _logger.LogInformation("Found {FoundCount}/{RequestedCount} categories from {TotalFetched} total categories", 
-                    filteredCategories.Count, entityIds.Count, allCategories.Count);
-            }
-            else
-            {
-                _logger.LogWarning("No categories found in store {StoreId} tree {TreeId}", 
-                    sourceStore.StoreId, categoryTreeId);
-            }
-
-            _logger.LogInformation("Successfully fetched {SuccessCount} of {TotalCount} categories for migration {MigrationId}", 
-                fetchedCategories.Count, entityIds.Count, migrationId);
-
-            return fetchedCategories;
-        }
-        catch (Exception ex)
+        _logger.LogInformation("🔍 DEBUG: API returned {TotalCount} categories from tree {TreeId}", 
+            allCategories.Count, categoryTreeId);
+        
+        foreach (var cat in allCategories)
         {
-            _logger.LogError(ex, "Failed to fetch categories for migration {MigrationId}", migrationId);
-            
-            // Return empty list to allow migration to continue with other batches
-            return new List<Dictionary<string, object>>();
+            var id = cat.GetValueOrDefault("id")?.ToString() ?? "unknown";
+            var name = cat.GetValueOrDefault("name")?.ToString() ?? "unknown";
+            var parentId = cat.GetValueOrDefault("parent_id");
+            _logger.LogInformation("🔍 DEBUG: - Category ID: {Id}, Name: '{Name}', ParentId: {ParentId}", 
+                id, name, parentId);
         }
+
+        // ✅ HIERARCHICAL SORTING: Sort categories so parents come before children
+        var sortedCategories = SortCategoriesHierarchically(allCategories);
+        
+        // Filter to only the requested categories while preserving hierarchical order
+        var requestedEntityIdsSet = new HashSet<string>(entityIds);
+        var filteredCategories = sortedCategories
+            .Where(cat => requestedEntityIdsSet.Contains(cat.GetValueOrDefault("id")?.ToString() ?? ""))
+            .ToList();
+
+        _logger.LogInformation("🔍 DEBUG: After hierarchical sorting and filtering, found {Count} matching categories:",
+            filteredCategories.Count);
+        
+        foreach (var cat in filteredCategories)
+        {
+            var id = cat.GetValueOrDefault("id")?.ToString() ?? "unknown";
+            var name = cat.GetValueOrDefault("name")?.ToString() ?? "unknown";
+            _logger.LogInformation("🔍 DEBUG: - Sorted Category ID: {Id}, Name: '{Name}'", id, name);
+        }
+
+        // Add original entity ID tracking for error reporting
+        foreach (var category in filteredCategories)
+        {
+            var categoryId = category.GetValueOrDefault("id")?.ToString() ?? "";
+            category["_original_entity_id"] = categoryId;
+        }
+
+        _logger.LogInformation("Found {FoundCount}/{RequestedCount} categories from {TotalCount} total categories", 
+            filteredCategories.Count, entityIds.Count, allCategories.Count);
+
+        _logger.LogInformation("Successfully fetched {Count} of {Total} categories for migration {MigrationId}", 
+            filteredCategories.Count, entityIds.Count, migrationId);
+
+        return filteredCategories;
     }
 
+    /// <summary>
+    /// Sorts categories hierarchically ensuring parents come before children
+    /// </summary>
+    private static List<Dictionary<string, object>> SortCategoriesHierarchically(List<Dictionary<string, object>> categories)
+    {
+        var sortedCategories = new List<Dictionary<string, object>>();
+        var categoryMap = categories.ToDictionary(
+            cat => cat.GetValueOrDefault("id")?.ToString() ?? "",
+            cat => cat
+        );
+        var processedIds = new HashSet<string>();
 
+        // Process categories level by level (breadth-first)
+        var currentLevelParentIds = new HashSet<string> { "0" }; // Start with root categories
+
+        while (currentLevelParentIds.Any() && sortedCategories.Count < categories.Count)
+        {
+            var nextLevelParentIds = new HashSet<string>();
+
+            foreach (var category in categories)
+            {
+                var categoryId = category.GetValueOrDefault("id")?.ToString() ?? "";
+                var parentId = category.GetValueOrDefault("parent_id")?.ToString() ?? "0";
+
+                // Add categories whose parents are in the current level
+                if (!processedIds.Contains(categoryId) && currentLevelParentIds.Contains(parentId))
+                {
+                    sortedCategories.Add(category);
+                    processedIds.Add(categoryId);
+                    nextLevelParentIds.Add(categoryId); // This category can be a parent for next level
+                }
+            }
+
+            currentLevelParentIds = nextLevelParentIds;
+        }
+
+        return sortedCategories;
+    }
 } 

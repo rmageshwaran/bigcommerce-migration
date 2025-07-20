@@ -1,492 +1,423 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import {
   Box,
   Card,
   CardContent,
   Typography,
   Button,
+  Table,
+  TableHead,
+  TableBody,
+  TableRow,
+  TableCell,
   Chip,
-  IconButton,
-  Tabs,
-  Tab,
+  CircularProgress,
   Alert,
-  LinearProgress,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  useTheme,
+  Stack,
 } from '@mui/material';
 import {
-  Timeline,
-  TimelineItem,
-  TimelineSeparator,
-  TimelineConnector,
-  TimelineContent,
-  TimelineDot,
-  TimelineOppositeContent,
-} from '@mui/lab';
-import {
-  Refresh as RefreshIcon,
-  Download as DownloadIcon,
-  PlayArrow as PlayIcon,
-  CheckCircle as CheckIcon,
+  ArrowBack as ArrowBackIcon,
   Error as ErrorIcon,
-  Close as CloseIcon,
+  CheckCircle as CheckCircleIcon,
+  Schedule as ScheduleIcon,
 } from '@mui/icons-material';
-import { useDashboard } from '../../context/DashboardContext';
-import type { MigrationProgress } from '../../types';
+import { format } from 'date-fns';
+import { apiService } from '../../services/apiService';
+import type { MigrationStatus } from '../../types';
 
-interface MigrationDetailViewProps {
+interface MigrationDetail {
   migrationId: string;
-  onClose?: () => void;
-  onAction?: (action: string, migrationId: string) => void;
+  sourceStore: string;
+  destinationStore: string;
+  startedAt: string;
+  completedAt: string;
+  status: MigrationStatus;
+  totalEntities: number;
+  processedEntities: number;
+  successfulEntities: number;
+  failedEntities: number;
+  percentageCompleted: number;
+  entities: string[];
 }
 
-interface TabPanelProps {
-  children?: React.ReactNode;
-  index: number;
-  value: number;
+interface MigrationError {
+  entityId: string;
+  entityType: string;
+  error: string;
+  processedAt: string;
 }
 
-const TabPanel: React.FC<TabPanelProps> = ({ children, value, index, ...other }) => (
-  <div
-    role="tabpanel"
-    hidden={value !== index}
-    id={`migration-tabpanel-${index}`}
-    aria-labelledby={`migration-tab-${index}`}
-    {...other}
-  >
-    {value === index && <Box sx={{ p: 3 }}>{children}</Box>}
-  </div>
-);
+export const MigrationDetailView: React.FC = () => {
+  const { requestId } = useParams<{ requestId: string }>();
+  const navigate = useNavigate();
+  const [migration, setMigration] = useState<MigrationDetail | null>(null);
+  const [errors, setErrors] = useState<MigrationError[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-const EntityDetailCard: React.FC<{ 
-  entityType: string; 
-  progress: any; // Changed from EntityProgress to any as EntityProgress type is removed
-  onViewDetails: (entityType: string) => void;
-}> = ({ entityType, progress, onViewDetails }) => {
-  const theme = useTheme();
-  
-  const getProgressColor = () => {
-    if (progress.progressPercentage >= 100) return 'success';
-    if (progress.progressPercentage >= 75) return 'info';
-    if (progress.progressPercentage >= 50) return 'warning';
-    return 'error';
-  };
+  useEffect(() => {
+    if (!requestId) {
+      setError('Migration ID is required');
+      setLoading(false);
+      return;
+    }
 
-  const getStatusIcon = () => {
-    if (progress.progressPercentage >= 100) return <CheckIcon color="success" />;
-    if (progress.failureCount > 0) return <ErrorIcon color="error" />;
-    if (progress.progressPercentage > 0) return <PlayIcon color="primary" />;
-    return <PlayIcon color="primary" />; // Changed from InfoIcon to PlayIcon
-  };
+    fetchMigrationDetails();
+  }, [requestId]);
 
-  return (
-    <Card sx={{ mb: 2 }}>
-      <CardContent>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center' }}>
-            {getStatusIcon()}
-            <Typography variant="h6" sx={{ ml: 1 }}>
-              {entityType.charAt(0).toUpperCase() + entityType.slice(1)}
-            </Typography>
-          </Box>
+  const fetchMigrationDetails = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      // Fetch migration details
+      const migrationResponse = await apiService.getMigrationProgress(requestId!);
+      console.log('✅ Migration details response:', migrationResponse);
+
+      // Transform the response to match our interface
+      const response = migrationResponse as any;
+      const migrationDetail: MigrationDetail = {
+        migrationId: response.migrationId,
+        sourceStore: response.sourceStore || 'Unknown',
+        destinationStore: response.destinationStore || 'Unknown',
+        startedAt: response.createdAt || response.startTime?.toString() || new Date().toISOString(),
+        completedAt: response.updatedAt || response.lastUpdated?.toString() || new Date().toISOString(),
+        status: response.status,
+        totalEntities: response.progress?.totalEntities || response.totalEntities || 0,
+        processedEntities: response.progress?.processedEntities || response.processedEntities || 0,
+        successfulEntities: response.progress?.completedEntities || response.successfulEntities || 0,
+        failedEntities: response.progress?.failedEntities || response.failedEntities || 0,
+        percentageCompleted: response.progress?.overallProgress || response.overallProgressPercentage || 0,
+        entities: response.entities || Object.keys(response.entityProgress || {}),
+      };
+
+      setMigration(migrationDetail);
+
+      // Fetch migration errors if there are any failures
+      if (response.failedEntities > 0) {
+        console.log('🔍 Fetching errors for failed entities:', response.failedEntities);
+        try {
+          // Try to fetch errors for each entity type
+          const allErrors: MigrationError[] = [];
           
-          <Button
-            size="small"
-            startIcon={<PlayIcon />} // Changed from VisibilityIcon to PlayIcon
-            onClick={() => onViewDetails(entityType)}
-          >
-            View Details
-          </Button>
-        </Box>
+          for (const entityType of response.entities || []) {
+            try {
+              console.log(`🔍 Fetching errors for entity type: ${entityType}`);
+              const errorsResponse = await apiService.getMigrationEntityErrors(requestId!, entityType);
+              console.log(`✅ Errors for ${entityType}:`, errorsResponse);
+              
+              // Transform errors to match our interface
+              if (Array.isArray(errorsResponse)) {
+                const entityErrors = errorsResponse.map((err: any) => ({
+                  entityId: err.entityId || 'Unknown',
+                  entityType: err.entityType || entityType,
+                  error: err.errorMessage || err.error || 'Unknown error',
+                  processedAt: err.timestamp || new Date().toISOString(),
+                }));
+                allErrors.push(...entityErrors);
+              } else if (errorsResponse && typeof errorsResponse === 'object' && 'errors' in errorsResponse && Array.isArray((errorsResponse as any).errors)) {
+                // Handle the case where errors are nested in a response object
+                const entityErrors = (errorsResponse as any).errors.map((err: any) => ({
+                  entityId: err.entityId || 'Unknown',
+                  entityType: err.entityType || entityType,
+                  error: err.errorMessage || err.error || 'Unknown error',
+                  processedAt: err.timestamp || new Date().toISOString(),
+                }));
+                allErrors.push(...entityErrors);
+              }
+            } catch (entityError) {
+              console.warn(`Failed to fetch errors for entity type ${entityType}:`, entityError);
+            }
+          }
+          
+          console.log('📊 Total errors found:', allErrors.length);
+          setErrors(allErrors);
+        } catch (error) {
+          console.warn('Failed to fetch migration errors:', error);
+          // Don't fail the whole request if errors can't be fetched
+        }
+      }
 
-        <Box sx={{ mb: 2 }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-            <Typography variant="body2">Progress</Typography>
-            <Typography variant="body2">{progress.progressPercentage.toFixed(1)}%</Typography>
-          </Box>
-          <LinearProgress
-            variant="determinate"
-            value={progress.progressPercentage}
-            color={getProgressColor()}
-            sx={{ height: 8, borderRadius: 4 }}
-          />
-        </Box>
-
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2 }}>
-          <Box>
-            <Typography variant="caption" color="text.secondary">Total</Typography>
-            <Typography variant="body2">{progress.totalCount.toLocaleString()}</Typography>
-          </Box>
-          <Box>
-            <Typography variant="caption" color="text.secondary">Processed</Typography>
-            <Typography variant="body2">{progress.processedCount.toLocaleString()}</Typography>
-          </Box>
-          <Box>
-            <Typography variant="caption" color="text.secondary">Success</Typography>
-            <Typography variant="body2" color="success.main">{progress.successCount.toLocaleString()}</Typography>
-          </Box>
-          <Box>
-            <Typography variant="caption" color="text.secondary">Errors</Typography>
-            <Typography variant="body2" color={progress.failureCount > 0 ? "error.main" : "inherit"}>
-              {progress.failureCount.toLocaleString()}
-            </Typography>
-          </Box>
-          <Box>
-            <Typography variant="caption" color="text.secondary">Processing Time</Typography>
-            <Typography variant="body2">{progress.processingTime.toFixed(1)}s</Typography>
-          </Box>
-        </Box>
-      </CardContent>
-    </Card>
-  );
-};
-
-const MigrationTimelineView: React.FC<{ migration: MigrationProgress }> = ({ migration }) => {
-  const theme = useTheme();
-  
-  // Mock timeline events (in real app, this would come from API)
-  const timelineEvents = [
-    {
-      time: '10:00:00',
-      title: 'Migration Started',
-      description: 'Migration initialization completed',
-      type: 'success',
-      icon: <PlayIcon />,
-    },
-    {
-      time: '10:05:30',
-      title: 'Categories Processing',
-      description: '1,250 categories processed successfully',
-      type: 'success',
-      icon: <CheckIcon />,
-    },
-    {
-      time: '10:12:15',
-      title: 'Products Processing Started',
-      description: 'Beginning product migration (15,000 items)',
-      type: 'info',
-      icon: <PlayIcon />, // Changed from InfoIcon to PlayIcon
-    },
-    {
-      time: '10:18:45',
-      title: 'Rate Limit Warning',
-      description: 'API rate limit approaching, throttling requests',
-      type: 'warning',
-      icon: <PlayIcon />, // Changed from WarningIcon to PlayIcon
-    },
-    {
-      time: '10:25:00',
-      title: 'Processing Error',
-      description: '3 product imports failed validation',
-      type: 'error',
-      icon: <ErrorIcon />,
-    },
-  ];
-
-  const getTimelineDotColor = (type: string) => {
-    switch (type) {
-      case 'success': return 'success';
-      case 'warning': return 'warning';
-      case 'error': return 'error';
-      default: return 'primary';
+    } catch (err) {
+      console.error('❌ Failed to fetch migration details:', err);
+      setError(err instanceof Error ? err.message : 'Failed to fetch migration details');
+    } finally {
+      setLoading(false);
     }
   };
 
-  return (
-    <Timeline>
-      {timelineEvents.map((event, index) => (
-        <TimelineItem key={index}>
-          <TimelineOppositeContent sx={{ m: 'auto 0' }}>
-            <Typography variant="body2" color="text.secondary">
-              {event.time}
-            </Typography>
-          </TimelineOppositeContent>
-          <TimelineSeparator>
-            <TimelineDot color={getTimelineDotColor(event.type)}>
-              {event.icon}
-            </TimelineDot>
-            {index < timelineEvents.length - 1 && <TimelineConnector />}
-          </TimelineSeparator>
-          <TimelineContent sx={{ py: '12px', px: 2 }}>
-            <Typography variant="h6" component="span">
-              {event.title}
-            </Typography>
-            <Typography color="text.secondary">{event.description}</Typography>
-          </TimelineContent>
-        </TimelineItem>
-      ))}
-    </Timeline>
-  );
-};
-
-const ErrorLogView: React.FC<{ migration: MigrationProgress }> = ({ migration }) => {
-  // Mock error data (in real app, this would come from API)
-  const errors = [
-    {
-      id: 1,
-      timestamp: '2024-01-15 10:25:00',
-      entityType: 'products',
-      entityId: 'prod_12345',
-      severity: 'error',
-      message: 'Product validation failed: Missing required field "description"',
-      details: 'Product ID prod_12345 failed validation during import process',
-      resolved: false,
-    },
-    {
-      id: 2,
-      timestamp: '2024-01-15 10:23:15',
-      entityType: 'products',
-      entityId: 'prod_12344',
-      severity: 'warning',
-      message: 'Image URL not accessible',
-      details: 'Product image URL returned 404, using placeholder image',
-      resolved: true,
-    },
-    {
-      id: 3,
-      timestamp: '2024-01-15 10:20:30',
-      entityType: 'categories',
-      entityId: 'cat_567',
-      severity: 'error',
-      message: 'Duplicate category name detected',
-      details: 'Category "Electronics" already exists in destination store',
-      resolved: false,
-    },
-  ];
-
-  const getSeverityColor = (severity: string) => {
-    switch (severity) {
-      case 'error': return 'error';
-      case 'warning': return 'warning';
-      default: return 'info';
+  const getStatusColor = (status: MigrationStatus) => {
+    switch (status) {
+      case 'completed': return 'success';
+      case 'running': return 'info';
+      case 'failed': return 'error';
+      case 'cancelled': return 'warning';
+      case 'pending': return 'default';
+      default: return 'default';
     }
   };
 
-  return (
-    <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-        <Typography variant="h6">Error Log</Typography>
-        <Button startIcon={<DownloadIcon />} size="small">
-          Export Log
-        </Button>
-      </Box>
-      
-      {errors.map((error) => (
-        <Card key={error.id} sx={{ mb: 1 }}>
-          <CardContent>
-            <Box sx={{ display: 'flex', alignItems: 'center', width: '100%' }}>
-              <Chip
-                size="small"
-                label={error.severity}
-                color={getSeverityColor(error.severity)}
-                sx={{ mr: 2 }}
-              />
-              <Typography sx={{ flex: 1 }}>{error.message}</Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mr: 2 }}>
-                {error.timestamp}
-              </Typography>
-              {error.resolved && (
-                <Chip size="small" label="Resolved" color="success" />
-              )}
-            </Box>
-          </CardContent>
-        </Card>
-      ))}
-    </Box>
-  );
-};
+  const getStatusIcon = (status: MigrationStatus) => {
+    switch (status) {
+      case 'completed': return <CheckCircleIcon />;
+      case 'running': return <ScheduleIcon />;
+      case 'failed': return <ErrorIcon />;
+      case 'cancelled': return <ErrorIcon />;
+      case 'pending': return <ScheduleIcon />;
+      default: return <ScheduleIcon />;
+    }
+  };
 
-export const MigrationDetailView: React.FC<MigrationDetailViewProps> = ({
-  migrationId,
-  onClose,
-  onAction,
-}) => {
-  const { state } = useDashboard();
-  const { activeMigrations } = state;
-  const [activeTab, setActiveTab] = useState(0);
-  const [entityDetailDialog, setEntityDetailDialog] = useState<string | null>(null);
+  const formatDate = (dateString: string) => {
+    try {
+      return format(new Date(dateString), 'EEE, dd-MMM-yyyy');
+    } catch {
+      return dateString;
+    }
+  };
 
-  const migration = activeMigrations.get(migrationId);
+  const formatDateTime = (dateString: string) => {
+    try {
+      return format(new Date(dateString), 'EEE, dd-MMM-yyyy HH:mm:ss');
+    } catch {
+      return dateString;
+    }
+  };
 
-  if (!migration) {
+  const calculateSuccessRate = () => {
+    if (!migration || migration.totalEntities === 0) return 0;
+    return Math.round((migration.successfulEntities / migration.totalEntities) * 100);
+  };
+
+  if (loading) {
     return (
-      <Card>
-        <CardContent>
-          <Typography variant="h6" color="error">
-            Migration not found: {migrationId}
-          </Typography>
-        </CardContent>
-      </Card>
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '400px' }}>
+        <CircularProgress />
+      </Box>
     );
   }
 
-  const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
-    setActiveTab(newValue);
-  };
+  if (error) {
+    return (
+      <Box sx={{ p: 3 }}>
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {error}
+        </Alert>
+        <Button
+          variant="outlined"
+          startIcon={<ArrowBackIcon />}
+          onClick={() => navigate('/history')}
+        >
+          Back to Migration History
+        </Button>
+      </Box>
+    );
+  }
 
-  const handleViewEntityDetails = (entityType: string) => {
-    setEntityDetailDialog(entityType);
-  };
+  if (!migration) {
+    return (
+      <Box sx={{ p: 3 }}>
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          Migration not found
+        </Alert>
+        <Button
+          variant="outlined"
+          startIcon={<ArrowBackIcon />}
+          onClick={() => navigate('/history')}
+        >
+          Back to Migration History
+        </Button>
+      </Box>
+    );
+  }
 
-  const handleAction = (action: string) => {
-    onAction?.(action, migrationId);
-  };
-
-  const formatTime = (seconds: number): string => {
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    const secs = Math.floor(seconds % 60);
-    
-    if (hours > 0) {
-      return `${hours}h ${minutes}m ${secs}s`;
-    } else if (minutes > 0) {
-      return `${minutes}m ${secs}s`;
-    } else {
-      return `${secs}s`;
-    }
-  };
+  const successRate = calculateSuccessRate();
+  const primaryEntityType = migration.entities.length > 0 ? migration.entities[0] : 'Unknown';
 
   return (
-    <Box>
-      {/* Header */}
+    <Box sx={{ p: 3 }}>
+      {/* Back Link */}
+      <Button
+        variant="outlined"
+        startIcon={<ArrowBackIcon />}
+        onClick={() => navigate('/history')}
+        sx={{
+          mb: 3,
+          textTransform: 'none',
+          fontWeight: 500,
+          borderColor: 'divider',
+        }}
+      >
+        Back to Migration History
+      </Button>
+
+      {/* Migration Detail Card */}
       <Card sx={{ mb: 3 }}>
-        <CardContent>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-            <Typography variant="h4">
-              Migration {migration.migrationId.slice(-8)}
-            </Typography>
-            
-            <Box sx={{ display: 'flex', gap: 1 }}>
-              <Button
-                startIcon={<RefreshIcon />}
-                onClick={() => handleAction('refresh')}
-                size="small"
-              >
-                Refresh
-              </Button>
-              {onClose && (
-                <IconButton onClick={onClose}>
-                  <CloseIcon />
-                </IconButton>
-              )}
-            </Box>
-          </Box>
-
-          {/* Status and Progress */}
-          <Box sx={{ display: 'flex', gap: 4, mb: 3 }}>
-            <Box>
-              <Typography variant="body2" color="text.secondary">Status</Typography>
-              <Chip label={migration.status.toUpperCase()} color="primary" />
-            </Box>
-            <Box>
-              <Typography variant="body2" color="text.secondary">Overall Progress</Typography>
-              <Typography variant="h6">{migration.overallProgressPercentage.toFixed(1)}%</Typography>
-            </Box>
-            <Box>
-              <Typography variant="body2" color="text.secondary">Elapsed Time</Typography>
-              <Typography variant="h6">{formatTime(migration.elapsedTime)}</Typography>
-            </Box>
-            <Box>
-              <Typography variant="body2" color="text.secondary">Processing Speed</Typography>
-              <Typography variant="h6">{migration.entitiesPerSecond.toFixed(1)}/s</Typography>
-            </Box>
-          </Box>
-
-          {/* Overall Progress Bar */}
-          <Box sx={{ mb: 2 }}>
-            <LinearProgress
-              variant="determinate"
-              value={migration.overallProgressPercentage}
-              sx={{ height: 12, borderRadius: 6 }}
-              color={migration.status === 'running' ? 'primary' : migration.status === 'completed' ? 'success' : 'inherit'}
+        <CardContent sx={{ p: 3 }}>
+          {/* Status and Entity */}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
+            <Chip
+              icon={getStatusIcon(migration.status)}
+              label={migration.status.charAt(0).toUpperCase() + migration.status.slice(1)}
+              color={getStatusColor(migration.status) as any}
+              sx={{ fontWeight: 600 }}
             />
+            <Typography variant="h5" sx={{ fontWeight: 600 }}>
+              {primaryEntityType.charAt(0).toUpperCase() + primaryEntityType.slice(1)}
+            </Typography>
+            <Box sx={{ ml: 'auto', p: 1, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+              <Typography variant="caption" color="text.secondary">
+                {migration.migrationId}
+              </Typography>
+            </Box>
           </Box>
 
-          {/* Current Phase */}
-          <Typography variant="body2" color="text.secondary">
-            Current Phase: {migration.currentPhase} - {migration.currentEntity}
-          </Typography>
+          {/* Migration Info */}
+          <Box sx={{ display: 'flex', gap: 4, mb: 3, flexWrap: 'wrap' }}>
+            <Box>
+              <Typography variant="body2" color="text.secondary">
+                <strong>Source:</strong> {migration.sourceStore}
+              </Typography>
+            </Box>
+            <Box>
+              <Typography variant="body2" color="text.secondary">
+                <strong>Destination:</strong> {migration.destinationStore}
+              </Typography>
+            </Box>
+            <Box>
+              <Typography variant="body2" color="text.secondary">
+                <strong>Created:</strong> {formatDate(migration.startedAt)}
+              </Typography>
+            </Box>
+            <Box>
+              <Typography variant="body2" color="text.secondary">
+                <strong>Updated:</strong> {formatDate(migration.completedAt)}
+              </Typography>
+            </Box>
+          </Box>
+
+          {/* Migration Summary */}
+          <Box sx={{ 
+            backgroundColor: 'primary.50', 
+            p: 2, 
+            borderRadius: 1, 
+            mb: 3,
+            border: '1px solid',
+            borderColor: 'primary.light',
+          }}>
+            <Typography variant="body2" color="primary.main" sx={{ mb: 2, fontWeight: 600 }}>
+              Migration {migration.status}: {migration.successfulEntities} successful, {migration.failedEntities} failed, {migration.totalEntities - migration.processedEntities} skipped
+            </Typography>
+          </Box>
+
+          {/* Statistics */}
+          <Stack direction="row" spacing={4} justifyContent="center" sx={{ py: 3 }}>
+            <Box sx={{ textAlign: 'center' }}>
+              <Typography variant="h2" color="success.main" sx={{ fontWeight: 700, fontSize: '3rem' }}>
+                {migration.successfulEntities}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Success
+              </Typography>
+            </Box>
+            <Box sx={{ textAlign: 'center' }}>
+              <Typography variant="h2" color="error.main" sx={{ fontWeight: 700, fontSize: '3rem' }}>
+                {migration.failedEntities}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Failed
+              </Typography>
+            </Box>
+            <Box sx={{ textAlign: 'center' }}>
+              <Typography variant="h2" color="primary.main" sx={{ fontWeight: 700, fontSize: '3rem' }}>
+                {migration.totalEntities}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Total
+              </Typography>
+            </Box>
+            <Box sx={{ textAlign: 'center' }}>
+              <Typography variant="h2" color="text.primary" sx={{ fontWeight: 700, fontSize: '3rem' }}>
+                {successRate}%
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Success Rate
+              </Typography>
+            </Box>
+          </Stack>
         </CardContent>
       </Card>
 
-      {/* Tabs */}
-      <Card>
-        <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
-          <Tabs value={activeTab} onChange={handleTabChange}>
-            <Tab label="Entity Progress" />
-            <Tab label="Timeline" />
-            <Tab label="Error Log" />
-            <Tab label="Configuration" />
-          </Tabs>
-        </Box>
+      {/* Failure Details - Show if there are errors or failed entities */}
+      {(errors.length > 0 || migration.failedEntities > 0) && (
+        <Card>
+          <CardContent sx={{ p: 0 }}>
+            <Box sx={{ p: 3, display: 'flex', alignItems: 'center', gap: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
+              <ErrorIcon sx={{ color: 'error.main' }} />
+              <Typography variant="h6" sx={{ fontWeight: 600, color: 'error.main' }}>
+                Failure Details ({migration.failedEntities} failed entities)
+              </Typography>
+            </Box>
 
-        <TabPanel value={activeTab} index={0}>
-          <Typography variant="h6" gutterBottom>
-            Entity Migration Progress
-          </Typography>
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {Object.entries(migration.entityProgress).map(([entityType, progress]) => (
-              <EntityDetailCard
-                key={entityType}
-                entityType={entityType}
-                progress={progress}
-                onViewDetails={handleViewEntityDetails}
-              />
-            ))}
-          </Box>
-        </TabPanel>
+            {errors.length > 0 ? (
+              <Table>
+                <TableHead>
+                  <TableRow sx={{ backgroundColor: 'background.default' }}>
+                    <TableCell sx={{ fontWeight: 600, py: 2 }}>EntityId</TableCell>
+                    <TableCell sx={{ fontWeight: 600, py: 2 }}>EntityType</TableCell>
+                    <TableCell sx={{ fontWeight: 600, py: 2 }}>Error</TableCell>
+                    <TableCell sx={{ fontWeight: 600, py: 2 }}>ProcessedAt</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {errors.map((failure, failureIndex) => (
+                    <TableRow key={failureIndex}>
+                      <TableCell sx={{ fontSize: '0.875rem' }}>{failure.entityId}</TableCell>
+                      <TableCell sx={{ fontSize: '0.875rem' }}>{failure.entityType}</TableCell>
+                      <TableCell sx={{ fontSize: '0.875rem', maxWidth: '400px' }}>
+                        <Typography variant="body2" sx={{ wordBreak: 'break-word' }}>
+                          {failure.error}
+                        </Typography>
+                      </TableCell>
+                      <TableCell sx={{ fontSize: '0.875rem' }}>{formatDateTime(failure.processedAt)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <Box sx={{ p: 3, textAlign: 'center' }}>
+                <Typography variant="body1" color="text.secondary" sx={{ mb: 2 }}>
+                  {migration.failedEntities} entities failed during migration, but detailed error information is not available.
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  This could be due to:
+                </Typography>
+                <Box component="ul" sx={{ textAlign: 'left', mt: 1, color: 'text.secondary' }}>
+                  <li>Errors not being logged to the database</li>
+                  <li>Error logging being disabled during migration</li>
+                  <li>Errors being cleared after migration completion</li>
+                </Box>
+              </Box>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
-        <TabPanel value={activeTab} index={1}>
-          <Typography variant="h6" gutterBottom>
-            Migration Timeline
-          </Typography>
-          <MigrationTimelineView migration={migration} />
-        </TabPanel>
-
-        <TabPanel value={activeTab} index={2}>
-          <ErrorLogView migration={migration} />
-        </TabPanel>
-
-        <TabPanel value={activeTab} index={3}>
-          <Typography variant="h6" gutterBottom>
-            Migration Configuration
-          </Typography>
-          <Alert severity="info" sx={{ mb: 2 }}>
-            Configuration details will be implemented in the next component.
-          </Alert>
-          <Typography variant="body2" color="text.secondary">
-            This section will show the migration configuration including source/destination stores,
-            entity selections, batch sizes, and migration options.
-          </Typography>
-        </TabPanel>
-      </Card>
-
-      {/* Entity Detail Dialog */}
-      <Dialog
-        open={!!entityDetailDialog}
-        onClose={() => setEntityDetailDialog(null)}
-        maxWidth="lg"
-        fullWidth
-      >
-        <DialogTitle>
-          {entityDetailDialog && `${entityDetailDialog.charAt(0).toUpperCase() + entityDetailDialog.slice(1)} Details`}
-        </DialogTitle>
-        <DialogContent>
-          <Alert severity="info" sx={{ mb: 2 }}>
-            Entity-specific detailed view will be implemented next.
-          </Alert>
-          <Typography variant="body2" color="text.secondary">
-            This dialog will show detailed information about the specific entity type including
-            individual item progress, error details, and processing logs.
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setEntityDetailDialog(null)}>Close</Button>
-        </DialogActions>
-      </Dialog>
+      {/* No Errors Message */}
+      {migration.failedEntities === 0 && errors.length === 0 && (
+        <Card>
+          <CardContent sx={{ p: 3, textAlign: 'center' }}>
+            <CheckCircleIcon sx={{ fontSize: 48, color: 'success.main', mb: 2 }} />
+            <Typography variant="h6" color="success.main" sx={{ mb: 1 }}>
+              No Failures
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              This migration completed successfully with no errors.
+            </Typography>
+          </CardContent>
+        </Card>
+      )}
     </Box>
   );
 }; 

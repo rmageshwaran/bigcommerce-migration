@@ -277,18 +277,18 @@ export class ApiService {
 
   /**
    * Get migration status by ID  
-   * Maps to: GET /api/migrations/{id}/status (MigrationQueryFunctions)
+   * Maps to: GET /api/migrations/{id}/status-http (MigrationHttpFunctions)
    */
   public async getMigrationStatus(migrationId: string): Promise<MigrationProgress> {
-    return this.get<MigrationProgress>(`/migrations/${migrationId}/status`);
+    return this.get<MigrationProgress>(`/migrations/${migrationId}/status-http`);
   }
 
   /**
    * Get detailed migration progress
-   * Maps to: GET /api/migrations/{id}/details (MigrationQueryFunctions)
+   * Maps to: GET /api/migrations/{id}/status-http (MigrationHttpFunctions)
    */
   public async getMigrationProgress(migrationId: string): Promise<MigrationProgress> {
-    return this.get<MigrationProgress>(`/migrations/${migrationId}/details`);
+    return this.get<MigrationProgress>(`/migrations/${migrationId}/status-http`);
   }
 
   /**

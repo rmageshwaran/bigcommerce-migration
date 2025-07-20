@@ -56,36 +56,17 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
         // Ensure custom_url structure exists and is valid
         EnsureCustomUrlStructure(transformed, categoryTreeContext, migrationId);
 
-        // Handle parent_id conversion - BigCommerce expects integer, but source might be string
+        // Apply parent_id mapping for hierarchical categories
         await HandleParentIdConversionAsync(transformed, migrationId, cancellationToken);
 
-        // Remove null values and any remaining invalid fields
-        RemoveNullValues(transformed);
+        // Remove fields that shouldn't be sent to BigCommerce API
         RemoveInvalidFields(transformed, migrationId);
 
-        // 🔍 DEBUG: Log the transformed category details before returning
-        var categoryName = transformed.GetValueOrDefault("name", "UNKNOWN").ToString();
-        var hasUrl = transformed.ContainsKey("url");
-        var hasTreeId = transformed.ContainsKey("tree_id");
-        
-        _logger.LogInformation("🔍 DEBUG: Transformed category '{CategoryName}' for migration {MigrationId} - hasUrl: {HasUrl}, hasTreeId: {HasTreeId}", 
-            categoryName, migrationId, hasUrl, hasTreeId);
-            
-        if (hasUrl && transformed["url"] is Dictionary<string, object> urlDict)
-        {
-            var hasPath = urlDict.ContainsKey("path");
-            var pathValue = hasPath ? urlDict["path"]?.ToString() : "MISSING";
-            var hasIsCustomized = urlDict.ContainsKey("is_customized");
-            
-            _logger.LogInformation("🔍 DEBUG: URL structure - hasPath: {HasPath}, path: '{PathValue}', hasIsCustomized: {HasIsCustomized}", 
-                hasPath, pathValue, hasIsCustomized);
-        }
-        else
-        {
-            _logger.LogWarning("🔍 DEBUG: URL structure is missing or invalid in transformed category for migration {MigrationId}", migrationId);
-        }
+        // Log transformed category details at debug level
+        _logger.LogDebug("Transformed category '{CategoryName}' for migration {MigrationId}",
+            transformed.GetValueOrDefault("name"), migrationId);
 
-        return await Task.FromResult(transformed);
+        return transformed;
     }
 
     /// <summary>
@@ -361,12 +342,12 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
     {
         if (transformed.TryGetValue("parent_id", out var parentId))
         {
-            _logger.LogInformation("🔍 DEBUG: HandleParentIdConversionAsync - processing parent_id: {ParentId} (type: {ParentIdType}) for migration {MigrationId}", 
+            _logger.LogDebug("🔍 DEBUG: HandleParentIdConversionAsync - processing parent_id: {ParentId} (type: {ParentIdType}) for migration {MigrationId}", 
                 parentId, parentId?.GetType().Name, migrationId);
                 
             if (parentId is string parentIdString)
             {
-                _logger.LogInformation("🔍 DEBUG: Looking up mapping for parent_id string '{ParentIdString}' in migration {MigrationId}", 
+                _logger.LogDebug("🔍 DEBUG: Looking up mapping for parent_id string '{ParentIdString}' in migration {MigrationId}", 
                     parentIdString, migrationId);
                     
                 var mappedParentId = await _entityMappingService.GetDestinationIdAsync(
@@ -375,35 +356,31 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
                     parentIdString,
                     cancellationToken);
 
-                _logger.LogInformation("🔍 DEBUG: Mapping lookup result for parent_id '{ParentIdString}': '{MappedParentId}' in migration {MigrationId}", 
+                _logger.LogDebug("🔍 DEBUG: Mapping lookup result for parent_id '{ParentIdString}': '{MappedParentId}' in migration {MigrationId}", 
                     parentIdString, mappedParentId ?? "NULL", migrationId);
 
                 if (!string.IsNullOrEmpty(mappedParentId) && int.TryParse(mappedParentId, out var parsedMappedId))
                 {
                     transformed["parent_id"] = parsedMappedId;
-                    _logger.LogInformation("🔍 DEBUG: ✅ Successfully mapped parent_id {ParentIdString} to {MappedParentId} for migration {MigrationId}", 
+                    _logger.LogDebug("🔍 DEBUG: ✅ Successfully mapped parent_id {ParentIdString} to {MappedParentId} for migration {MigrationId}", 
                         parentIdString, parsedMappedId, migrationId);
+                }
+                else if (int.TryParse(parentIdString, out var parsedOriginal))
+                {
+                    transformed["parent_id"] = parsedOriginal;
+                    _logger.LogDebug("No mapping found for parent_id {ParentIdString}, using original value {ParsedOriginal} for migration {MigrationId}",
+                        parentIdString, parsedOriginal, migrationId);
                 }
                 else
                 {
-                    // If no mapping found, try to parse the original value as fallback
-                    if (int.TryParse(parentIdString, out var parsedOriginal))
-                    {
-                        transformed["parent_id"] = parsedOriginal;
-                        _logger.LogWarning("🔍 DEBUG: ❌ No mapping found for parent_id {ParentIdString}, using original value {ParsedOriginal} for migration {MigrationId}", 
-                            parentIdString, parsedOriginal, migrationId);
-                    }
-                    else
-                    {
-                        transformed["parent_id"] = 0;
-                        _logger.LogWarning("🔍 DEBUG: ❌ Parent_id {ParentIdString} not found in mapping and cannot be parsed, treating as root category for migration {MigrationId}", 
-                            parentIdString, migrationId);
-                    }
+                    transformed["parent_id"] = 0;
+                    _logger.LogDebug("Parent_id {ParentIdString} not found in mapping and cannot be parsed, treating as root category for migration {MigrationId}",
+                        parentIdString, migrationId);
                 }
             }
             else if (parentId is int parentIdInt)
             {
-                _logger.LogInformation("🔍 DEBUG: Looking up mapping for parent_id int '{ParentIdInt}' in migration {MigrationId}", 
+                _logger.LogDebug("🔍 DEBUG: Looking up mapping for parent_id int '{ParentIdInt}' in migration {MigrationId}", 
                     parentIdInt, migrationId);
                     
                 // Try to map the integer parent_id to destination store
@@ -413,20 +390,19 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
                     parentIdInt.ToString(),
                     cancellationToken);
 
-                _logger.LogInformation("🔍 DEBUG: Mapping lookup result for parent_id '{ParentIdInt}': '{MappedParentId}' in migration {MigrationId}", 
+                _logger.LogDebug("🔍 DEBUG: Mapping lookup result for parent_id '{ParentIdInt}': '{MappedParentId}' in migration {MigrationId}", 
                     parentIdInt, mappedParentId ?? "NULL", migrationId);
 
                 if (!string.IsNullOrEmpty(mappedParentId) && int.TryParse(mappedParentId, out var parsedMappedId))
                 {
                     transformed["parent_id"] = parsedMappedId;
-                    _logger.LogInformation("🔍 DEBUG: ✅ Successfully mapped parent_id {ParentIdInt} to {MappedParentId} for migration {MigrationId}", 
+                    _logger.LogDebug("🔍 DEBUG: ✅ Successfully mapped parent_id {ParentIdInt} to {MappedParentId} for migration {MigrationId}", 
                         parentIdInt, parsedMappedId, migrationId);
                 }
                 else
                 {
-                    // If no mapping found, use original value
-                    transformed["parent_id"] = parentIdInt;
-                    _logger.LogWarning("🔍 DEBUG: ❌ No mapping found for parent_id {ParentIdInt}, using original value for migration {MigrationId}", 
+                    // Keep original value if no mapping found
+                    _logger.LogDebug("No mapping found for parent_id {ParentIdInt}, using original value for migration {MigrationId}",
                         parentIdInt, migrationId);
                 }
             }
@@ -434,7 +410,7 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
         else
         {
             transformed["parent_id"] = 0;
-            _logger.LogInformation("🔍 DEBUG: No parent_id found in entity, setting to 0 (root category) for migration {MigrationId}", migrationId);
+            _logger.LogDebug("🔍 DEBUG: No parent_id found in entity, setting to 0 (root category) for migration {MigrationId}", migrationId);
         }
     }
 

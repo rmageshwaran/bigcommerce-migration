@@ -68,8 +68,8 @@ public class ProcessEntityBatchActivity
         var stopwatch = Stopwatch.StartNew();
         
         // ✅ DEBUG: Log what we're receiving at the activity level
-        _logger.LogWarning("🔍 DEBUG: ProcessEntityBatchActivity received - EntityType: {EntityType}, BatchNumber: {BatchNumber}, EntityIds: [{EntityIds}], CachedDataCount: {CachedDataCount}",
-            request.EntityType, request.BatchNumber, string.Join(", ", request.EntityIds), request.CachedEntityData?.Count ?? 0);
+        _logger.LogDebug("ProcessEntityBatchActivity - EntityType: {EntityType}, BatchNumber: {BatchNumber}, EntityIds: [{EntityIds}], CachedDataCount: {CachedDataCount}",
+            request.EntityType, request.BatchNumber, string.Join(", ", request.EntityIds ?? new List<string>()), request.CachedEntityData?.Count ?? 0);
         
         var result = new BatchProcessingResult
         {
@@ -273,44 +273,15 @@ public class ProcessEntityBatchActivity
                     // Create and store entity mapping
                     var createdEntity = createdEntities.First();
                     
-                    // 🔍 DEBUG: Log the created entity structure to understand the API response
-                    _logger.LogInformation("🔍 DEBUG: Created entity structure from BigCommerce API: {CreatedEntity} for {EntityType} in migration {MigrationId}",
+                    // Log the created entity structure for troubleshooting (debug level)
+                    _logger.LogDebug("Created entity from BigCommerce API: {CreatedEntity} for {EntityType} in migration {MigrationId}",
                         System.Text.Json.JsonSerializer.Serialize(createdEntity), request.EntityType, request.MigrationId);
                     
                     var mapping = _entityMappingService.CreateEntityMapping(entity, createdEntity, request);
                     result.EntityMappings.Add(mapping);
 
-                    // 🔍 DEBUG: Log the entity mapping details for troubleshooting  
-                    var sourceId = entity.GetValueOrDefault("id")?.ToString() ?? "UNKNOWN";
-                    
-                    // Use the same ID extraction logic as the EntityMappingService for consistency
-                    var destinationId = "UNKNOWN";
-                    try 
-                    {
-                        // For categories, try category_id first, then fallback to id
-                        if (request.EntityType.Equals("categories", StringComparison.OrdinalIgnoreCase))
-                        {
-                            destinationId = createdEntity.GetValueOrDefault("category_id")?.ToString() ?? 
-                                          createdEntity.GetValueOrDefault("id")?.ToString() ?? "UNKNOWN";
-                        }
-                        else
-                        {
-                            destinationId = createdEntity.GetValueOrDefault("id")?.ToString() ?? "UNKNOWN";
-                        }
-                    }
-                    catch 
-                    {
-                        destinationId = "ERROR";
-                    }
-                    
-                    _logger.LogInformation("🔍 DEBUG: Creating entity mapping - SourceId: {SourceId} → DestinationId: {DestinationId} for {EntityType} in migration {MigrationId}",
-                        sourceId, destinationId, request.EntityType, request.MigrationId);
-
                     // Store mapping immediately for hierarchy relationships
                     await _entityMappingService.StoreEntityMappingAsync(mapping, cancellationToken);
-
-                    _logger.LogInformation("🔍 DEBUG: ✅ Successfully stored entity mapping - SourceId: {SourceId} → DestinationId: {DestinationId} for {EntityType} in migration {MigrationId}",
-                        sourceId, destinationId, request.EntityType, request.MigrationId);
 
                     _logger.LogDebug("Successfully processed {EntityType} {EntityId} in migration {MigrationId}",
                         request.EntityType, originalEntityId, request.MigrationId);

@@ -36,8 +36,8 @@ public class CategoryFetchStrategy : IEntityFetchStrategy
         _logger.LogInformation("Fetching {Count} specific categories for migration {MigrationId}", 
             entityIds.Count, migrationId);
         
-        // 🔍 DEBUG: Show requested entity IDs for troubleshooting
-        _logger.LogInformation("🔍 DEBUG: Requested category IDs: [{EntityIds}] for migration {MigrationId}",
+        // Log requested entity IDs for debugging
+        _logger.LogDebug("Requested category IDs: [{EntityIds}] for migration {MigrationId}",
             string.Join(", ", entityIds), migrationId);
 
         // Determine category tree ID for fetching
@@ -63,16 +63,19 @@ public class CategoryFetchStrategy : IEntityFetchStrategy
 
         var allCategories = response.Data ?? new List<Dictionary<string, object>>();
 
-        _logger.LogInformation("🔍 DEBUG: API returned {TotalCount} categories from tree {TreeId}", 
+        _logger.LogDebug("API returned {TotalCount} categories from tree {TreeId}",
             allCategories.Count, categoryTreeId);
-        
-        foreach (var cat in allCategories)
+
+        if (_logger.IsEnabled(LogLevel.Debug))
         {
-            var id = cat.GetValueOrDefault("id")?.ToString() ?? "unknown";
-            var name = cat.GetValueOrDefault("name")?.ToString() ?? "unknown";
-            var parentId = cat.GetValueOrDefault("parent_id");
-            _logger.LogInformation("🔍 DEBUG: - Category ID: {Id}, Name: '{Name}', ParentId: {ParentId}", 
-                id, name, parentId);
+            foreach (var cat in allCategories)
+            {
+                var id = cat.GetValueOrDefault("id")?.ToString() ?? "unknown";
+                var name = cat.GetValueOrDefault("name")?.ToString() ?? "unknown";
+                var parentId = cat.GetValueOrDefault("parent_id");
+                _logger.LogDebug("- Category ID: {Id}, Name: '{Name}', ParentId: {ParentId}",
+                    id, name, parentId);
+            }
         }
 
         // ✅ HIERARCHICAL SORTING: Sort categories so parents come before children
@@ -84,14 +87,17 @@ public class CategoryFetchStrategy : IEntityFetchStrategy
             .Where(cat => requestedEntityIdsSet.Contains(cat.GetValueOrDefault("id")?.ToString() ?? ""))
             .ToList();
 
-        _logger.LogInformation("🔍 DEBUG: After hierarchical sorting and filtering, found {Count} matching categories:",
+        _logger.LogDebug("After hierarchical sorting and filtering, found {Count} matching categories:",
             filteredCategories.Count);
-        
-        foreach (var cat in filteredCategories)
+
+        if (_logger.IsEnabled(LogLevel.Debug))
         {
-            var id = cat.GetValueOrDefault("id")?.ToString() ?? "unknown";
-            var name = cat.GetValueOrDefault("name")?.ToString() ?? "unknown";
-            _logger.LogInformation("🔍 DEBUG: - Sorted Category ID: {Id}, Name: '{Name}'", id, name);
+            foreach (var cat in filteredCategories)
+            {
+                var id = cat.GetValueOrDefault("id")?.ToString() ?? "unknown";
+                var name = cat.GetValueOrDefault("name")?.ToString() ?? "unknown";
+                _logger.LogDebug("- Sorted Category ID: {Id}, Name: '{Name}'", id, name);
+            }
         }
 
         // Add original entity ID tracking for error reporting

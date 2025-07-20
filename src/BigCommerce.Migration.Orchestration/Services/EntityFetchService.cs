@@ -39,7 +39,7 @@ public class EntityFetchService : IEntityFetchService
             request.EntityType, request.BatchNumber, request.MigrationId);
 
         // ✅ DEBUG: Log the decision-making process for debugging
-        _logger.LogInformation("🔍 DEBUG: EntityFetchService decision - UseDirectPagination: {UseDirectPagination}, HasEntityIds: {HasEntityIds}, CachedDataCount: {CachedDataCount}",
+        _logger.LogDebug("EntityFetchService decision - UseDirectPagination: {UseDirectPagination}, HasEntityIds: {HasEntityIds}, CachedDataCount: {CachedDataCount}",
             request.UseDirectPagination, request.EntityIds?.Any() ?? false, request.CachedEntityData?.Count ?? 0);
 
         try

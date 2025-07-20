@@ -264,10 +264,6 @@ public class EntityMappingService : IEntityMappingService
         if (entity == null || entity.Count == 0)
             throw new ArgumentException("Entity cannot be null or empty");
 
-        // 🔍 DEBUG: Log the entity structure for troubleshooting
-        var availableKeys = string.Join(", ", entity.Keys);
-        Console.WriteLine($"🔍 DEBUG: ExtractId for {entityType} - Available keys: [{availableKeys}]");
-
         // Define entity-specific ID field names
         var idFieldMappings = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
         {
@@ -282,35 +278,33 @@ public class EntityMappingService : IEntityMappingService
             ["shipping_methods"] = new[] { "shipping_method_id", "id", "Id", "ID" },
             ["payment_methods"] = new[] { "payment_method_id", "id", "Id", "ID" },
             ["tax_classes"] = new[] { "tax_class_id", "id", "Id", "ID" },
-            ["tax_rates"] = new[] { "tax_rate_id", "id", "Id", "ID" },
-            ["product_options"] = new[] { "product_option_id", "id", "Id", "ID" },
-            ["product_option_values"] = new[] { "product_option_value_id", "id", "Id", "ID" },
-            ["product_variants"] = new[] { "variant_id", "id", "Id", "ID" },
-            ["product_images"] = new[] { "image_id", "id", "Id", "ID" },
-            ["product_custom_fields"] = new[] { "custom_field_id", "id", "Id", "ID" },
-            ["product_bulk_pricing_rules"] = new[] { "bulk_pricing_rule_id", "id", "Id", "ID" },
-            ["product_metafields"] = new[] { "metafield_id", "id", "Id", "ID" },
-            ["category_metafields"] = new[] { "metafield_id", "id", "Id", "ID" },
-            ["brand_metafields"] = new[] { "metafield_id", "id", "Id", "ID" },
-            ["customer_metafields"] = new[] { "metafield_id", "id", "Id", "ID" },
-            ["order_metafields"] = new[] { "metafield_id", "id", "Id", "ID" }
+            ["coupons"] = new[] { "coupon_id", "id", "Id", "ID" },
+            ["redirects"] = new[] { "redirect_id", "id", "Id", "ID" },
+            ["wishlist"] = new[] { "wishlist_id", "id", "Id", "ID" },
+            ["gift_certificates"] = new[] { "gift_certificate_id", "id", "Id", "ID" },
+            ["pages"] = new[] { "page_id", "id", "Id", "ID" },
+            ["blog_posts"] = new[] { "blog_post_id", "id", "Id", "ID" },
+            ["blog_tags"] = new[] { "blog_tag_id", "id", "Id", "ID" },
+            ["banner"] = new[] { "banner_id", "id", "Id", "ID" },
+            ["newsletter_subscribers"] = new[] { "subscriber_id", "id", "Id", "ID" }
         };
 
-        // Get the possible ID fields for this entity type, or fall back to generic ones
-        var possibleIdFields = idFieldMappings.TryGetValue(entityType, out var fields) 
+        var possibleIdFields = idFieldMappings.TryGetValue(entityType.ToLowerInvariant(), out var fields)
             ? fields 
             : new[] { "id", "Id", "ID" };
-        
+
         foreach (var field in possibleIdFields)
         {
-            if (entity.TryGetValue(field, out var id) && id != null)
+            if (entity.TryGetValue(field, out var value) && value != null)
             {
-                Console.WriteLine($"🔍 DEBUG: ExtractId for {entityType} - Found ID field '{field}' = '{id}'");
-                return id.ToString()!;
+                var id = value.ToString();
+                if (!string.IsNullOrWhiteSpace(id))
+                {
+                    return id;
+                }
             }
         }
 
-        Console.WriteLine($"🔍 DEBUG: ExtractId for {entityType} - No ID field found! Tried: [{string.Join(", ", possibleIdFields)}]");
         throw new InvalidOperationException($"Entity is missing ID field for entity type '{entityType}'. Available keys: {string.Join(", ", entity.Keys)}");
     }
 } 

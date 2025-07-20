@@ -105,23 +105,27 @@ public class BigCommerceApiClient : IBigCommerceApiClient
         // Reference: https://developer.bigcommerce.com/docs/rest-catalog/category-trees/categories#create-categories
         var url = $"{storeConfig.GetApiBaseUrl()}/catalog/trees/categories";
         
-        // Categories are already properly formatted by the transformation layer
+        _logger.LogDebug("Creating {Count} categories for tree {TreeId} in store {StoreId}", 
+            categories.Count, categoryTreeId, storeConfig.StoreId);
+
+        // Serialize categories to JSON for the API call
         var jsonContent = JsonSerializer.Serialize(categories);
+        _logger.LogDebug("Category creation payload: {JsonPayload}", jsonContent);
         
-        // 🔍 DEBUG: Log the exact JSON payload being sent to BigCommerce
-        _logger.LogInformation("🔍 DEBUG: Sending category creation payload to BigCommerce: {JsonPayload}", jsonContent);
-        
-        // Also log individual category details for debugging
-        for (int i = 0; i < categories.Count; i++)
+        // Log category details at debug level if needed
+        if (_logger.IsEnabled(LogLevel.Debug))
         {
-            var category = categories[i];
-            var hasUrl = category.ContainsKey("url");
-            var urlDetails = hasUrl ? category["url"]?.ToString() : "MISSING";
-            var hasTreeId = category.ContainsKey("tree_id");
-            var treeIdValue = hasTreeId ? category["tree_id"]?.ToString() : "MISSING";
-            
-            _logger.LogInformation("🔍 DEBUG: Category[{Index}] - name: {Name}, url: {UrlDetails}, tree_id: {TreeId}, hasUrl: {HasUrl}, hasTreeId: {HasTreeId}", 
-                i, category.GetValueOrDefault("name", "UNKNOWN"), urlDetails, treeIdValue, hasUrl, hasTreeId);
+            for (int i = 0; i < categories.Count; i++)
+            {
+                var category = categories[i];
+                var name = category.GetValueOrDefault("name");
+                var treeId = category.GetValueOrDefault("tree_id");
+                var hasUrl = category.ContainsKey("url");
+                var hasTreeId = category.ContainsKey("tree_id");
+                
+                _logger.LogDebug("Category[{Index}] - name: {Name}, tree_id: {TreeId}, hasUrl: {HasUrl}, hasTreeId: {HasTreeId}",
+                    i, name, treeId, hasUrl, hasTreeId);
+            }
         }
 
         try

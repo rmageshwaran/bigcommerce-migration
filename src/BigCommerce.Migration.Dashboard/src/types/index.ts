@@ -203,6 +203,16 @@ export interface PaginatedResponse<T> {
   totalPages: number;
 }
 
+export interface MigrationHistoryResponse {
+  migrations: any[];
+  totalCount: number;
+  pageSize: number;
+  currentPage: number;
+  totalPages: number;
+  hasMorePages: boolean;
+  message: string;
+}
+
 // Error Types
 export interface DashboardError {
   code: string;

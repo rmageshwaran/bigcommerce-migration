@@ -37,7 +37,7 @@ import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
 import { apiService } from '../../services/apiService';
-import type { MigrationStatus } from '../../types';
+import type { MigrationStatus, MigrationHistoryResponse } from '../../types';
 
 interface MigrationHistoryItem {
   migrationId: string;
@@ -54,16 +54,6 @@ interface MigrationHistoryItem {
   entities: string[];
 }
 
-interface MigrationHistoryResponse {
-  migrations: MigrationHistoryItem[];
-  totalCount: number;
-  pageSize: number;
-  currentPage: number;
-  totalPages: number;
-  hasMorePages: boolean;
-  message: string;
-}
-
 interface FilterState {
   startDate: Date | null;
   endDate: Date | null;
@@ -75,7 +65,7 @@ interface FilterState {
 }
 
 const initialFilters: FilterState = {
-  startDate: subDays(new Date(), 7),
+  startDate: subDays(new Date(), 30), // Show last 30 days instead of 7
   endDate: new Date(),
   requestId: '',
   status: '',
@@ -124,10 +114,12 @@ export const HistoryView: React.FC = () => {
     };
 
     if (filters.startDate) {
-      params.startDate = filters.startDate.toISOString();
+      // Format as ISO 8601 without timezone offset for better backend compatibility
+      params.startDate = format(filters.startDate, "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'");
     }
     if (filters.endDate) {
-      params.endDate = endOfDay(filters.endDate).toISOString();
+      // Format end date as end of day in ISO 8601 format
+      params.endDate = format(endOfDay(filters.endDate), "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'");
     }
     if (filters.requestId.trim()) {
       params.migrationId = filters.requestId.trim();
@@ -154,17 +146,24 @@ export const HistoryView: React.FC = () => {
 
     try {
       const queryParams = buildQueryParams();
-      const response = await apiService.getMigrationHistory(queryParams);
+      console.log('🔍 Fetching migration history with params:', queryParams);
       
-      setMigrations(response.data || []);
+      const response = await apiService.getMigrationHistory(queryParams);
+      console.log('✅ Migration history response:', response);
+      
+      // The API returns { migrations: [], totalCount: 0, ... }
+      const migrationData = response.migrations || [];
+      console.log('📊 Migration data to display:', migrationData);
+      
+      setMigrations(migrationData);
       setPagination(prev => ({
         ...prev,
-        currentPage: response.page || 1,
+        currentPage: response.currentPage || 1,
         totalPages: response.totalPages || 1,
         totalCount: response.totalCount || 0,
       }));
     } catch (err) {
-      console.error('Failed to fetch migration history:', err);
+      console.error('❌ Failed to fetch migration history:', err);
       setError(err instanceof Error ? err.message : 'Failed to fetch migration history');
       setMigrations([]);
     } finally {

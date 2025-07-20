@@ -321,7 +321,7 @@ export const MigrationStartForm: React.FC = () => {
       {/* Store Configuration */}
       <Card sx={{ mb: 4 }}>
         <CardContent sx={{ p: 3 }}>
-          <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 3, alignItems: { md: 'center' } }}>
+          <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 3, alignItems: { md: 'flex-end' } }}>
             <Box sx={{ flex: '0 0 auto', minWidth: { md: '150px' } }}>
               <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
                 Source
@@ -408,7 +408,7 @@ export const MigrationStartForm: React.FC = () => {
               </FormControl>
             </Box>
 
-            <Box sx={{ flex: '0 0 auto', textAlign: { xs: 'center', md: 'right' } }}>
+            <Box sx={{ flex: '0 0 auto', textAlign: { xs: 'center', md: 'right' }, display: 'flex', alignItems: 'flex-end' }}>
               <Button
                 variant="contained"
                 startIcon={<ArrowForwardIcon />}
@@ -418,8 +418,11 @@ export const MigrationStartForm: React.FC = () => {
                   textTransform: 'none',
                   fontWeight: 600,
                   px: 3,
-                  py: 1,
+                  py: 1.5,
                   borderRadius: '6px',
+                  height: 40, // Match the height of small input fields
+                  whiteSpace: 'nowrap',
+                  fontSize: '0.875rem',
                 }}
               >
                 {loading ? 'Starting...' : 'Start the Migration'}

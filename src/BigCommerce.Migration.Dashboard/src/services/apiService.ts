@@ -7,7 +7,8 @@ import type {
   QueueStatusData,
   MigrationStatistics,
   ApiResponse,
-  PaginatedResponse
+  PaginatedResponse,
+  MigrationHistoryResponse
 } from '../types';
 
 // ===== API ENDPOINT MAPPING =====
@@ -354,10 +355,10 @@ export class ApiService {
    * Get migration history
    * Maps to: GET /api/migrations/history (MigrationHttpFunctions)
    */
-  public async getMigrationHistory(queryParams?: Record<string, string>): Promise<PaginatedResponse<any>> {
+  public async getMigrationHistory(queryParams?: Record<string, string>): Promise<MigrationHistoryResponse> {
     const params = queryParams ? new URLSearchParams(queryParams).toString() : '';
     const url = params ? `/migrations/history?${params}` : '/migrations/history';
-    return this.get<PaginatedResponse<any>>(url);
+    return this.get<MigrationHistoryResponse>(url);
   }
 
   /**

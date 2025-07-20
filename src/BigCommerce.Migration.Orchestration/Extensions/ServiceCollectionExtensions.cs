@@ -75,7 +75,8 @@ public static class ServiceCollectionExtensions
         
         // Register services as singleton for better performance and test consistency
         services.TryAddSingleton<ICategoryTreeResolver, CategoryTreeResolver>();
-        services.TryAddSingleton<IOpenSearchService, OpenSearchService>();
+        // Note: IOpenSearchService is registered in the Functions project with conditional logic
+        // Don't register it here to avoid conflicts
         
         // Register API request handler for HTTP concerns (required by BigCommerceApiClient)
         services.TryAddSingleton<IApiRequestHandler, ApiRequestHandler>();
@@ -111,6 +112,9 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IEntityCreateService, EntityCreateService>();
         services.TryAddSingleton<IEntityMappingService, EntityMappingService>();
         services.TryAddSingleton<IEntityErrorHandlingService, EntityErrorHandlingService>();
+        
+        // ✅ Register error message formatter (SOLID: Single Responsibility)
+        services.TryAddSingleton<IErrorMessageFormatter, ErrorMessageFormatter>();
         
         // Register entity discovery strategy pattern implementations (Task 2.3.3 - COMPLETED)
         services.TryAddSingleton<IEntityDiscoveryStrategyFactory, EntityDiscoveryStrategyFactory>();

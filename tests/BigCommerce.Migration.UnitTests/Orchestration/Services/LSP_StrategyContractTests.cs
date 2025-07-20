@@ -17,7 +17,12 @@ namespace BigCommerce.Migration.UnitTests.Orchestration.Services;
 public class LSP_StrategyContractTests
 {
     private readonly Mock<IBigCommerceApiClient> _mockApiClient;
-    private readonly Mock<ILogger> _mockLogger;
+    private readonly Mock<ILogger<CategoryFetchStrategy>> _mockCategoryLogger;
+    private readonly Mock<ILogger<ProductFetchStrategy>> _mockProductLogger;
+    private readonly Mock<ILogger<BrandFetchStrategy>> _mockBrandLogger;
+    private readonly Mock<ILogger<VariantFetchStrategy>> _mockVariantLogger;
+    private readonly Mock<ILogger<ImageFetchStrategy>> _mockImageLogger;
+    private readonly Mock<ILogger<ModifierFetchStrategy>> _mockModifierLogger;
 
     private readonly StoreConfiguration _testStoreConfig;
     private readonly List<string> _testEntityIds;
@@ -26,7 +31,12 @@ public class LSP_StrategyContractTests
     public LSP_StrategyContractTests()
     {
         _mockApiClient = new Mock<IBigCommerceApiClient>();
-        _mockLogger = new Mock<ILogger>();
+        _mockCategoryLogger = new Mock<ILogger<CategoryFetchStrategy>>();
+        _mockProductLogger = new Mock<ILogger<ProductFetchStrategy>>();
+        _mockBrandLogger = new Mock<ILogger<BrandFetchStrategy>>();
+        _mockVariantLogger = new Mock<ILogger<VariantFetchStrategy>>();
+        _mockImageLogger = new Mock<ILogger<ImageFetchStrategy>>();
+        _mockModifierLogger = new Mock<ILogger<ModifierFetchStrategy>>();
 
         _testStoreConfig = new StoreConfiguration
         {
@@ -47,12 +57,12 @@ public class LSP_StrategyContractTests
     {
         return new List<IEntityFetchStrategy>
         {
-            new CategoryFetchStrategy(_mockApiClient.Object, _mockLogger.Object),
-            new ProductFetchStrategy(_mockApiClient.Object, _mockLogger.Object),
-            new BrandFetchStrategy(_mockApiClient.Object, _mockLogger.Object),
-            new VariantFetchStrategy(_mockApiClient.Object, _mockLogger.Object),
-            new ImageFetchStrategy(_mockApiClient.Object, _mockLogger.Object),
-            new ModifierFetchStrategy(_mockApiClient.Object, _mockLogger.Object)
+            new CategoryFetchStrategy(_mockApiClient.Object, _mockCategoryLogger.Object),
+            new ProductFetchStrategy(_mockApiClient.Object, _mockProductLogger.Object),
+            new BrandFetchStrategy(_mockApiClient.Object, _mockBrandLogger.Object),
+            new VariantFetchStrategy(_mockApiClient.Object, _mockVariantLogger.Object),
+            new ImageFetchStrategy(_mockApiClient.Object, _mockImageLogger.Object),
+            new ModifierFetchStrategy(_mockApiClient.Object, _mockModifierLogger.Object)
         };
     }
 
@@ -400,12 +410,27 @@ public class LSP_StrategyContractTests
             constructorSignatures.Add(parameterTypes);
         }
 
-        // Assert - LSP VALIDATION: All strategies should have identical constructor signatures
+        // Assert - LSP VALIDATION: All strategies should have consistent constructor signatures
         var firstSignature = constructorSignatures.First();
         foreach (var signature in constructorSignatures)
         {
-            signature.Should().BeEquivalentTo(firstSignature, 
-                "LSP Violation: All strategy implementations must have identical constructor signatures");
+            signature.Should().HaveCount(firstSignature.Length, 
+                "LSP Violation: All strategy implementations must have the same number of constructor parameters");
+            
+            // Check that parameter types match (except for logger which can be strategy-specific)
+            for (int i = 0; i < firstSignature.Length; i++)
+            {
+                if (i == 1) // Logger parameter (second parameter)
+                {
+                    // Logger types can be different for each strategy (ILogger<StrategyType>)
+                    // Skip logger type validation as they can be strategy-specific
+                }
+                else
+                {
+                    signature[i].Should().Be(firstSignature[i], 
+                        $"Parameter {i} should have the same type across all strategies");
+                }
+            }
         }
 
         // Validate expected dependencies

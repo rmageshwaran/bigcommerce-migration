@@ -69,8 +69,14 @@ public class EntityCreateService : IEntityCreateService
             _logger.LogError(ex, "❌ [EXEC-{ExecutionId}] Failed to create {EntityType} entities for migration {MigrationId}", 
                 executionId, request.EntityType, request.MigrationId);
             
-            // ⚠️ This could cause Durable Functions replay - let's not throw here
-            // Instead, return empty list and let individual error handling manage the errors
+            // ✅ Store error details in the request context for later error logging
+            // This preserves the original exception without throwing (prevents replay)
+            request.AdditionalData["_api_error_message"] = ex.Message;
+            request.AdditionalData["_api_exception"] = ex;
+            request.AdditionalData["_api_stack_trace"] = ex.StackTrace ?? string.Empty;
+            request.AdditionalData["_api_inner_exception"] = ex.InnerException?.Message ?? string.Empty;
+            
+            // Return empty list to prevent replay
             _logger.LogWarning("🔄 [EXEC-{ExecutionId}] Returning empty result instead of throwing exception to prevent replay", executionId);
             return new List<Dictionary<string, object>>();
         }

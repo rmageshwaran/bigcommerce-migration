@@ -90,11 +90,22 @@ public class EntityErrorHandlingService : IEntityErrorHandlingService
             };
 
             // Log to OpenSearch for structured analysis
-            await _openSearchService.LogErrorAsync(
+            var logResult = await _openSearchService.LogErrorAsync(
                 $"MigrationError_{request.EntityType}", 
                 exception, 
                 errorData, 
                 cancellationToken);
+            
+            if (!logResult)
+            {
+                _logger.LogWarning("Failed to log structured migration error to OpenSearch for {EntityType} in migration {MigrationId}", 
+                    request.EntityType, request.MigrationId);
+            }
+            else
+            {
+                _logger.LogDebug("Successfully logged structured migration error to OpenSearch for {EntityType} in migration {MigrationId}", 
+                    request.EntityType, request.MigrationId);
+            }
 
             _logger.LogInformation("Successfully logged structured migration error for {EntityType} in migration {MigrationId} with payloads stored to blob storage", 
                 request.EntityType, request.MigrationId);
@@ -114,6 +125,29 @@ public class EntityErrorHandlingService : IEntityErrorHandlingService
         string entityId,
         CancellationToken cancellationToken)
     {
+        await LogEntityErrorAsync(exception, entity, request, entityId, null, cancellationToken);
+    }
+
+    public async Task LogEntityErrorAsync(
+        Exception exception, 
+        Dictionary<string, object> entity, 
+        BatchProcessingRequest request, 
+        string entityId,
+        string? responsePayload,
+        CancellationToken cancellationToken)
+    {
+        await LogEntityErrorAsync(exception, entity, request, entityId, responsePayload, null, cancellationToken);
+    }
+
+    public async Task LogEntityErrorAsync(
+        Exception exception, 
+        Dictionary<string, object> entity, 
+        BatchProcessingRequest request, 
+        string entityId,
+        string? responsePayload,
+        string? simpleErrorMessage,
+        CancellationToken cancellationToken)
+    {
         if (exception == null)
             throw new ArgumentNullException(nameof(exception));
         
@@ -128,8 +162,8 @@ public class EntityErrorHandlingService : IEntityErrorHandlingService
             _logger.LogError(exception, "Entity error for {EntityType} {EntityId} in migration {MigrationId}", 
                 request.EntityType, entityId, request.MigrationId);
 
-            // Extract response payload from exception
-            var responsePayload = ExtractResponsePayloadFromException(exception);
+            // Extract response payload from exception if not provided
+            var finalResponsePayload = responsePayload ?? ExtractResponsePayloadFromException(exception);
             
             // Create request payload from entity data
             var requestPayload = JsonSerializer.Serialize(entity, new JsonSerializerOptions 
@@ -146,7 +180,7 @@ public class EntityErrorHandlingService : IEntityErrorHandlingService
                 request.MigrationId, 
                 requestId, 
                 requestPayload, 
-                responsePayload, 
+                finalResponsePayload, 
                 $"{request.EntityType}_{sanitizedEntityId}",
                 cancellationToken);
 
@@ -169,7 +203,8 @@ public class EntityErrorHandlingService : IEntityErrorHandlingService
                 entityType = request.EntityType,
                 entityId = finalEntityId,
                 entityName = entityName,
-                errorMessage = exception.Message,
+                errorMessage = simpleErrorMessage ?? exception.Message, // Use simple message for UI display
+                detailedErrorMessage = exception.Message, // Store the full detailed error for expandable view
                 stackTrace = GetTruncatedStackTrace(exception.StackTrace),
                 httpStatusCode = ExtractHttpStatusFromException(exception),
                 // ✅ REMOVED: responsePayload = responsePayload, // Don't include raw payload, use blob URL instead
@@ -181,11 +216,22 @@ public class EntityErrorHandlingService : IEntityErrorHandlingService
             };
 
             // Log to OpenSearch for structured analysis
-            await _openSearchService.LogErrorAsync(
+            var logResult = await _openSearchService.LogErrorAsync(
                 $"EntityError_{request.EntityType}", 
                 exception, 
                 errorData, 
                 cancellationToken);
+            
+            if (!logResult)
+            {
+                _logger.LogWarning("Failed to log entity error to OpenSearch for {EntityType} {EntityId} in migration {MigrationId}", 
+                    request.EntityType, entityId, request.MigrationId);
+            }
+            else
+            {
+                _logger.LogDebug("Successfully logged entity error to OpenSearch for {EntityType} {EntityId} in migration {MigrationId}", 
+                    request.EntityType, entityId, request.MigrationId);
+            }
 
             _logger.LogInformation("Successfully logged entity error for {EntityType} {EntityId} in migration {MigrationId} with payloads stored to blob storage", 
                 request.EntityType, entityId, request.MigrationId);
@@ -266,6 +312,16 @@ public class EntityErrorHandlingService : IEntityErrorHandlingService
 
         try
         {
+            // ✅ First check if response payload is stored in exception data (from enhanced exceptions)
+            if (exception.Data.Contains("ResponsePayload"))
+            {
+                var responsePayload = exception.Data["ResponsePayload"]?.ToString();
+                if (!string.IsNullOrEmpty(responsePayload))
+                {
+                    return responsePayload;
+                }
+            }
+
             // Try to extract response payload from common exception types
             if (exception is HttpRequestException httpEx)
             {

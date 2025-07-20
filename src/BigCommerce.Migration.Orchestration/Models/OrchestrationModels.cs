@@ -301,6 +301,12 @@ public class BatchProcessingRequest
     public bool UseDirectPagination { get; set; }
     
     /// <summary>
+    /// Additional data for passing context between activities
+    /// Used for preserving error details without causing orchestration replay
+    /// </summary>
+    public Dictionary<string, object> AdditionalData { get; set; } = new();
+    
+    /// <summary>
     /// Validates the batch processing request
     /// </summary>
     /// <returns>True if valid, false otherwise</returns>

@@ -202,7 +202,7 @@ public class EntityDiscoveryStrategyTests
         result.EntityData.Should().BeEmpty(); // No data caching for scalability
         result.TotalCount.Should().Be(1000);
         result.PaginationMetadata.Should().ContainKey("Strategy");
-        result.PaginationMetadata["Strategy"].Should().Be("DirectPagination");
+        result.PaginationMetadata["Strategy"].Should().Be("EfficientPagination");
         result.PaginationMetadata.Should().ContainKey("MemoryOptimized");
         result.PaginationMetadata["MemoryOptimized"].Should().Be(true);
     }

@@ -194,6 +194,7 @@ public class OpenSearchService : IOpenSearchService
             Console.WriteLine($"OpenSearch: Exception Type: {exception.GetType().Name}");
             Console.WriteLine($"OpenSearch: Exception Message: {exception.Message}");
             Console.WriteLine($"OpenSearch: Category: Error");
+            Console.WriteLine($"OpenSearch: Document structure: {JsonSerializer.Serialize(document, new JsonSerializerOptions { WriteIndented = true })}");
             
             var response = await _client.IndexAsync(document, i => i.Index(indexName), cancellationToken);
 

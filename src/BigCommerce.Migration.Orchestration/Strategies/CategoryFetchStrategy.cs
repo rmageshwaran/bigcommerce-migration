@@ -32,6 +32,9 @@ public class CategoryFetchStrategy : IEntityFetchStrategy
         if (entityIds == null) throw new ArgumentNullException(nameof(entityIds));
         if (string.IsNullOrWhiteSpace(migrationId)) throw new ArgumentNullException(nameof(migrationId));
         if (sourceStore == null) throw new ArgumentNullException(nameof(sourceStore));
+        
+        // Handle cancellation first
+        cancellationToken.ThrowIfCancellationRequested();
 
         _logger.LogInformation("Fetching {Count} specific categories for migration {MigrationId}", 
             entityIds.Count, migrationId);
@@ -42,6 +45,13 @@ public class CategoryFetchStrategy : IEntityFetchStrategy
 
         // Determine category tree ID for fetching
         var categoryTreeId = categoryTreeContext?.SourceCategoryTreeId ?? "1"; // Default to tree 1
+        
+        // Handle empty entity IDs case
+        if (entityIds.Count == 0)
+        {
+            _logger.LogInformation("No category IDs provided, returning empty list for migration {MigrationId}", migrationId);
+            return new List<Dictionary<string, object>>();
+        }
         
         _logger.LogDebug("Using category tree ID {CategoryTreeId} for fetching categories", categoryTreeId);
 

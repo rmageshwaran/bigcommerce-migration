@@ -31,6 +31,7 @@ public class ProcessEntityBatchActivity
     private readonly IOpenSearchService _openSearchService;
     private readonly IMigrationStorageService _migrationStorageService;
     private readonly IMigrationSignalRService _signalRService;
+    private readonly IErrorMessageFormatter _errorMessageFormatter;
 
     public ProcessEntityBatchActivity(
         ILogger<ProcessEntityBatchActivity> logger,
@@ -42,7 +43,8 @@ public class ProcessEntityBatchActivity
         IRateLimitService rateLimitService,
         IOpenSearchService openSearchService,
         IMigrationStorageService migrationStorageService,
-        IMigrationSignalRService signalRService)
+        IMigrationSignalRService signalRService,
+        IErrorMessageFormatter errorMessageFormatter)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _entityFetchService = entityFetchService ?? throw new ArgumentNullException(nameof(entityFetchService));
@@ -54,6 +56,7 @@ public class ProcessEntityBatchActivity
         _openSearchService = openSearchService ?? throw new ArgumentNullException(nameof(openSearchService));
         _migrationStorageService = migrationStorageService ?? throw new ArgumentNullException(nameof(migrationStorageService));
         _signalRService = signalRService ?? throw new ArgumentNullException(nameof(signalRService));
+        _errorMessageFormatter = errorMessageFormatter ?? throw new ArgumentNullException(nameof(errorMessageFormatter));
     }
 
     /// <summary>
@@ -289,9 +292,43 @@ public class ProcessEntityBatchActivity
                 else
                 {
                     result.FailedEntities++;
-                    var error = $"Failed to create {request.EntityType} {originalEntityId}: No entity returned";
-                    result.Errors.Add(error);
-                    _logger.LogWarning(error);
+                    
+                    // ✅ Check for preserved API error details from EntityCreateService
+                    var apiErrorMessage = request.AdditionalData.TryGetValue("_api_error_message", out var errorMsg) ? errorMsg?.ToString() : null;
+                    var apiStackTrace = request.AdditionalData.TryGetValue("_api_stack_trace", out var stackTrace) ? stackTrace?.ToString() : null;
+                    var apiInnerException = request.AdditionalData.TryGetValue("_api_inner_exception", out var innerEx) ? innerEx?.ToString() : null;
+                    var apiResponsePayload = request.AdditionalData.TryGetValue("_api_response_payload", out var responsePayload) ? responsePayload?.ToString() : null;
+                    
+                    // ✅ Create simple, user-friendly error message for main display (SOLID: Single Responsibility)
+                    var simpleErrorMessage = _errorMessageFormatter.CreateSimpleErrorMessage(request.EntityType, originalEntityId, apiErrorMessage);
+                    result.Errors.Add(simpleErrorMessage);
+                    _logger.LogWarning(simpleErrorMessage);
+                    
+                    // ✅ Create enhanced exception with preserved API error details
+                    var entityErrorException = new InvalidOperationException(simpleErrorMessage);
+                    
+                    // If we have preserved API error details, create a more detailed exception
+                    if (!string.IsNullOrEmpty(apiErrorMessage))
+                    {
+                        var detailedException = new InvalidOperationException(
+                            $"API Error creating {request.EntityType} {originalEntityId}: {apiErrorMessage}", 
+                            entityErrorException);
+                        
+                        // Add stack trace and inner exception details if available
+                        if (!string.IsNullOrEmpty(apiStackTrace))
+                        {
+                            detailedException.Data["StackTrace"] = apiStackTrace;
+                        }
+                        if (!string.IsNullOrEmpty(apiInnerException))
+                        {
+                            detailedException.Data["InnerException"] = apiInnerException;
+                        }
+                        
+                        entityErrorException = detailedException;
+                    }
+                    
+                    await _errorHandlingService.LogEntityErrorAsync(
+                        entityErrorException, entity, request, originalEntityId, apiResponsePayload, simpleErrorMessage, cancellationToken);
                 }
             }
             catch (Exception ex)
@@ -459,4 +496,6 @@ public class ProcessEntityBatchActivity
             return null;
         }
     }
+
+
 } 

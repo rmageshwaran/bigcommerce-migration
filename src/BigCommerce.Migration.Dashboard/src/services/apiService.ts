@@ -78,6 +78,7 @@ export interface MigrationRequest {
 
 export interface MigrationEntityError {
   entityId: string;
+  entityName?: string;
   entityType: string;
   errorMessage: string;
   timestamp: string;
@@ -374,7 +375,20 @@ export class ApiService {
    * Maps to: GET /api/migrations/{id}/entities/{entityType}/errors (MigrationHttpFunctions)
    */
   public async getMigrationEntityErrors(migrationId: string, entityType: string): Promise<MigrationEntityError[]> {
-    return this.get<MigrationEntityError[]>(`/migrations/${migrationId}/entities/${entityType}/errors`);
+    const response = await this.get<any>(`/migrations/${migrationId}/entities/${entityType}/errors`);
+    
+    // Handle the actual response format from the backend
+    if (response && response.errors && Array.isArray(response.errors)) {
+      return response.errors.map((err: any) => ({
+        entityId: err.entityId || 'Unknown',
+        entityName: err.entityName, // Add the missing entityName field
+        entityType: err.entityType || entityType,
+        errorMessage: err.errorMessage || err.error || 'Unknown error',
+        timestamp: err.timestamp || new Date().toISOString(),
+      }));
+    }
+    
+    return [];
   }
 
   /**

@@ -4,6 +4,7 @@ using Xunit;
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Infrastructure.Services;
 using BigCommerce.Migration.Orchestration.Extensions;
+using BigCommerce.Migration.Orchestration.Services;
 
 namespace BigCommerce.Migration.UnitTests.Infrastructure;
 
@@ -42,6 +43,10 @@ public class SegregatedInterfaceRegistrationTests
         
         // Register IConfiguration as a service for dependency injection
         _services.AddSingleton<IConfiguration>(_configuration);
+        
+        // Add required services that are not part of orchestration services
+        _services.AddSingleton<IRateLimitService, RateLimitService>();
+        _services.AddSingleton<IOpenSearchService, NoOpOpenSearchService>();
     }
 
     [Fact]

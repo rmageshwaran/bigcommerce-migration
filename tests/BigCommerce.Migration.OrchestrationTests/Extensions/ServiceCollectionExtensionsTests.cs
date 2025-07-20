@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
 using Xunit;
+using Moq;
 using BigCommerce.Migration.Orchestration.Extensions;
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Infrastructure.Services;
@@ -33,6 +34,10 @@ public class ServiceCollectionExtensionsTests
         _services = new ServiceCollection();
         _services.AddSingleton(_configuration);
         _services.AddLogging();
+        
+        // Add missing core services that orchestration depends on
+        _services.AddSingleton<IOpenSearchService>(new Mock<IOpenSearchService>().Object);
+        _services.AddSingleton<IApiRequestHandler>(new Mock<IApiRequestHandler>().Object);
     }
 
     [Fact]

@@ -32,6 +32,9 @@ public class BrandFetchStrategy : IEntityFetchStrategy
         if (entityIds == null) throw new ArgumentNullException(nameof(entityIds));
         if (string.IsNullOrWhiteSpace(migrationId)) throw new ArgumentNullException(nameof(migrationId));
         if (sourceStore == null) throw new ArgumentNullException(nameof(sourceStore));
+        
+        // Handle cancellation first
+        cancellationToken.ThrowIfCancellationRequested();
 
         _logger.LogInformation("Fetching {Count} specific brands for migration {MigrationId}", 
             entityIds.Count, migrationId);

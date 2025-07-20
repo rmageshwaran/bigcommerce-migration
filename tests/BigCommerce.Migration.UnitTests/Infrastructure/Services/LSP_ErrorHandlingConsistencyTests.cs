@@ -16,12 +16,22 @@ namespace BigCommerce.Migration.UnitTests.Infrastructure.Services;
 /// </summary>
 public class LSP_ErrorHandlingConsistencyTests
 {
-    private readonly Mock<ILogger> _mockLogger;
+    private readonly Mock<ILogger<CategoryFetchStrategy>> _mockCategoryLogger;
+    private readonly Mock<ILogger<ProductFetchStrategy>> _mockProductLogger;
+    private readonly Mock<ILogger<BrandFetchStrategy>> _mockBrandLogger;
+    private readonly Mock<ILogger<VariantFetchStrategy>> _mockVariantLogger;
+    private readonly Mock<ILogger<ImageFetchStrategy>> _mockImageLogger;
+    private readonly Mock<ILogger<ModifierFetchStrategy>> _mockModifierLogger;
     private readonly Mock<IBigCommerceApiClient> _mockApiClient;
 
     public LSP_ErrorHandlingConsistencyTests()
     {
-        _mockLogger = new Mock<ILogger>();
+        _mockCategoryLogger = new Mock<ILogger<CategoryFetchStrategy>>();
+        _mockProductLogger = new Mock<ILogger<ProductFetchStrategy>>();
+        _mockBrandLogger = new Mock<ILogger<BrandFetchStrategy>>();
+        _mockVariantLogger = new Mock<ILogger<VariantFetchStrategy>>();
+        _mockImageLogger = new Mock<ILogger<ImageFetchStrategy>>();
+        _mockModifierLogger = new Mock<ILogger<ModifierFetchStrategy>>();
         _mockApiClient = new Mock<IBigCommerceApiClient>();
     }
 
@@ -143,12 +153,12 @@ public class LSP_ErrorHandlingConsistencyTests
         // Arrange
         var strategies = new List<IEntityFetchStrategy>
         {
-            new CategoryFetchStrategy(_mockApiClient.Object, _mockLogger.Object),
-            new ProductFetchStrategy(_mockApiClient.Object, _mockLogger.Object),
-            new BrandFetchStrategy(_mockApiClient.Object, _mockLogger.Object),
-            new VariantFetchStrategy(_mockApiClient.Object, _mockLogger.Object),
-            new ImageFetchStrategy(_mockApiClient.Object, _mockLogger.Object),
-            new ModifierFetchStrategy(_mockApiClient.Object, _mockLogger.Object)
+            new CategoryFetchStrategy(_mockApiClient.Object, _mockCategoryLogger.Object),
+            new ProductFetchStrategy(_mockApiClient.Object, _mockProductLogger.Object),
+            new BrandFetchStrategy(_mockApiClient.Object, _mockBrandLogger.Object),
+            new VariantFetchStrategy(_mockApiClient.Object, _mockVariantLogger.Object),
+            new ImageFetchStrategy(_mockApiClient.Object, _mockImageLogger.Object),
+            new ModifierFetchStrategy(_mockApiClient.Object, _mockModifierLogger.Object)
         };
 
         var exceptionTypes = new List<Type>();
@@ -202,9 +212,9 @@ public class LSP_ErrorHandlingConsistencyTests
         // Arrange
         var strategies = new List<IEntityFetchStrategy>
         {
-            new CategoryFetchStrategy(_mockApiClient.Object, _mockLogger.Object),
-            new ProductFetchStrategy(_mockApiClient.Object, _mockLogger.Object),
-            new BrandFetchStrategy(_mockApiClient.Object, _mockLogger.Object)
+            new CategoryFetchStrategy(_mockApiClient.Object, _mockCategoryLogger.Object),
+            new ProductFetchStrategy(_mockApiClient.Object, _mockProductLogger.Object),
+            new BrandFetchStrategy(_mockApiClient.Object, _mockBrandLogger.Object)
         };
 
         using var cts = new CancellationTokenSource();
@@ -341,7 +351,7 @@ public class LSP_ErrorHandlingConsistencyTests
         var migrationLogger = new Mock<ILogger<MigrationRepository>>().Object;
         var repository = new MigrationRepository(migrationLogger);
 
-        var strategy = new CategoryFetchStrategy(_mockApiClient.Object, _mockLogger.Object);
+        var strategy = new CategoryFetchStrategy(_mockApiClient.Object, _mockCategoryLogger.Object);
 
         var errorMessages = new List<string>();
 

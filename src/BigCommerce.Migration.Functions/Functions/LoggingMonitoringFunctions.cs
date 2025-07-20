@@ -439,26 +439,75 @@ public class LoggingMonitoringFunctions
                 return response;
             }
 
-            // TODO: Implement blob storage retrieval
-            // For now, return a placeholder response indicating the feature is under development
-            response.StatusCode = HttpStatusCode.NotImplemented;
-            await response.WriteStringAsync(JsonSerializer.Serialize(new
+            // Implement blob storage retrieval
+            try
             {
-                error = new
+                // Construct the blob path based on the parameters
+                var blobPath = $"migration-payloads/{migrationId}/{payloadType}s/{requestId}_*.json";
+                
+                _logger.LogInformation("Retrieving payload from blob storage: {BlobPath}", blobPath);
+                
+                // List files in the migration-payloads container for this migration and payload type
+                var files = await _blobService.ListFilesAsync("migration-payloads", $"{migrationId}/{payloadType}s/");
+                
+                // Find the file that matches our requestId
+                var targetFile = files.FirstOrDefault(f => f.Name.Contains(requestId));
+                
+                if (targetFile == null)
                 {
-                    code = "FEATURE_NOT_IMPLEMENTED",
-                    message = "Blob payload retrieval is currently under development. Please use the blob URLs from the error logs to access payloads directly."
-                },
-                info = new
-                {
-                    migrationId = migrationId,
-                    requestId = requestId,
-                    payloadType = payloadType,
-                    entityName = entityName,
-                    expectedBlobPath = $"migration-payloads/{migrationId}/{requestId}_{payloadType}_{entityName}.gz"
+                    response.StatusCode = HttpStatusCode.NotFound;
+                    await response.WriteStringAsync(JsonSerializer.Serialize(new
+                    {
+                        error = new
+                        {
+                            code = "PAYLOAD_NOT_FOUND",
+                            message = $"Payload not found for migration {migrationId}, request {requestId}, type {payloadType}"
+                        }
+                    }));
+                    return response;
                 }
-            }));
-            return response;
+                
+                // Retrieve the payload content
+                var payloadContent = await _blobService.GetStoredPayloadAsync(targetFile.Url);
+                
+                if (string.IsNullOrEmpty(payloadContent))
+                {
+                    response.StatusCode = HttpStatusCode.NotFound;
+                    await response.WriteStringAsync(JsonSerializer.Serialize(new
+                    {
+                        error = new
+                        {
+                            code = "PAYLOAD_EMPTY",
+                            message = "Payload content is empty"
+                        }
+                    }));
+                    return response;
+                }
+                
+                // Return the payload content
+                response.StatusCode = HttpStatusCode.OK;
+                response.Headers.Add("Content-Type", "application/json");
+                response.Headers.Add("Content-Disposition", $"attachment; filename=\"{targetFile.Name}\"");
+                
+                await response.WriteStringAsync(payloadContent);
+                return response;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving payload from blob storage for migration {MigrationId}, request {RequestId}, type {PayloadType}", 
+                    migrationId, requestId, payloadType);
+                
+                response.StatusCode = HttpStatusCode.InternalServerError;
+                await response.WriteStringAsync(JsonSerializer.Serialize(new
+                {
+                    error = new
+                    {
+                        code = "BLOB_RETRIEVAL_ERROR",
+                        message = "An error occurred while retrieving the payload from blob storage"
+                    }
+                }));
+                return response;
+            }
         }
         catch (Exception ex)
         {

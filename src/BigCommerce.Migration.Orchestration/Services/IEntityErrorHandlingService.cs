@@ -40,6 +40,42 @@ public interface IEntityErrorHandlingService
         CancellationToken cancellationToken);
 
     /// <summary>
+    /// Logs individual entity errors with context and optional response payload
+    /// </summary>
+    /// <param name="exception">The exception that occurred</param>
+    /// <param name="entity">Entity data that caused the error</param>
+    /// <param name="request">Batch processing request</param>
+    /// <param name="entityId">ID of the entity that failed</param>
+    /// <param name="responsePayload">Optional response payload from API call</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    Task LogEntityErrorAsync(
+        Exception exception, 
+        Dictionary<string, object> entity, 
+        BatchProcessingRequest request, 
+        string entityId,
+        string? responsePayload,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Logs individual entity errors with context, optional response payload, and simple error message
+    /// </summary>
+    /// <param name="exception">The exception that occurred</param>
+    /// <param name="entity">Entity data that caused the error</param>
+    /// <param name="request">Batch processing request</param>
+    /// <param name="entityId">ID of the entity that failed</param>
+    /// <param name="responsePayload">Optional response payload from API call</param>
+    /// <param name="simpleErrorMessage">Simple error message for UI display</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    Task LogEntityErrorAsync(
+        Exception exception, 
+        Dictionary<string, object> entity, 
+        BatchProcessingRequest request, 
+        string entityId,
+        string? responsePayload,
+        string? simpleErrorMessage,
+        CancellationToken cancellationToken);
+
+    /// <summary>
     /// Stores request and response payloads for error analysis
     /// </summary>
     /// <param name="migrationId">Migration ID</param>

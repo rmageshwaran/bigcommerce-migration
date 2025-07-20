@@ -29,7 +29,9 @@ public class BlobService : IBlobService
     public BlobService(IConfiguration configuration, ILogger<BlobService> logger)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        // Try ConnectionStrings section first, then fall back to Values section (Azure Functions style)
         var connectionString = configuration.GetConnectionString("AzureWebJobsStorage") 
+            ?? configuration["AzureWebJobsStorage"]
             ?? throw new ArgumentNullException("AzureWebJobsStorage connection string is required");
         
         _blobServiceClient = new BlobServiceClient(connectionString);

@@ -90,7 +90,7 @@ public static class ServiceCollectionExtensions
         // Register Azure Storage services
         services.TryAddSingleton<IBlobService, BlobService>();
         services.TryAddSingleton<IQueueService, QueueService>();
-        services.TryAddSingleton<IMigrationStorageService, MigrationStorageService>();
+        services.TryAddScoped<IMigrationStorageService, MigrationStorageService>();
         
         return services;
     }

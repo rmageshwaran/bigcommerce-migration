@@ -22,6 +22,16 @@
       "tracing": {
         "traceInputsAndOutputs": true,
         "traceReplayEvents": false
+      },
+      "notifications": {
+        "eventGrid": {
+          "publishRetryCount": 0,
+          "publishRetryInterval": "00:00:30",
+          "publishEventTypes": []
+        }
+      },
+      "webhook": {
+        "authLevel": "anonymous"
       }
     },
     "queues": {

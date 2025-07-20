@@ -130,7 +130,9 @@ public static class ServiceCollectionExtensions
         var isTestEnvironment = IsTestEnvironment(configuration);
 
         // Validate Azure Storage connection string (not required in test environment)
-        var storageConnectionString = configuration.GetConnectionString("AzureWebJobsStorage");
+        // Try ConnectionStrings section first, then fall back to Values section (Azure Functions style)
+        var storageConnectionString = configuration.GetConnectionString("AzureWebJobsStorage")
+            ?? configuration["AzureWebJobsStorage"];
         if (string.IsNullOrEmpty(storageConnectionString))
         {
             if (!isTestEnvironment)
@@ -405,7 +407,7 @@ public static class ServiceCollectionExtensions
         // Register Azure Storage services
         services.TryAddSingleton<IBlobService, BlobService>();
         services.TryAddSingleton<IQueueService, QueueService>();
-        services.TryAddSingleton<IMigrationStorageService, MigrationStorageService>();
+        services.TryAddScoped<IMigrationStorageService, MigrationStorageService>();
 
         // Register API request handler for HTTP concerns (delegation pattern)
         services.TryAddSingleton<IApiRequestHandler, ApiRequestHandler>();

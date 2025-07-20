@@ -1,0 +1,36 @@
+# Exclude Windows build artifacts and cache
+**/obj/
+**/bin/
+**/TestResults/
+**/.vs/
+**/.vscode/
+**/packages/
+**/node_modules/
+
+# Exclude OS files
+.DS_Store
+Thumbs.db
+
+# Exclude Git
+.git/
+.gitignore
+
+# Exclude documentation
+docs/
+*.md
+README*
+
+# Exclude test projects to speed up build
+tests/
+
+# Exclude Azure pipelines
+azure-pipelines*.yml
+
+# Exclude scripts
+scripts/
+
+# Exclude infrastructure
+iac/
+
+# Keep required files
+!src/ 

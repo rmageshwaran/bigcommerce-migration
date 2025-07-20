@@ -5,10 +5,13 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   server: {
-    port: 5173,
+    host: '0.0.0.0',
+    port: 3000,
     proxy: {
       '/api': {
-        target: 'http://localhost:7071',
+        target: process.env.NODE_ENV === 'development' && process.env.DOCKER_ENV === 'true' 
+          ? 'http://bigcommerce-functions' 
+          : 'http://localhost:7071',
         changeOrigin: true,
         secure: false,
         configure: (proxy, _options) => {

@@ -1,0 +1,48 @@
+# Azure Functions Project - .dockerignore
+# Exclude build artifacts and cache
+obj/
+bin/
+TestResults/
+*.user
+*.suo
+*.tmp
+*.log
+
+# Exclude development tools
+.vs/
+.vscode/
+.idea/
+
+# Exclude OS files
+.DS_Store
+Thumbs.db
+
+# Exclude Git
+.git/
+.gitignore
+
+# Exclude documentation
+*.md
+README*
+
+# Exclude Azure Function specific files that shouldn't be in container
+local.settings.json
+.azure/
+.azurite/
+
+# Exclude NuGet packages (will be restored in container)
+packages/
+.nuget/
+
+# Exclude other projects (since this is project-specific)
+../../tests/
+../../docs/
+../../iac/
+../../scripts/
+
+# Keep only essential Function files
+!appsettings*.json
+!host.json
+!local.settings.docker.json
+!**/*.cs
+!**/*.csproj 

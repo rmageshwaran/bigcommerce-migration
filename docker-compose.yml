@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # Azure Storage Emulator (Azurite) for local development
   azurite:
@@ -14,11 +12,7 @@ services:
     command: "azurite --silent --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0 --location /data --debug /data/debug.log"
     environment:
       - AZURITE_ACCOUNTS=devstoreaccount1
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:10000/devstoreaccount1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+
     restart: unless-stopped
     networks:
       - bigcommerce-network
@@ -38,6 +32,7 @@ services:
       - WEBSITE_RUN_FROM_PACKAGE=1
       - FUNCTIONS_EXTENSION_VERSION=~4
       - ASPNETCORE_ENVIRONMENT=Development
+      - WEBSITE_HOSTNAME=localhost:7071
       
       # Queue Configuration (matches our fixed environment variables)
       - MigrationStartQueueName=migration-start
@@ -70,8 +65,8 @@ services:
       - AppSettings__MaxConcurrency=3
       - AppSettings__RetryAttempts=3
       
-      # SignalR Configuration (optional for local testing)
-      - AzureSignalR=Endpoint=http://localhost:8080;Port=8080;
+      # SignalR Configuration (using Azure SignalR service)
+      - AzureSignalRConnectionString=Endpoint=https://vortexiq-migration-signalr-dev.service.signalr.net;AccessKey=5LdRJbZb7Mq7Es4urlymsqw70FBjWHdqcJ7NALcGPRFrf67639RGJQQJ99BGACYeBjFXJ3w3AAAAASRSlVgW;Version=1.0;
       
       # Logging Configuration
       - Logging__LogLevel__Default=Information
@@ -79,8 +74,7 @@ services:
       - Logging__LogLevel__Microsoft=Warning
       
     depends_on:
-      azurite:
-        condition: service_healthy
+      - azurite
     volumes:
       - ./src/BigCommerce.Migration.Functions:/app
       - functions-logs:/tmp/functions-logs
@@ -106,28 +100,19 @@ services:
       - REACT_APP_SIGNALR_URL=http://bigcommerce-functions/api
       - REACT_APP_ENVIRONMENT=development
       - CHOKIDAR_USEPOLLING=true
+      - NODE_ENV=development
+      - DOCKER_ENV=true
     volumes:
       - ./src/BigCommerce.Migration.Dashboard/src:/app/src
       - ./src/BigCommerce.Migration.Dashboard/public:/app/public
       - /app/node_modules
     depends_on:
-      bigcommerce-functions:
-        condition: service_healthy
+      - bigcommerce-functions
     restart: unless-stopped
     networks:
       - bigcommerce-network
 
-  # Optional: SignalR Service (for real-time updates)
-  signalr-emulator:
-    image: mcr.microsoft.com/signalr/signalr:latest
-    container_name: bigcommerce-signalr
-    ports:
-      - "8080:80"
-    environment:
-      - ASPNETCORE_ENVIRONMENT=Development
-    restart: unless-stopped
-    networks:
-      - bigcommerce-network
+
 
   # Test Services - Unit Tests
   unit-tests:

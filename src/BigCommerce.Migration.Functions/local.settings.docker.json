@@ -6,7 +6,8 @@
     "WEBSITE_RUN_FROM_PACKAGE": "1",
     "FUNCTIONS_EXTENSION_VERSION": "~4",
     "ASPNETCORE_ENVIRONMENT": "Development",
-    "AzureSignalRConnectionString": "Endpoint=http://signalr-emulator:80;Port=80;",
+    "WEBSITE_HOSTNAME": "localhost:7071",
+    "AzureSignalRConnectionString": "Endpoint=https://vortexiq-migration-signalr-dev.service.signalr.net;AccessKey=5LdRJbZb7Mq7Es4urlymsqw70FBjWHdqcJ7NALcGPRFrf67639RGJQQJ99BGACYeBjFXJ3w3AAAAASRSlVgW;Version=1.0;",
     
     "MigrationStartQueueName": "migration-start",
     "EntityBatchQueueName": "entity-batch",
@@ -17,7 +18,8 @@
     "RetryQueueName": "retry"
   },
   "ConnectionStrings": {
-    "AzureSignalR": "Endpoint=http://signalr-emulator:80;Port=80;"
+    "AzureWebJobsStorage": "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;QueueEndpoint=http://azurite:10001/devstoreaccount1;TableEndpoint=http://azurite:10002/devstoreaccount1;",
+    "AzureSignalR": "Endpoint=https://vortexiq-migration-signalr-dev.service.signalr.net;AccessKey=5LdRJbZb7Mq7Es4urlymsqw70FBjWHdqcJ7NALcGPRFrf67639RGJQQJ99BGACYeBjFXJ3w3AAAAASRSlVgW;Version=1.0;"
   },
   "BigCommerce": {
     "BaseUrl": "https://api.bigcommerce.com",

@@ -28,26 +28,37 @@ namespace BigCommerce.Migration.Functions.Functions
         /// </summary>
         [Function("negotiate")]
         public async Task<HttpResponseData> Negotiate(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "post", "options", Route = "negotiate")] HttpRequestData req,
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", "post", "options", Route = "negotiate")] HttpRequestData req,
             [SignalRConnectionInfoInput(HubName = "migration")] string connectionInfo)
         {
             try
             {
-                _logger.LogInformation("SignalR negotiate request - Method: {Method}, Headers: {Headers}", 
-                    req.Method, string.Join(", ", req.Headers.Select(h => $"{h.Key}: {string.Join(", ", h.Value)}")));
+                _logger.LogInformation("SignalR negotiate request - Method: {Method}, URL: {URL}", req.Method, req.Url);
+                _logger.LogInformation("Request Headers: {Headers}", 
+                    string.Join(", ", req.Headers.Select(h => $"{h.Key}: {string.Join(", ", h.Value)}")));
+                
+                // Log the Origin header specifically
+                if (req.Headers.TryGetValues("Origin", out var originValues))
+                {
+                    _logger.LogInformation("Origin header found: {Origin}", string.Join(", ", originValues));
+                }
+                else
+                {
+                    _logger.LogWarning("No Origin header found in request");
+                }
                 
                 // Handle CORS preflight requests explicitly
                 if (req.Method.Equals("OPTIONS", StringComparison.OrdinalIgnoreCase))
                 {
                     var optionsResponse = req.CreateResponse(System.Net.HttpStatusCode.OK);
                     
-                    // Get origin from request or use default
-                    var origin = GetOriginFromRequest(req) ?? "http://localhost:5173";
+                    // Get origin from request or use default (Docker uses port 3000)
+                    var origin = GetOriginFromRequest(req) ?? "http://localhost:3000";
                     
                     // Add CORS headers for preflight response
                     optionsResponse.Headers.Add("Access-Control-Allow-Origin", origin);
                     optionsResponse.Headers.Add("Access-Control-Allow-Credentials", "true");
-                    optionsResponse.Headers.Add("Access-Control-Allow-Methods", "POST, OPTIONS");
+                    optionsResponse.Headers.Add("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
                     optionsResponse.Headers.Add("Access-Control-Allow-Headers", "Content-Type, Authorization, x-requested-with, x-signalr-user-agent, x-ms-signalr-connectionid, x-functions-key");
                     optionsResponse.Headers.Add("Access-Control-Max-Age", "86400"); // Cache preflight for 24 hours
                     
@@ -57,8 +68,8 @@ namespace BigCommerce.Migration.Functions.Functions
                 
                 var response = req.CreateResponse();
                 
-                // Add CORS headers for actual response
-                var responseOrigin = GetOriginFromRequest(req) ?? "http://localhost:5173";
+                // Add CORS headers for actual response  
+                var responseOrigin = GetOriginFromRequest(req) ?? "http://localhost:3000";
                 response.Headers.Add("Access-Control-Allow-Origin", responseOrigin);
                 response.Headers.Add("Access-Control-Allow-Credentials", "true");
                 response.Headers.Add("Content-Type", "application/json");
@@ -74,7 +85,7 @@ namespace BigCommerce.Migration.Functions.Functions
                 var errorResponse = req.CreateResponse(System.Net.HttpStatusCode.BadRequest);
                 
                 // Add CORS headers to error response too
-                var errorOrigin = GetOriginFromRequest(req) ?? "http://localhost:5173";
+                var errorOrigin = GetOriginFromRequest(req) ?? "http://localhost:3000";
                 errorResponse.Headers.Add("Access-Control-Allow-Origin", errorOrigin);
                 errorResponse.Headers.Add("Access-Control-Allow-Credentials", "true");
                 

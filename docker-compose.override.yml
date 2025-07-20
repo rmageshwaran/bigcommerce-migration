@@ -43,7 +43,7 @@ services:
   # Development overrides for Azurite
   azurite:
     environment:
-      - AZURITE_ACCOUNTS=devstoreaccount1;devstoreaccount2  # Multiple accounts for testing
+      - AZURITE_ACCOUNTS=devstoreaccount1  # Single development account
     command: "azurite --silent --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0 --location /data --debug /data/debug.log --loose"
     ports:
       - "10000:10000"  # Blob service

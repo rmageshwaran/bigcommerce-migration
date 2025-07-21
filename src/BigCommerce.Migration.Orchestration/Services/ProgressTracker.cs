@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using BigCommerce.Migration.Core.Interfaces;
+using BigCommerce.Migration.Core.Models;
 using System.Collections.Concurrent;
 
 namespace BigCommerce.Migration.Orchestration.Services;
@@ -554,9 +555,46 @@ public class ProgressTracker : IProgressTracker
                 // Update the migration in storage
                 await _storageService.UpdateMigrationAsync(migrationEntry);
                 
-                _logger.LogDebug("Persisted progress to storage for migration {MigrationId}: {ProgressPercentage}% complete, " +
+                _logger.LogDebug("Persisted migration progress to storage for migration {MigrationId}: {ProgressPercentage}% complete, " +
                     "{ProcessedEntities}/{TotalEntities} entities processed", 
                     migrationId, progress.OverallProgressPercentage, progress.ProcessedEntities, progress.TotalEntities);
+            }
+
+            // Persist entity-level progress data
+            foreach (var entityProgress in progress.EntityProgress)
+            {
+                try
+                {
+                    var entityProgressEntry = new EntityProgressEntry
+                    {
+                        MigrationId = migrationId,
+                        EntityType = entityProgress.Key,
+                        TotalCount = entityProgress.Value.TotalCount,
+                        ProcessedCount = entityProgress.Value.ProcessedCount,
+                        SuccessCount = entityProgress.Value.SuccessCount,
+                        FailureCount = entityProgress.Value.FailureCount,
+                        ProgressPercentage = entityProgress.Value.ProgressPercentage,
+                        Status = entityProgress.Value.Status,
+                        StartTime = entityProgress.Value.StartTime,
+                        EndTime = entityProgress.Value.EndTime,
+                        ProcessingTime = entityProgress.Value.ProcessingTime,
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow
+                    };
+
+                    await _storageService.CreateOrUpdateEntityProgressAsync(entityProgressEntry);
+                    
+                    _logger.LogDebug("Persisted entity progress to storage for migration {MigrationId}, entity {EntityType}: " +
+                        "{ProcessedCount}/{TotalCount} entities processed, {ProgressPercentage}% complete", 
+                        migrationId, entityProgress.Key, entityProgress.Value.ProcessedCount, entityProgress.Value.TotalCount, 
+                        entityProgress.Value.ProgressPercentage);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to persist entity progress for migration {MigrationId}, entity {EntityType}", 
+                        migrationId, entityProgress.Key);
+                    // Continue with other entities even if one fails
+                }
             }
         }
         catch (Exception ex)

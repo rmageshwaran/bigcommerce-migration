@@ -21,6 +21,7 @@ public class MigrationStorageService : IMigrationStorageService
     private const string EntityMappingsTableName = "entitymappings";
     private const string ApiCallTrackingTableName = "apicalltracking";
     private const string CancellationTokensTableName = "cancellationtokens";
+    private const string EntityProgressTableName = "entityprogress";
 
     /// <summary>
     /// Initializes a new instance of the MigrationStorageService class
@@ -787,6 +788,206 @@ public class MigrationStorageService : IMigrationStorageService
 
     #endregion
 
+    #region Entity Progress Operations
+
+    /// <summary>
+    /// Creates or updates an entity progress entry in Azure Table Storage
+    /// </summary>
+    /// <param name="progressEntry">Entity progress entry to create or update</param>
+    /// <returns>Created or updated progress entry</returns>
+    public async Task<EntityProgressEntry> CreateOrUpdateEntityProgressAsync(EntityProgressEntry progressEntry)
+    {
+        try
+        {
+            _logger.LogInformation("Creating/updating entity progress: {MigrationId}, {EntityType}", 
+                progressEntry.MigrationId, progressEntry.EntityType);
+
+            var tableClient = await GetTableClientAsync(EntityProgressTableName);
+            var tableEntity = new TableEntity(progressEntry.MigrationId, progressEntry.EntityType)
+            {
+                ["EntityType"] = progressEntry.EntityType,
+                ["TotalCount"] = progressEntry.TotalCount,
+                ["ProcessedCount"] = progressEntry.ProcessedCount,
+                ["SuccessCount"] = progressEntry.SuccessCount,
+                ["FailureCount"] = progressEntry.FailureCount,
+                ["ProgressPercentage"] = progressEntry.ProgressPercentage,
+                ["Status"] = progressEntry.Status,
+                ["StartTime"] = progressEntry.StartTime,
+                ["EndTime"] = progressEntry.EndTime,
+                ["ProcessingTime"] = progressEntry.ProcessingTime.TotalMilliseconds,
+                ["CreatedAt"] = progressEntry.CreatedAt,
+                ["UpdatedAt"] = progressEntry.UpdatedAt
+            };
+
+            await tableClient.UpsertEntityAsync(tableEntity);
+            
+            _logger.LogInformation("Successfully created/updated entity progress: {MigrationId}, {EntityType}", 
+                progressEntry.MigrationId, progressEntry.EntityType);
+            return progressEntry;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error creating/updating entity progress: {MigrationId}, {EntityType}", 
+                progressEntry.MigrationId, progressEntry.EntityType);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Gets entity progress entries for a migration
+    /// </summary>
+    /// <param name="migrationId">Migration ID</param>
+    /// <param name="entityType">Optional entity type filter</param>
+    /// <returns>List of entity progress entries</returns>
+    public async Task<List<EntityProgressEntry>> GetEntityProgressAsync(string migrationId, string? entityType = null)
+    {
+        try
+        {
+            _logger.LogInformation("Getting entity progress for migration: {MigrationId}, EntityType: {EntityType}", 
+                migrationId, entityType);
+
+            var tableClient = await GetTableClientAsync(EntityProgressTableName);
+            var filter = $"PartitionKey eq '{migrationId}'";
+            
+            if (!string.IsNullOrEmpty(entityType))
+            {
+                filter += $" and EntityType eq '{entityType}'";
+            }
+
+            var progressEntries = new List<EntityProgressEntry>();
+            await foreach (var entity in tableClient.QueryAsync<TableEntity>(filter))
+            {
+                progressEntries.Add(new EntityProgressEntry
+                {
+                    MigrationId = entity.PartitionKey!,
+                    EntityType = entity.GetString("EntityType") ?? string.Empty,
+                    TotalCount = entity.GetInt32("TotalCount") ?? 0,
+                    ProcessedCount = entity.GetInt32("ProcessedCount") ?? 0,
+                    SuccessCount = entity.GetInt32("SuccessCount") ?? 0,
+                    FailureCount = entity.GetInt32("FailureCount") ?? 0,
+                    ProgressPercentage = entity.GetDouble("ProgressPercentage") ?? 0.0,
+                    Status = entity.GetString("Status") ?? string.Empty,
+                    StartTime = entity.GetDateTime("StartTime") ?? DateTime.UtcNow,
+                    EndTime = entity.GetDateTime("EndTime"),
+                    ProcessingTime = TimeSpan.FromMilliseconds(entity.GetDouble("ProcessingTime") ?? 0),
+                    CreatedAt = entity.GetDateTime("CreatedAt") ?? DateTime.UtcNow,
+                    UpdatedAt = entity.GetDateTime("UpdatedAt") ?? DateTime.UtcNow
+                });
+            }
+
+            return progressEntries;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting entity progress: {MigrationId}", migrationId);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Gets a specific entity progress entry
+    /// </summary>
+    /// <param name="migrationId">Migration ID</param>
+    /// <param name="entityType">Entity type</param>
+    /// <returns>Entity progress entry or null if not found</returns>
+    public async Task<EntityProgressEntry?> GetEntityProgressByTypeAsync(string migrationId, string entityType)
+    {
+        try
+        {
+            _logger.LogInformation("Getting specific entity progress: {MigrationId}, {EntityType}", 
+                migrationId, entityType);
+
+            var tableClient = await GetTableClientAsync(EntityProgressTableName);
+            var response = await tableClient.GetEntityIfExistsAsync<TableEntity>(migrationId, entityType);
+
+            if (!response.HasValue)
+            {
+                _logger.LogWarning("Entity progress not found: {MigrationId}, {EntityType}", 
+                    migrationId, entityType);
+                return null;
+            }
+
+            var entity = response.Value!;
+            return new EntityProgressEntry
+            {
+                MigrationId = entity.PartitionKey!,
+                EntityType = entity.GetString("EntityType") ?? string.Empty,
+                TotalCount = entity.GetInt32("TotalCount") ?? 0,
+                ProcessedCount = entity.GetInt32("ProcessedCount") ?? 0,
+                SuccessCount = entity.GetInt32("SuccessCount") ?? 0,
+                FailureCount = entity.GetInt32("FailureCount") ?? 0,
+                ProgressPercentage = entity.GetDouble("ProgressPercentage") ?? 0.0,
+                Status = entity.GetString("Status") ?? string.Empty,
+                StartTime = entity.GetDateTime("StartTime") ?? DateTime.UtcNow,
+                EndTime = entity.GetDateTime("EndTime"),
+                ProcessingTime = TimeSpan.FromMilliseconds(entity.GetDouble("ProcessingTime") ?? 0),
+                CreatedAt = entity.GetDateTime("CreatedAt") ?? DateTime.UtcNow,
+                UpdatedAt = entity.GetDateTime("UpdatedAt") ?? DateTime.UtcNow
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting specific entity progress: {MigrationId}, {EntityType}", 
+                migrationId, entityType);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Deletes entity progress entries for a migration
+    /// </summary>
+    /// <param name="migrationId">Migration ID</param>
+    /// <param name="entityType">Optional entity type filter</param>
+    /// <returns>True if deleted, false if not found</returns>
+    public async Task<bool> DeleteEntityProgressAsync(string migrationId, string? entityType = null)
+    {
+        try
+        {
+            _logger.LogInformation("Deleting entity progress: {MigrationId}, EntityType: {EntityType}", 
+                migrationId, entityType);
+
+            var tableClient = await GetTableClientAsync(EntityProgressTableName);
+            
+            if (!string.IsNullOrEmpty(entityType))
+            {
+                // Delete specific entity type
+                await tableClient.DeleteEntityAsync(migrationId, entityType);
+                _logger.LogInformation("Successfully deleted entity progress: {MigrationId}, {EntityType}", 
+                    migrationId, entityType);
+                return true;
+            }
+            else
+            {
+                // Delete all entity types for the migration
+                var filter = $"PartitionKey eq '{migrationId}'";
+                var deletedCount = 0;
+                
+                await foreach (var entity in tableClient.QueryAsync<TableEntity>(filter))
+                {
+                    await tableClient.DeleteEntityAsync(entity.PartitionKey!, entity.RowKey!);
+                    deletedCount++;
+                }
+                
+                _logger.LogInformation("Successfully deleted {DeletedCount} entity progress entries for migration: {MigrationId}", 
+                    deletedCount, migrationId);
+                return deletedCount > 0;
+            }
+        }
+        catch (RequestFailedException ex) when (ex.Status == 404)
+        {
+            _logger.LogWarning("Entity progress not found for deletion: {MigrationId}, EntityType: {EntityType}", 
+                migrationId, entityType);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deleting entity progress: {MigrationId}", migrationId);
+            throw;
+        }
+    }
+
+    #endregion
+
     #region Helper Methods
 
     private async Task<TableClient> GetTableClientAsync(string tableName)
@@ -851,6 +1052,11 @@ public class MigrationStorageService : IMigrationStorageService
         if (!string.IsNullOrEmpty(request.Status))
         {
             filter += $" and Status eq '{request.Status}'";
+        }
+
+        if (!string.IsNullOrEmpty(request.MigrationId))
+        {
+            filter += $" and RowKey eq '{request.MigrationId}'";
         }
 
         // Handle store filtering - if both source and destination are the same, use OR logic

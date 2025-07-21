@@ -366,8 +366,8 @@ export class ApiService {
    * Get migration entity breakdown
    * Maps to: GET /api/migrations/{id}/entities (MigrationHttpFunctions)
    */
-  public async getMigrationEntityBreakdown(migrationId: string): Promise<MigrationEntityBreakdown[]> {
-    return this.get<MigrationEntityBreakdown[]>(`/migrations/${migrationId}/entities`);
+  public async getMigrationEntityBreakdown(migrationId: string): Promise<any> {
+    return this.get<any>(`/migrations/${migrationId}/entities`);
   }
 
   /**

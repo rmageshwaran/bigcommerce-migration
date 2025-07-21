@@ -220,6 +220,11 @@ public class MigrationQueryRequest
     public string? DestinationStoreId { get; set; }
 
     /// <summary>
+    /// Filter by specific migration ID
+    /// </summary>
+    public string? MigrationId { get; set; }
+
+    /// <summary>
     /// Filter by created date range start
     /// </summary>
     public DateTime? CreatedAfter { get; set; }
@@ -1196,6 +1201,76 @@ public class DeadLetterProcessingResult
     public string? DiscardReason { get; set; }
 }
 
+/// <summary>
+/// Entity progress tracking entry for persisting entity-level progress data
+/// </summary>
+public class EntityProgressEntry
+{
+    /// <summary>
+    /// Migration ID this progress entry belongs to
+    /// </summary>
+    public string MigrationId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Entity type (e.g., "product", "category", "brand")
+    /// </summary>
+    public string EntityType { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Total count of entities for this type
+    /// </summary>
+    public int TotalCount { get; set; }
+
+    /// <summary>
+    /// Number of entities processed
+    /// </summary>
+    public int ProcessedCount { get; set; }
+
+    /// <summary>
+    /// Number of successful entities
+    /// </summary>
+    public int SuccessCount { get; set; }
+
+    /// <summary>
+    /// Number of failed entities
+    /// </summary>
+    public int FailureCount { get; set; }
+
+    /// <summary>
+    /// Progress percentage for this entity type (0.0 to 100.0)
+    /// </summary>
+    public double ProgressPercentage { get; set; }
+
+    /// <summary>
+    /// Current status of entity processing
+    /// </summary>
+    public string Status { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Start time for entity processing
+    /// </summary>
+    public DateTime StartTime { get; set; }
+
+    /// <summary>
+    /// End time for entity processing
+    /// </summary>
+    public DateTime? EndTime { get; set; }
+
+    /// <summary>
+    /// Time taken to process this entity type
+    /// </summary>
+    public TimeSpan ProcessingTime { get; set; }
+
+    /// <summary>
+    /// When the progress entry was created
+    /// </summary>
+    public DateTime CreatedAt { get; set; }
+
+    /// <summary>
+    /// When the progress entry was last updated
+    /// </summary>
+    public DateTime UpdatedAt { get; set; }
+}
 
 
 #endregion 

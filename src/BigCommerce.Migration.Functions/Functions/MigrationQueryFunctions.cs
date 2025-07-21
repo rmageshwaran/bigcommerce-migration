@@ -315,6 +315,27 @@ public class MigrationQueryFunctions
             var migrationEntry = await _migrationStorageService.GetMigrationAsync(migrationId);
             if (migrationEntry != null)
             {
+                // Get entity-level progress from storage
+                var entityProgressEntries = await _migrationStorageService.GetEntityProgressAsync(migrationId);
+                var entityProgress = new Dictionary<string, EntityProgress>();
+                
+                foreach (var entry in entityProgressEntries)
+                {
+                    entityProgress[entry.EntityType] = new EntityProgress
+                    {
+                        EntityType = entry.EntityType,
+                        TotalCount = entry.TotalCount,
+                        ProcessedCount = entry.ProcessedCount,
+                        SuccessCount = entry.SuccessCount,
+                        FailureCount = entry.FailureCount,
+                        ProgressPercentage = entry.ProgressPercentage,
+                        Status = entry.Status,
+                        StartTime = entry.StartTime,
+                        EndTime = entry.EndTime,
+                        ProcessingTime = entry.ProcessingTime
+                    };
+                }
+                
                 return new MigrationProgress
                 {
                     MigrationId = migrationId,
@@ -327,7 +348,7 @@ public class MigrationQueryFunctions
                     SuccessfulEntities = migrationEntry.ProcessedEntities - migrationEntry.FailedEntities,
                     FailedEntities = migrationEntry.FailedEntities,
                     CurrentPhase = migrationEntry.CurrentPhase ?? "completed",
-                    EntityProgress = new Dictionary<string, EntityProgress>()
+                    EntityProgress = entityProgress
                 };
             }
             

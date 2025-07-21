@@ -128,6 +128,11 @@ public class MigrationRepository : IMigrationRepository
             }
         }
 
+        if (!string.IsNullOrEmpty(request.MigrationId))
+        {
+            filteredMigrations = filteredMigrations.Where(m => m.Id.Equals(request.MigrationId, StringComparison.OrdinalIgnoreCase));
+        }
+
         // Apply sorting
         filteredMigrations = filteredMigrations.OrderByDescending(m => m.CreatedAt);
 

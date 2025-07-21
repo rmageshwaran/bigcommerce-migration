@@ -96,6 +96,41 @@ public interface IMigrationStorageService
 
     #endregion
 
+    #region Entity Progress Operations
+
+    /// <summary>
+    /// Creates or updates an entity progress entry
+    /// </summary>
+    /// <param name="progressEntry">Entity progress entry to create or update</param>
+    /// <returns>Created or updated progress entry</returns>
+    Task<EntityProgressEntry> CreateOrUpdateEntityProgressAsync(EntityProgressEntry progressEntry);
+
+    /// <summary>
+    /// Gets entity progress entries for a migration
+    /// </summary>
+    /// <param name="migrationId">Migration ID</param>
+    /// <param name="entityType">Optional entity type filter</param>
+    /// <returns>List of entity progress entries</returns>
+    Task<List<EntityProgressEntry>> GetEntityProgressAsync(string migrationId, string? entityType = null);
+
+    /// <summary>
+    /// Gets a specific entity progress entry
+    /// </summary>
+    /// <param name="migrationId">Migration ID</param>
+    /// <param name="entityType">Entity type</param>
+    /// <returns>Entity progress entry or null if not found</returns>
+    Task<EntityProgressEntry?> GetEntityProgressByTypeAsync(string migrationId, string entityType);
+
+    /// <summary>
+    /// Deletes entity progress entries for a migration
+    /// </summary>
+    /// <param name="migrationId">Migration ID</param>
+    /// <param name="entityType">Optional entity type filter</param>
+    /// <returns>True if deleted, false if not found</returns>
+    Task<bool> DeleteEntityProgressAsync(string migrationId, string? entityType = null);
+
+    #endregion
+
     #region API Call Tracking Operations
 
     /// <summary>

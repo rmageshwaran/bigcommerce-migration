@@ -649,6 +649,7 @@ public class MigrationHttpFunctions
             var statusFilter = ExtractQueryParameter(query, "status");
             var sourceStore = ExtractQueryParameter(query, "sourceStore");
             var destinationStore = ExtractQueryParameter(query, "destinationStore");
+            var migrationId = ExtractQueryParameter(query, "migrationId");
             var pageSize = int.TryParse(ExtractQueryParameter(query, "pageSize"), out var size) ? size : 50;
             var currentPage = int.TryParse(ExtractQueryParameter(query, "page"), out var page) ? page : 1;
             
@@ -658,6 +659,7 @@ public class MigrationHttpFunctions
                 Status = statusFilter,
                 SourceStoreId = sourceStore,
                 DestinationStoreId = destinationStore,
+                MigrationId = migrationId,
                 PageSize = pageSize,
                 Page = currentPage,
                 SortBy = "CreatedAt",
@@ -1568,6 +1570,27 @@ public class MigrationHttpFunctions
             var migrationEntry = await _migrationStorageService.GetMigrationAsync(migrationId);
             if (migrationEntry != null)
             {
+                // Get entity-level progress from storage
+                var entityProgressEntries = await _migrationStorageService.GetEntityProgressAsync(migrationId);
+                var entityProgress = new Dictionary<string, EntityProgress>();
+                
+                foreach (var entry in entityProgressEntries)
+                {
+                    entityProgress[entry.EntityType] = new EntityProgress
+                    {
+                        EntityType = entry.EntityType,
+                        TotalCount = entry.TotalCount,
+                        ProcessedCount = entry.ProcessedCount,
+                        SuccessCount = entry.SuccessCount,
+                        FailureCount = entry.FailureCount,
+                        ProgressPercentage = entry.ProgressPercentage,
+                        Status = entry.Status,
+                        StartTime = entry.StartTime,
+                        EndTime = entry.EndTime,
+                        ProcessingTime = entry.ProcessingTime
+                    };
+                }
+                
                 return new MigrationProgress
                 {
                     MigrationId = migrationId,
@@ -1580,7 +1603,7 @@ public class MigrationHttpFunctions
                     SuccessfulEntities = migrationEntry.ProcessedEntities - migrationEntry.FailedEntities,
                     FailedEntities = migrationEntry.FailedEntities,
                     CurrentPhase = migrationEntry.CurrentPhase ?? "completed",
-                    EntityProgress = new Dictionary<string, EntityProgress>()
+                    EntityProgress = entityProgress
                 };
             }
             

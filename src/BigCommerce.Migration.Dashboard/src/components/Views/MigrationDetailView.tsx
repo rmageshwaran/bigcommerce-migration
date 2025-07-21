@@ -172,31 +172,11 @@ export const MigrationDetailView: React.FC = () => {
           console.log('📊 Total errors found:', allErrors.length);
           console.log('🔍 Final error details:', allErrors);
           
-          // Add test error data if no real errors exist (for UI testing)
+          // Show real errors only - no test data
           if (allErrors.length === 0) {
-            const testErrors = [
-              {
-                entityId: '4486',
-                entityName: 'Clothing',
-                entityType: 'categories',
-                error: 'Failed to create categories 4486: A parent category with the id: 4487 was not found',
-                processedAt: '2025-07-20T22:34:26.0564613Z',
-                requestPayloadBlobUrl: 'http://localhost:7071/api/logs/payload/afa71f04-2d4f-4f5f-9459-62e7231a577e/test_request_4486/request/categories',
-                responsePayloadBlobUrl: 'http://localhost:7071/api/logs/payload/afa71f04-2d4f-4f5f-9459-62e7231a577e/test_response_4486/response/categories'
-              },
-              {
-                entityId: '4487',
-                entityName: 'Mens',
-                entityType: 'categories',
-                error: 'Failed to create categories 4487: A duplicate category with the name: \'Mens\' was found in the same parent',
-                processedAt: '2025-07-20T22:34:24.0564613Z',
-                requestPayloadBlobUrl: undefined, // Test case with no request payload
-                responsePayloadBlobUrl: 'http://localhost:7071/api/logs/payload/afa71f04-2d4f-4f5f-9459-62e7231a577e/test_response_4487/response/categories'
-              }
-            ];
-            console.log('🧪 Using test error data for UI verification:', testErrors);
-            setErrors(testErrors);
-            setDebugInfo('Test errors loaded: ' + testErrors.length);
+            console.log('✅ No real errors found - showing clean successful migration');
+            setErrors([]);
+            setDebugInfo('No errors in this successful migration');
           } else {
             console.log('📊 Using real error data:', allErrors);
             setErrors(allErrors);
@@ -207,32 +187,11 @@ export const MigrationDetailView: React.FC = () => {
           // Don't fail the whole request if errors can't be fetched
         }
       } else {
-        console.log('✅ No failed entities, but adding test errors for UI verification');
+        console.log('✅ No failed entities - showing clean successful migration results');
         
-        // Add test error data for UI testing even when no real errors exist
-        const testErrors = [
-          {
-            entityId: '4486',
-            entityName: 'Clothing',
-            entityType: 'categories',
-            error: 'Failed to create categories 4486: A parent category with the id: 4487 was not found',
-            processedAt: '2025-07-20T22:34:26.0564613Z',
-            requestPayloadBlobUrl: 'http://localhost:7071/api/logs/payload/afa71f04-2d4f-4f5f-9459-62e7231a577e/test_request_4486/request/categories',
-            responsePayloadBlobUrl: 'http://localhost:7071/api/logs/payload/afa71f04-2d4f-4f5f-9459-62e7231a577e/test_response_4486/response/categories'
-          },
-          {
-            entityId: '4487',
-            entityName: 'Mens',
-            entityType: 'categories',
-            error: 'Failed to create categories 4487: A duplicate category with the name: \'Mens\' was found in the same parent',
-            processedAt: '2025-07-20T22:34:24.0564613Z',
-            requestPayloadBlobUrl: undefined, // Test case with no request payload
-            responsePayloadBlobUrl: 'http://localhost:7071/api/logs/payload/afa71f04-2d4f-4f5f-9459-62e7231a577e/test_response_4487/response/categories'
-          }
-        ];
-        console.log('🧪 Adding test error data for UI verification:', testErrors);
-        setErrors(testErrors);
-        setDebugInfo('Test errors loaded: ' + testErrors.length);
+        // No test data - show real migration results only
+        setErrors([]);
+        setDebugInfo('No errors in this successful migration');
       }
 
     } catch (err) {

@@ -1,21 +1,24 @@
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
 using Microsoft.Extensions.Logging;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace BigCommerce.Migration.Orchestration.Services.EntityCreation;
 
 /// <summary>
 /// Strategy implementation for creating brands in destination stores
 /// Implements Open/Closed Principle: specific to brands without modifying base service
+/// NOTE: BigCommerce brands API only supports individual brand creation, not batch operations
 /// </summary>
 public class BrandCreationStrategy : IEntityCreationStrategy
 {
-    private readonly IBigCommerceApiClient _apiClient;
+    private readonly IApiRequestHandler _apiRequestHandler;
     private readonly ILogger<BrandCreationStrategy> _logger;
 
-    public BrandCreationStrategy(IBigCommerceApiClient apiClient, ILogger<BrandCreationStrategy> logger)
+    public BrandCreationStrategy(IApiRequestHandler apiRequestHandler, ILogger<BrandCreationStrategy> logger)
     {
-        _apiClient = apiClient ?? throw new ArgumentNullException(nameof(apiClient));
+        _apiRequestHandler = apiRequestHandler ?? throw new ArgumentNullException(nameof(apiRequestHandler));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -65,30 +68,71 @@ public class BrandCreationStrategy : IEntityCreationStrategy
                     executionId, brandName, brandId, migrationId);
             }
 
-            // Note: The API client doesn't have a CreateBrandsAsync method, so we'll implement individual creation
+            // Create brands individually (BigCommerce brands API doesn't support batch creation)
             var createdBrands = new List<Dictionary<string, object>>();
 
-            foreach (var brand in entities)
+            for (int i = 0; i < entities.Count; i++)
             {
+                var brand = entities[i];
                 try
                 {
-                    // For now, we'll create a mock response since the API client doesn't have brand creation
-                    var mockCreatedBrand = new Dictionary<string, object>(brand)
-                    {
-                        ["id"] = Guid.NewGuid().ToString()
-                    };
-                    createdBrands.Add(mockCreatedBrand);
-                    
                     var brandName = brand.TryGetValue("name", out var name) ? name?.ToString() : "unknown";
-                    _logger.LogDebug("🏪 [BRAND-{ExecutionId}] Successfully created brand '{BrandName}' for migration {MigrationId}", 
-                        executionId, brandName, migrationId);
+                    _logger.LogDebug("🏪 [BRAND-{ExecutionId}] Creating individual brand {Index}/{Total}: '{BrandName}' in migration {MigrationId}",
+                        executionId, i + 1, entities.Count, brandName, migrationId);
+
+                    var createdBrand = await CreateSingleBrandAsync(destinationStore, brand, cancellationToken);
+                    if (createdBrand != null)
+                    {
+                        createdBrands.Add(createdBrand);
+                    }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "🏪 [BRAND-{ExecutionId}] Failed to create individual brand for migration {MigrationId}", 
-                        executionId, migrationId);
-                    // Continue with next brand instead of failing entire batch
+                    var brandName = brand.TryGetValue("name", out var name) ? name?.ToString() : "unknown";
+                    var brandId = brand.TryGetValue("id", out var id) ? id?.ToString() : "unknown";
+                    
+                    _logger.LogError(ex, "🏪 [BRAND-{ExecutionId}] ❌ Failed to create individual brand '{BrandName}' (ID: {BrandId}) in migration {MigrationId}",
+                        executionId, brandName, brandId, migrationId);
+
+                    // ✅ Create enhanced exception with preserved API error details
+                    // This ensures the stack trace and response payload are preserved for error logging
+                    var detailedErrorMessage = ExtractDetailedErrorMessage(ex);
+                    var enhancedException = new InvalidOperationException(
+                        $"API Error creating brand '{brandName}' (ID: {brandId}): {detailedErrorMessage}", ex);
+                    
+                    // Add the original exception as inner exception to preserve stack trace
+                    // Add response payload and other details to the exception data
+                    var responsePayload = ExtractResponsePayloadFromException(ex);
+                    if (!string.IsNullOrEmpty(responsePayload))
+                    {
+                        enhancedException.Data["ResponsePayload"] = responsePayload;
+                    }
+                    enhancedException.Data["ApiErrorMessage"] = detailedErrorMessage;
+                    enhancedException.Data["OriginalStackTrace"] = ex.StackTrace ?? string.Empty;
+                    enhancedException.Data["EntityName"] = brandName;
+                    enhancedException.Data["EntityId"] = brandId;
+                    
+                    // Re-throw the enhanced exception to trigger proper error logging
+                    _logger.LogWarning("🏪 [BRAND-{ExecutionId}] Re-throwing enhanced exception for proper error logging for brand '{BrandName}' in migration {MigrationId}", 
+                        executionId, brandName, migrationId);
+                    
+                    throw enhancedException;
                 }
+            }
+
+            // ✅ Check if we have partial failures and log appropriately
+            if (createdBrands.Count == 0 && entities.Count > 0)
+            {
+                var errorMessage = $"BigCommerce API returned no successful brand creations for {entities.Count} brands";
+                _logger.LogError("🏪 [BRAND-{ExecutionId}] {ErrorMessage} in migration {MigrationId}", 
+                    executionId, errorMessage, migrationId);
+                
+                // Create enhanced exception to preserve error details for logging
+                var enhancedException = new InvalidOperationException(errorMessage);
+                enhancedException.Data["ApiErrorMessage"] = errorMessage;
+                enhancedException.Data["EntityCount"] = entities.Count;
+                
+                throw enhancedException;
             }
 
             _logger.LogInformation("✅ [BRAND-{ExecutionId}] Successfully created {CreatedCount}/{TotalCount} brands for migration {MigrationId}", 
@@ -104,11 +148,26 @@ public class BrandCreationStrategy : IEntityCreationStrategy
             _logger.LogError(ex, "🏪 [BRAND-{ExecutionId}] ❌ Failed to create {BrandCount} brands in migration {MigrationId}. {DetailedError}",
                 executionId, entities.Count, migrationId, detailedErrorMessage);
 
-            // Return empty list to avoid causing Durable Functions replay issues
-            _logger.LogWarning("🏪 [BRAND-{ExecutionId}] Returning empty result to prevent replay in migration {MigrationId}", 
+            // ✅ Create enhanced exception with preserved API error details
+            // This ensures the stack trace and response payload are preserved for error logging
+            var enhancedException = new InvalidOperationException(
+                $"API Error creating {entities.Count} brands: {detailedErrorMessage}", ex);
+            
+            // Add the original exception as inner exception to preserve stack trace
+            // Add response payload and other details to the exception data
+            var responsePayload = ExtractResponsePayloadFromException(ex);
+            if (!string.IsNullOrEmpty(responsePayload))
+            {
+                enhancedException.Data["ResponsePayload"] = responsePayload;
+            }
+            enhancedException.Data["ApiErrorMessage"] = detailedErrorMessage;
+            enhancedException.Data["OriginalStackTrace"] = ex.StackTrace ?? string.Empty;
+            
+            // Re-throw the enhanced exception to trigger proper error logging
+            _logger.LogWarning("🏪 [BRAND-{ExecutionId}] Re-throwing enhanced exception for proper error logging in migration {MigrationId}", 
                 executionId, migrationId);
             
-            return new List<Dictionary<string, object>>();
+            throw enhancedException;
         }
     }
 
@@ -145,5 +204,81 @@ public class BrandCreationStrategy : IEntityCreationStrategy
         }
 
         return exception.Message;
+    }
+
+    /// <summary>
+    /// Extracts response payload from API exceptions for error logging
+    /// </summary>
+    /// <param name="exception">The exception to analyze</param>
+    /// <returns>Response payload if available, otherwise empty string</returns>
+    private static string ExtractResponsePayloadFromException(Exception exception)
+    {
+        if (exception == null) return string.Empty;
+
+        // Check exception data for response payload
+        if (exception.Data.Contains("ResponsePayload") && exception.Data["ResponsePayload"] is string payload)
+        {
+            return payload;
+        }
+
+        // Check inner exceptions for response payload
+        var innerException = exception.InnerException;
+        while (innerException != null)
+        {
+            if (innerException.Data.Contains("ResponsePayload") && innerException.Data["ResponsePayload"] is string innerPayload)
+            {
+                return innerPayload;
+            }
+            innerException = innerException.InnerException;
+        }
+
+        return string.Empty;
+    }
+
+    /// <summary>
+    /// Creates a single brand using the BigCommerce API
+    /// </summary>
+    /// <param name="storeConfig">Destination store configuration</param>
+    /// <param name="brand">Brand data to create</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>Created brand with destination ID, or null if creation failed</returns>
+    private async Task<Dictionary<string, object>?> CreateSingleBrandAsync(
+        StoreConfiguration storeConfig,
+        Dictionary<string, object> brand,
+        CancellationToken cancellationToken)
+    {
+        // Remove fields that shouldn't be sent to the API (like source IDs)
+        var cleanBrand = new Dictionary<string, object>(brand);
+        cleanBrand.Remove("id"); // Remove source ID
+        cleanBrand.Remove("_original_entity_id"); // Remove tracking fields
+
+        // Ensure required fields are present and valid according to BigCommerce API
+        if (!cleanBrand.ContainsKey("name") || string.IsNullOrWhiteSpace(cleanBrand["name"]?.ToString()))
+        {
+            throw new ArgumentException("Brand name is required for creation");
+        }
+
+        // Build the API request URL
+        var url = $"{storeConfig.GetApiBaseUrl()}/catalog/brands";
+
+        // Serialize the brand data
+        var jsonContent = JsonSerializer.Serialize(cleanBrand, new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        });
+
+        // Create and execute the API request
+        var request = ApiRequest.CreatePost(url, jsonContent, storeConfig);
+        var response = await _apiRequestHandler.ExecuteRequestAsync<Dictionary<string, object>>(request, cancellationToken);
+
+        // Extract the created brand data from the response
+        if (response?.TryGetValue("data", out var dataValue) == true && dataValue is JsonElement dataElement)
+        {
+            var createdBrand = JsonSerializer.Deserialize<Dictionary<string, object>>(dataElement.GetRawText());
+            return createdBrand;
+        }
+
+        return response; // Return the response if it's already in the expected format
     }
 } 

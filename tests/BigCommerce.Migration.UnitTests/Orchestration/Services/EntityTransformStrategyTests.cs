@@ -2,7 +2,10 @@ using FluentAssertions;
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
 using BigCommerce.Migration.Orchestration.Models;
+using BigCommerce.Migration.Orchestration.Strategies;
 using BigCommerce.Migration.UnitTests.TestHelpers;
+using Microsoft.Extensions.Logging;
+using Moq;
 using Xunit;
 
 namespace BigCommerce.Migration.UnitTests.Orchestration.Services;
@@ -14,6 +17,8 @@ namespace BigCommerce.Migration.UnitTests.Orchestration.Services;
 /// </summary>
 public class EntityTransformStrategyTests
 {
+    private readonly Mock<ILogger<BrandTransformStrategy>> _mockLogger = new();
+
     #region Interface Contract Tests (RED phase)
 
     [Fact]
@@ -245,6 +250,156 @@ public class EntityTransformStrategyTests
                 DestinationCategoryTreeId = "dest-tree-123"
             }
         };
+    }
+
+    #endregion
+
+    #region Brand Transform Strategy Comprehensive Tests
+
+    [Fact]
+    public async Task BrandTransformStrategy_Should_Transform_ToMatchBigCommerceApiFormat()
+    {
+        // ARRANGE: Create a source brand entity with various field formats
+        var sourceEntity = new Dictionary<string, object>
+        {
+            ["id"] = 123,
+            ["name"] = "Common Good",
+            ["page_title"] = "Common Good Brand Page",
+            ["meta_keywords"] = new List<string> { "modern", "clean", "contemporary" },
+            ["meta_description"] = "Common Good is a modern brand.",
+            ["search_keywords"] = "kitchen, laundry, cart, storage",
+            ["image_url"] = "https://cdn8.bigcommerce.com/s-12345/product_images/k/your-image-name.png",
+            ["custom_url"] = new Dictionary<string, object>
+            {
+                ["url"] = "/shoes",
+                ["is_customized"] = true
+            }
+        };
+
+        var strategy = new BrandTransformStrategy(_mockLogger.Object);
+
+        // ACT: Transform the entity
+        var result = await strategy.TransformEntityAsync(
+            sourceEntity,
+            "test-migration-id",
+            TestDataFactory.CreateSourceStoreConfiguration(),
+            TestDataFactory.CreateDestinationStoreConfiguration()
+        );
+
+        // ASSERT: Verify the transformation matches BigCommerce API format exactly
+        result.Should().NotBeNull();
+        result.Should().ContainKey("name").WhoseValue.Should().Be("Common Good");
+        result.Should().ContainKey("page_title").WhoseValue.Should().Be("Common Good Brand Page");
+        result.Should().ContainKey("meta_keywords").WhoseValue.Should().BeEquivalentTo(new List<string> { "modern", "clean", "contemporary" });
+        result.Should().ContainKey("meta_description").WhoseValue.Should().Be("Common Good is a modern brand.");
+        result.Should().ContainKey("search_keywords").WhoseValue.Should().Be("kitchen, laundry, cart, storage");
+        result.Should().ContainKey("image_url").WhoseValue.Should().Be("https://cdn8.bigcommerce.com/s-12345/product_images/k/your-image-name.png");
+        result.Should().ContainKey("custom_url");
+
+        var customUrl = result["custom_url"] as Dictionary<string, object>;
+        customUrl.Should().NotBeNull();
+        customUrl!.Should().ContainKey("url").WhoseValue.Should().Be("/shoes");
+        customUrl.Should().ContainKey("is_customized").WhoseValue.Should().Be(true);
+
+        // Verify source ID is NOT included (should be cleaned)
+        result.Should().NotContainKey("id");
+    }
+
+    [Fact]
+    public async Task BrandTransformStrategy_Should_HandleAlternativeFieldNames()
+    {
+        // ARRANGE: Create a source brand with alternative field names
+        var sourceEntity = new Dictionary<string, object>
+        {
+            ["brand_name"] = "Alternative Brand",
+            ["seo_title"] = "SEO Optimized Title",
+            ["keywords"] = "keyword1, keyword2, keyword3",
+            ["description"] = "Brand description for meta",
+            ["logo_url"] = "https://example.com/logo.png",
+            ["slug"] = "alternative-brand"
+        };
+
+        var strategy = new BrandTransformStrategy(_mockLogger.Object);
+
+        // ACT: Transform the entity
+        var result = await strategy.TransformEntityAsync(
+            sourceEntity,
+            "test-migration-id",
+            TestDataFactory.CreateSourceStoreConfiguration(),
+            TestDataFactory.CreateDestinationStoreConfiguration()
+        );
+
+        // ASSERT: Verify alternative fields are mapped correctly
+        result.Should().ContainKey("name").WhoseValue.Should().Be("Alternative Brand");
+        result.Should().ContainKey("page_title").WhoseValue.Should().Be("SEO Optimized Title");
+        result.Should().ContainKey("meta_keywords").WhoseValue.Should().BeEquivalentTo(new List<string> { "keyword1", "keyword2", "keyword3" });
+        result.Should().ContainKey("meta_description").WhoseValue.Should().Be("Brand description for meta");
+        result.Should().ContainKey("image_url").WhoseValue.Should().Be("https://example.com/logo.png");
+        result.Should().ContainKey("custom_url");
+
+        var customUrl = result["custom_url"] as Dictionary<string, object>;
+        customUrl.Should().NotBeNull();
+        customUrl!.Should().ContainKey("url").WhoseValue.Should().Be("/alternative-brand");
+        customUrl.Should().ContainKey("is_customized").WhoseValue.Should().Be(true);
+    }
+
+    [Fact]
+    public async Task BrandTransformStrategy_Should_HandleMinimalData()
+    {
+        // ARRANGE: Create a minimal brand entity (name only)
+        var sourceEntity = new Dictionary<string, object>
+        {
+            ["name"] = "Minimal Brand"
+        };
+
+        var strategy = new BrandTransformStrategy(_mockLogger.Object);
+
+        // ACT: Transform the entity
+        var result = await strategy.TransformEntityAsync(
+            sourceEntity,
+            "test-migration-id",
+            TestDataFactory.CreateSourceStoreConfiguration(),
+            TestDataFactory.CreateDestinationStoreConfiguration()
+        );
+
+        // ASSERT: Verify minimal transformation
+        result.Should().NotBeNull();
+        result.Should().ContainKey("name").WhoseValue.Should().Be("Minimal Brand");
+        result.Should().ContainKey("page_title").WhoseValue.Should().Be("Minimal Brand"); // Falls back to name
+
+        // Should not contain optional fields when not provided
+        result.Should().NotContainKey("meta_keywords");
+        result.Should().NotContainKey("meta_description");
+        result.Should().NotContainKey("search_keywords");
+        result.Should().NotContainKey("image_url");
+        result.Should().NotContainKey("custom_url");
+    }
+
+    [Fact]
+    public async Task BrandTransformStrategy_Should_HandleStringBasedMetaKeywords()
+    {
+        // ARRANGE: Create a brand with comma-separated meta keywords
+        var sourceEntity = new Dictionary<string, object>
+        {
+            ["name"] = "String Keywords Brand",
+            ["meta_keywords"] = "eco-friendly, sustainable, organic"
+        };
+
+        var strategy = new BrandTransformStrategy(_mockLogger.Object);
+
+        // ACT: Transform the entity
+        var result = await strategy.TransformEntityAsync(
+            sourceEntity,
+            "test-migration-id",
+            TestDataFactory.CreateSourceStoreConfiguration(),
+            TestDataFactory.CreateDestinationStoreConfiguration()
+        );
+
+        // ASSERT: Verify string meta keywords are converted to array
+        result.Should().ContainKey("meta_keywords");
+        var metaKeywords = result["meta_keywords"] as List<string>;
+        metaKeywords.Should().NotBeNull();
+        metaKeywords!.Should().BeEquivalentTo(new List<string> { "eco-friendly", "sustainable", "organic" });
     }
 
     #endregion

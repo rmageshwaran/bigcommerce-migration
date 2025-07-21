@@ -260,8 +260,13 @@ public class LSP_ErrorHandlingConsistencyTests
     public void LSP_AllStrategyFactories_ShouldHandleInvalidInput_WithConsistentExceptions()
     {
         // Arrange
-        var serviceProvider = new Mock<IServiceProvider>().Object;
-        var fetchFactory = new EntityFetchStrategyFactory(serviceProvider);
+        var mockLogger = new Mock<ILogger<EntityFetchStrategyFactory>>();
+        var strategies = new List<IEntityFetchStrategy>
+        {
+            new CategoryFetchStrategy(_mockApiClient.Object, _mockCategoryLogger.Object),
+            new BrandFetchStrategy(_mockApiClient.Object, _mockBrandLogger.Object)
+        };
+        var fetchFactory = new EntityFetchStrategyFactory(strategies, mockLogger.Object);
 
         var exceptionTypes = new List<Type>();
 

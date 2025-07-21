@@ -81,6 +81,7 @@ public static class ServiceCollectionExtensions
         // Register API request handler for HTTP concerns (required by BigCommerceApiClient)
         services.TryAddSingleton<IApiRequestHandler, ApiRequestHandler>();
         services.TryAddSingleton<IBigCommerceApiClient, BigCommerceApiClient>();
+        services.TryAddSingleton<IBatchApiClient, BatchApiClient>();
         
         // Register segregated API client interfaces (Interface Segregation Principle)
         services.TryAddSingleton<ICategoryApiClient, CategoryApiService>();

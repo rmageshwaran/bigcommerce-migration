@@ -199,38 +199,34 @@ public class BatchPerformanceValidationTests : IClassFixture<PerformanceTestFixt
         var storeConfig = _fixture.CreateTestStoreConfiguration();
         var products = _fixture.CreateTestProducts(entityCount);
         var categories = _fixture.CreateTestCategories(entityCount);
-        var brands = _fixture.CreateTestBrands(entityCount);
         
         _output.WriteLine($"🔄 MULTI-ENTITY BATCH VALIDATION:");
-        _output.WriteLine($"   Testing {entityCount} each of products, categories, and brands");
+        _output.WriteLine($"   Testing {entityCount} each of products and categories");
+        _output.WriteLine($"   NOTE: Brands are excluded as BigCommerce API only supports individual brand creation");
 
         // ACT: Execute batch operations for different entity types
         var totalStopwatch = Stopwatch.StartNew();
         
         var productTask = _batchApiClient.CreateProductsBatchAsync(storeConfig, products, CancellationToken.None);
         var categoryTask = _batchApiClient.CreateCategoriesBatchAsync(storeConfig, categories, CancellationToken.None);
-        var brandTask = _batchApiClient.CreateBrandsBatchAsync(storeConfig, brands, CancellationToken.None);
         
-        var results = await Task.WhenAll(productTask, categoryTask, brandTask);
+        var results = await Task.WhenAll(productTask, categoryTask);
         totalStopwatch.Stop();
 
         var productResults = results[0];
         var categoryResults = results[1];
-        var brandResults = results[2];
 
         // ASSERT: Validate all entity types processed successfully
         productResults.Should().HaveCount(entityCount, "All products should be processed");
         categoryResults.Should().HaveCount(entityCount, "All categories should be processed");
-        brandResults.Should().HaveCount(entityCount, "All brands should be processed");
 
-        var totalEntities = entityCount * 3;
+        var totalEntities = entityCount * 2;
         var totalTimeMs = totalStopwatch.ElapsedMilliseconds;
         var overallThroughput = (double)totalEntities / (totalTimeMs / 1000.0);
 
         _output.WriteLine($"✅ MULTI-ENTITY BATCH SUCCESS:");
         _output.WriteLine($"   Products: {productResults.Count}/{entityCount} processed");
         _output.WriteLine($"   Categories: {categoryResults.Count}/{entityCount} processed");
-        _output.WriteLine($"   Brands: {brandResults.Count}/{entityCount} processed");
         _output.WriteLine($"   Total Time: {totalTimeMs}ms for {totalEntities} entities");
         _output.WriteLine($"   Combined Throughput: {overallThroughput:F1} entities/sec");
     }

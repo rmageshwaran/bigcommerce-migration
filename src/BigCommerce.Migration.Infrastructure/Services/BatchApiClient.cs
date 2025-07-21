@@ -19,7 +19,7 @@ public class BatchApiClient : IBatchApiClient
     private const int MaxProductBatchSize = 10;     // BigCommerce products batch limit
     private const int MaxCategoryBatchSize = 50;    // BigCommerce categories batch limit
     private const int MaxVariantBatchSize = 50;     // BigCommerce variants batch limit
-    private const int MaxBrandBatchSize = 50;       // BigCommerce brands batch limit
+
 
     /// <summary>
     /// Initializes a new instance of the BatchApiClient with dependency injection
@@ -269,50 +269,7 @@ public class BatchApiClient : IBatchApiClient
         return results;
     }
 
-    /// <summary>
-    /// Creates multiple brands in a single batch operation
-    /// Optimizes brand creation for large migrations
-    /// </summary>
-    public async Task<List<Dictionary<string, object>>> CreateBrandsBatchAsync(
-        StoreConfiguration storeConfig,
-        List<Dictionary<string, object>> brands,
-        CancellationToken cancellationToken)
-    {
-        ValidateStoreConfiguration(storeConfig);
-        ValidateBrands(brands);
 
-        _logger.LogInformation("Creating {Count} brands in batches for store {StoreId}", 
-            brands.Count, storeConfig.StoreId);
-
-        var results = new List<Dictionary<string, object>>();
-        var batches = brands.Chunk(MaxBrandBatchSize);
-        var batchNumber = 1;
-
-        foreach (var batch in batches)
-        {
-            try
-            {
-                var batchResults = await CreateBrandBatchInternal(storeConfig, batch.ToList(), cancellationToken);
-                results.AddRange(batchResults);
-                
-                _logger.LogDebug("Successfully created brand batch {BatchNumber} with {Count} brands", 
-                    batchNumber, batchResults.Count);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to create brand batch {BatchNumber} for store {StoreId}", 
-                    batchNumber, storeConfig.StoreId);
-                throw;
-            }
-
-            batchNumber++;
-        }
-
-        _logger.LogInformation("Successfully created {TotalCount} brands in {BatchCount} batch calls", 
-            results.Count, batchNumber - 1);
-
-        return results;
-    }
 
     /// <summary>
     /// Gets performance metrics for batch operations
@@ -484,27 +441,7 @@ public class BatchApiClient : IBatchApiClient
         return ExtractDataFromResponse(response, "variants");
     }
 
-    /// <summary>
-    /// Internal method for creating a batch of brands
-    /// </summary>
-    private async Task<List<Dictionary<string, object>>> CreateBrandBatchInternal(
-        StoreConfiguration storeConfig,
-        List<Dictionary<string, object>> brands,
-        CancellationToken cancellationToken)
-    {
-        // BigCommerce batch brands endpoint
-        var url = $"{storeConfig.GetApiBaseUrl()}/catalog/brands";
-        
-        var jsonContent = JsonSerializer.Serialize(brands, new JsonSerializerOptions
-        {
-            PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
-        });
 
-        var request = ApiRequest.CreatePost(url, jsonContent, storeConfig);
-        var response = await _apiRequestHandler.ExecuteRequestAsync<Dictionary<string, object>>(request, cancellationToken);
-
-        return ExtractDataFromResponse(response, "brands");
-    }
 
     #endregion
 
@@ -579,21 +516,7 @@ public class BatchApiClient : IBatchApiClient
         }
     }
 
-    /// <summary>
-    /// Validates brands data
-    /// </summary>
-    private static void ValidateBrands(List<Dictionary<string, object>> brands)
-    {
-        if (brands == null)
-        {
-            throw new ArgumentNullException(nameof(brands));
-        }
 
-        if (brands.Count == 0)
-        {
-            throw new ArgumentException("Brands list cannot be empty", nameof(brands));
-        }
-    }
 
     /// <summary>
     /// Validates product ID

@@ -78,18 +78,7 @@ public interface IBatchApiClient
         List<Dictionary<string, object>> variants,
         CancellationToken cancellationToken);
 
-    /// <summary>
-    /// Creates multiple brands in a single batch operation
-    /// Optimizes brand creation for large migrations
-    /// </summary>
-    /// <param name="storeConfig">Store configuration with credentials</param>
-    /// <param name="brands">Brands to create in batch</param>
-    /// <param name="cancellationToken">Cancellation token</param>
-    /// <returns>List of created brands with assigned IDs</returns>
-    Task<List<Dictionary<string, object>>> CreateBrandsBatchAsync(
-        StoreConfiguration storeConfig,
-        List<Dictionary<string, object>> brands,
-        CancellationToken cancellationToken);
+
 
     /// <summary>
     /// Gets performance metrics for batch operations

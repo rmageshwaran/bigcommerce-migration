@@ -5,118 +5,11 @@ namespace BigCommerce.Migration.Core.Interfaces;
 /// <summary>
 /// Interface for BigCommerce API client operations
 /// Now supports request-based store credentials instead of hardcoded configuration
+/// Follows Interface Segregation Principle by inheriting from focused interfaces
 /// </summary>
-public interface IBigCommerceApiClient
+public interface IBigCommerceApiClient : ICategoryApiClient, IProductApiClient, IPaginationApiClient, IApiHealthClient
 {
-    /// <summary>
-    /// Gets category trees for a specific store and channel
-    /// </summary>
-    /// <param name="storeConfig">Store configuration with credentials</param>
-    /// <param name="cancellationToken">Cancellation token</param>
-    /// <returns>List of category trees</returns>
-    Task<List<Dictionary<string, object>>> GetCategoryTreesAsync(StoreConfiguration storeConfig, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Gets categories from a specific category tree
-    /// </summary>
-    /// <param name="storeConfig">Store configuration with credentials</param>
-    /// <param name="categoryTreeId">Category tree identifier</param>
-    /// <param name="cancellationToken">Cancellation token</param>
-    /// <returns>List of categories</returns>
-    Task<List<Dictionary<string, object>>> GetCategoriesAsync(StoreConfiguration storeConfig, string categoryTreeId, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Creates categories in a specific category tree
-    /// </summary>
-    /// <param name="storeConfig">Store configuration with credentials</param>
-    /// <param name="categoryTreeId">Category tree identifier</param>
-    /// <param name="categories">Categories to create</param>
-    /// <param name="cancellationToken">Cancellation token</param>
-    /// <returns>List of created categories</returns>
-    Task<List<Dictionary<string, object>>> CreateCategoriesAsync(StoreConfiguration storeConfig, string categoryTreeId, List<Dictionary<string, object>> categories, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Gets products from a specific store and channel with pagination
-    /// </summary>
-    /// <param name="storeConfig">Store configuration with credentials</param>
-    /// <param name="page">Page number for pagination</param>
-    /// <param name="limit">Number of products per page</param>
-    /// <param name="cancellationToken">Cancellation token</param>
-    /// <returns>List of products</returns>
-    Task<List<Dictionary<string, object>>> GetProductsAsync(StoreConfiguration storeConfig, int page = 1, int limit = 50, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Creates products in a specific store and channel
-    /// </summary>
-    /// <param name="storeConfig">Store configuration with credentials</param>
-    /// <param name="products">Products to create</param>
-    /// <param name="cancellationToken">Cancellation token</param>
-    /// <returns>List of created products</returns>
-    Task<List<Dictionary<string, object>>> CreateProductsAsync(StoreConfiguration storeConfig, List<Dictionary<string, object>> products, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Checks if the BigCommerce API is healthy for a specific store
-    /// </summary>
-    /// <param name="storeConfig">Store configuration with credentials</param>
-    /// <param name="cancellationToken">Cancellation token</param>
-    /// <returns>True if API is healthy, false otherwise</returns>
-    Task<bool> IsHealthyAsync(StoreConfiguration storeConfig, CancellationToken cancellationToken = default);
-
-    // Additional methods for activity functions
-    
-    // Legacy GetCategoriesAsync and GetBrandsAsync methods removed - use GetCategoryPageAsync and GetBrandPageAsync instead
-    // Legacy GetProductsAsync with ProductQueryOptions removed - use GetProductPageAsync instead
-
-    /// <summary>
-    /// Gets product variants for a specific product
-    /// </summary>
-    /// <param name="storeConfig">Store configuration with credentials</param>
-    /// <param name="productId">Product ID</param>
-    /// <param name="cancellationToken">Cancellation token</param>
-    /// <returns>List of product variant summaries</returns>
-    Task<List<ProductVariantSummary>> GetProductVariantsAsync(StoreConfiguration storeConfig, int productId, CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Gets product images for a specific product
-    /// </summary>
-    /// <param name="storeConfig">Store configuration with credentials</param>
-    /// <param name="productId">Product ID</param>
-    /// <param name="cancellationToken">Cancellation token</param>
-    /// <returns>List of product image summaries</returns>
-    Task<List<ProductImageSummary>> GetProductImagesAsync(StoreConfiguration storeConfig, int productId, CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Gets product modifiers for a specific product
-    /// </summary>
-    /// <param name="storeConfig">Store configuration with credentials</param>
-    /// <param name="productId">Product ID</param>
-    /// <param name="cancellationToken">Cancellation token</param>
-    /// <returns>List of product modifier summaries</returns>
-    Task<List<ProductModifierSummary>> GetProductModifiersAsync(StoreConfiguration storeConfig, int productId, CancellationToken cancellationToken);
-
-    // Paginated API methods
-    
-    /// <summary>
-    /// Detects the BigCommerce API version for a store
-    /// </summary>
-    /// <param name="storeConfig">Store configuration with credentials</param>
-    /// <param name="cancellationToken">Cancellation token</param>
-    /// <returns>API version (V2 or V3)</returns>
-    Task<BigCommerceApiVersion> DetectApiVersionAsync(StoreConfiguration storeConfig, CancellationToken cancellationToken);
-    
-    /// <summary>
-    /// Gets a paginated response for any entity type with automatic API version handling
-    /// </summary>
-    /// <param name="storeConfig">Store configuration with credentials</param>
-    /// <param name="entityType">Type of entity to fetch</param>
-    /// <param name="paginationRequest">Pagination parameters</param>
-    /// <param name="cancellationToken">Cancellation token</param>
-    /// <returns>Paginated response with data and meta information</returns>
-    Task<BigCommercePaginatedResponse<Dictionary<string, object>>> GetPaginatedEntitiesAsync(
-        StoreConfiguration storeConfig, 
-        string entityType, 
-        BigCommercePaginationRequest paginationRequest, 
-        CancellationToken cancellationToken);
+    // Additional methods unique to the composite interface
     
     /// <summary>
     /// Gets a specific page of products with pagination metadata
@@ -151,20 +44,6 @@ public interface IBigCommerceApiClient
     /// <returns>Paginated brands response</returns>
     Task<BigCommercePaginatedResponse<BrandSummary>> GetBrandPageAsync(
         StoreConfiguration storeConfig,
-        BigCommercePaginationRequest paginationRequest,
-        CancellationToken cancellationToken);
-    
-    /// <summary>
-    /// Gets all entities of a specific type using pagination (streaming approach)
-    /// </summary>
-    /// <param name="storeConfig">Store configuration with credentials</param>
-    /// <param name="entityType">Type of entity to fetch</param>
-    /// <param name="paginationRequest">Base pagination parameters</param>
-    /// <param name="cancellationToken">Cancellation token</param>
-    /// <returns>Async enumerable of entity pages</returns>
-    IAsyncEnumerable<BigCommercePaginatedResponse<Dictionary<string, object>>> GetAllEntitiesPaginatedAsync(
-        StoreConfiguration storeConfig,
-        string entityType,
         BigCommercePaginationRequest paginationRequest,
         CancellationToken cancellationToken);
     
@@ -246,8 +125,6 @@ public class ProductModifierSummary
     /// <summary>Product ID</summary>
     public int ProductId { get; set; }
 }
-
-// Legacy CategoryQueryOptions, BrandQueryOptions, and ProductQueryOptions classes removed - use BigCommercePaginationRequest instead
 
 /// <summary>
 /// BigCommerce API exception

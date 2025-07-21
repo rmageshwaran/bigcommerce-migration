@@ -209,9 +209,9 @@ public class MigrationHttpFunctions
     /// <param name="migrationId">Migration ID</param>
     /// <param name="context">Function execution context</param>
     /// <returns>HTTP response with migration status</returns>
-    [Function("GetMigrationStatus")]
-    [OpenApiOperation(operationId: "GetMigrationStatus", tags: new[] { "Migrations" },
-        Summary = "Get migration status",
+    [Function("GetMigrationStatusHttp")]
+    [OpenApiOperation(operationId: "GetMigrationStatusHttp", tags: new[] { "Migrations" },
+        Summary = "Get migration status (HTTP API)",
         Description = "Retrieves the current status and progress information for a specific migration.")]
     [OpenApiParameter(name: "migrationId", In = ParameterLocation.Path, Required = true, Type = typeof(string),
         Description = "Unique identifier of the migration")]
@@ -222,7 +222,7 @@ public class MigrationHttpFunctions
     [OpenApiResponseWithBody(statusCode: HttpStatusCode.Unauthorized, contentType: "application/json",
         bodyType: typeof(object), Description = "Authentication required")]
     public async Task<HttpResponseData> GetMigrationStatus(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "migrations/{migrationId}")] HttpRequestData req,
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "migrations/{migrationId}/status-http")] HttpRequestData req,
         string migrationId,
         FunctionContext context)
     {
@@ -986,6 +986,7 @@ public class MigrationHttpFunctions
                 }
                 
                 // Extract additional error details from additionalData
+                string? detailedErrorMessage = null;
                 if (logDict.TryGetValue("additionalData", out var errorAdditionalData))
                 {
                     Dictionary<string, object>? errorAdditionalDataDict = null;
@@ -1003,6 +1004,12 @@ public class MigrationHttpFunctions
                     {
                         errorMessage = additionalErrorMessage?.ToString() ?? errorMessage;
                     }
+                    
+                    // Extract detailedErrorMessage from additionalData if available
+                    if (errorAdditionalDataDict?.TryGetValue("detailedErrorMessage", out var additionalDetailedErrorMessage) == true)
+                    {
+                        detailedErrorMessage = additionalDetailedErrorMessage?.ToString();
+                    }
                 }
                 
                 var errorInfo = new
@@ -1011,6 +1018,7 @@ public class MigrationHttpFunctions
                     category = category,
                     entityType = GetEntityTypeFromLog(logDict),
                     errorMessage = errorMessage,
+                    detailedErrorMessage = detailedErrorMessage, // Add the detailed error message
                     context = logDict.TryGetValue("context", out var ctx) ? ctx : null,
                     stackTrace = stackTrace,
                     requestPayloadBlobUrl = GetRequestPayloadBlobUrl(logDict),

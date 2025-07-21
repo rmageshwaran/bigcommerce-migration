@@ -158,6 +158,10 @@ public class EntityMigrationOrchestrator
     /// <returns>List of batch processing requests</returns>
     private List<BatchProcessingRequest> CreateBatches(List<string> entityIds, EntityMigrationRequest request, EntityDiscoveryResult discoveryResult)
     {
+        // ✅ DEBUG: Log discovery result status at the start
+        _logger.LogWarning("🔍 DEBUG: CreateBatches called - HasEntityData: {HasEntityData}, EntityDataCount: {EntityDataCount}, EntityIdsCount: {EntityIdsCount}",
+            discoveryResult.HasEntityData, discoveryResult.EntityData?.Count ?? 0, entityIds.Count);
+
         // Determine effective batch size (EntityConfig override takes priority)
         int batchSize = request.EntityConfig.BatchSizeOverride ?? request.BatchSize;
         
@@ -168,6 +172,8 @@ public class EntityMigrationOrchestrator
         }
 
         var batches = new List<BatchProcessingRequest>();
+
+        // Standard entity-ID-based batching (works for all strategies)
         var totalBatches = (int)Math.Ceiling((double)entityIds.Count / batchSize);
 
         for (int i = 0; i < totalBatches; i++)
@@ -189,6 +195,11 @@ public class EntityMigrationOrchestrator
                 CategoryTreeContext = request.CategoryTreeContext,
                 CachedEntityData = discoveryResult.HasEntityData ? discoveryResult.EntityData : null
             };
+
+            // ✅ DEBUG: Log cached data status for troubleshooting
+            _logger.LogWarning("🔍 DEBUG: Batch {BatchNumber} for {EntityType} - HasEntityData: {HasEntityData}, CachedCount: {CachedCount}, EntityIds: [{EntityIds}]",
+                i + 1, request.EntityType, discoveryResult.HasEntityData, 
+                discoveryResult.EntityData?.Count ?? 0, string.Join(", ", batchEntityIds));
 
             batches.Add(batchRequest);
         }

@@ -59,7 +59,7 @@ public class MigrationQueueFunctions
             // Convert Azure Queue Message to our custom QueueMessage model
             var queueMessage = ConvertAzureQueueMessage(azureQueueMessage);
             
-            await ProcessMigrationStartMessageInternal(queueMessage, new DurableTaskClientWrapper(durableTaskClient), cancellationToken);
+            await ProcessMigrationStartMessageInternal(queueMessage, new DurableTaskClientWrapper(durableTaskClient), cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -90,7 +90,7 @@ public class MigrationQueueFunctions
             _logger.LogInformation("Processing migration start message. MessageId: {MessageId}", queueMessage.MessageId);
 
             // Validate and parse the queue message
-            var validationResult = await _queueService.ValidateQueueMessageAsync(queueMessage);
+            var validationResult = await _queueService.ValidateQueueMessageAsync(queueMessage).ConfigureAwait(false);
             if (!validationResult.IsValid)
             {
                 _logger.LogWarning("Invalid migration start message. MessageId: {MessageId}, Validation: {ValidationError}", 
@@ -106,7 +106,7 @@ public class MigrationQueueFunctions
             }
 
             // Extract and parse the migration request from the queue message
-            var migrationData = await ExtractMigrationDataFromMessage(queueMessage);
+            var migrationData = await ExtractMigrationDataFromMessage(queueMessage).ConfigureAwait(false);
             if (migrationData == null)
             {
                 _logger.LogError("Failed to extract migration data from message. MessageId: {MessageId}", queueMessage.MessageId);
@@ -126,12 +126,12 @@ public class MigrationQueueFunctions
             // Update migration status to InProgress
             try
             {
-                var migrationEntry = await _migrationStorageService.GetMigrationAsync(migrationId);
+                var migrationEntry = await _migrationStorageService.GetMigrationAsync(migrationId).ConfigureAwait(false);
                 if (migrationEntry != null)
                 {
                     migrationEntry.Status = Core.Models.MigrationStatus.InProgress;
                     migrationEntry.UpdatedAt = DateTime.UtcNow;
-                    await _migrationStorageService.UpdateMigrationAsync(migrationEntry);
+                    await _migrationStorageService.UpdateMigrationAsync(migrationEntry).ConfigureAwait(false);
                     
                     _logger.LogInformation("Updated migration status to InProgress for MigrationId: {MigrationId}", migrationId);
                 }
@@ -158,7 +158,7 @@ public class MigrationQueueFunctions
                 { 
                     InstanceId = $"migration-{migrationId}",
                     StartAt = DateTime.UtcNow
-                });
+                }).ConfigureAwait(false);
 
             _logger.LogInformation("Started migration orchestrator for MigrationId: {MigrationId}, InstanceId: {InstanceId}", 
                 migrationId, instanceId);
@@ -171,7 +171,7 @@ public class MigrationQueueFunctions
                 entities = migrationData.MigrationRequest.Entities,
                 sourceStore = migrationData.MigrationRequest.SourceStore?.StoreId ?? "unknown",
                 destinationStore = migrationData.MigrationRequest.DestinationStore?.StoreId ?? "unknown"
-            }, cancellationToken);
+            }, cancellationToken).ConfigureAwait(false);
 
             _logger.LogInformation("Successfully started migration processing for MigrationId: {MigrationId}", migrationId);
         }
@@ -226,7 +226,7 @@ public class MigrationQueueFunctions
     {
         // Convert Azure Queue Message to our custom QueueMessage model
         var queueMessage = ConvertAzureQueueMessage(azureQueueMessage);
-        await ProcessEntityBatchMessageInternal(queueMessage, cancellationToken);
+                    await ProcessEntityBatchMessageInternal(queueMessage, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -348,7 +348,7 @@ public class MigrationQueueFunctions
     {
         // Convert Azure Queue Message to our custom QueueMessage model
         var queueMessage = ConvertAzureQueueMessage(azureQueueMessage);
-        await ProcessCancellationMessageInternal(queueMessage, new DurableTaskClientWrapper(durableTaskClient), cancellationToken);
+                    await ProcessCancellationMessageInternal(queueMessage, new DurableTaskClientWrapper(durableTaskClient), cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>

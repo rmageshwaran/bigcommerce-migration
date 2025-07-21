@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # Azure Storage Emulator (Azurite) for local development
   azurite:
@@ -14,14 +12,12 @@ services:
     command: "azurite --silent --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0 --location /data --debug /data/debug.log"
     environment:
       - AZURITE_ACCOUNTS=devstoreaccount1
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:10000/devstoreaccount1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    restart: unless-stopped
 
-  # BigCommerce Migration Functions
+    restart: unless-stopped
+    networks:
+      - bigcommerce-network
+
+  # BigCommerce Migration Functions (Main API Service)
   bigcommerce-functions:
     build:
       context: .
@@ -36,6 +32,7 @@ services:
       - WEBSITE_RUN_FROM_PACKAGE=1
       - FUNCTIONS_EXTENSION_VERSION=~4
       - ASPNETCORE_ENVIRONMENT=Development
+      - WEBSITE_HOSTNAME=localhost:7071
       
       # Queue Configuration (matches our fixed environment variables)
       - MigrationStartQueueName=migration-start
@@ -68,8 +65,23 @@ services:
       - AppSettings__MaxConcurrency=3
       - AppSettings__RetryAttempts=3
       
-      # SignalR Configuration (optional for local testing)
-      - AzureSignalR=Endpoint=http://localhost:8080;Port=8080;
+      # SignalR Configuration (using Azure SignalR service)
+      - AzureSignalRConnectionString=Endpoint=https://vortexiq-migration-signalr-dev.service.signalr.net;AccessKey=5LdRJbZb7Mq7Es4urlymsqw70FBjWHdqcJ7NALcGPRFrf67639RGJQQJ99BGACYeBjFXJ3w3AAAAASRSlVgW;Version=1.0;
+      - ConnectionStrings__AzureSignalR=Endpoint=https://vortexiq-migration-signalr-dev.service.signalr.net;AccessKey=5LdRJbZb7Mq7Es4urlymsqw70FBjWHdqcJ7NALcGPRFrf67639RGJQQJ99BGACYeBjFXJ3w3AAAAASRSlVgW;Version=1.0;
+      
+      # SignalR Performance Optimization Configuration
+      - SignalR__BaseUrl=http://localhost:7071
+      - SignalR__TimeoutSeconds=30
+      - SignalR__Enabled=true
+      - SignalR__EnableDebugLogging=false
+      - SignalR__MaxRetries=0
+      - SignalR__EnableAsyncQueuing=true
+      - SignalR__EnableBatching=false
+      - SignalR__EnableHttpService=true
+      - SignalR__Batching__BatchSize=15
+      - SignalR__Batching__BatchTimeoutMs=300
+      - SignalR__Batching__MaxQueueSize=2000
+      - SignalR__Batching__Enabled=false
       
       # Logging Configuration
       - Logging__LogLevel__Default=Information
@@ -77,8 +89,7 @@ services:
       - Logging__LogLevel__Microsoft=Warning
       
     depends_on:
-      azurite:
-        condition: service_healthy
+      - azurite
     volumes:
       - ./src/BigCommerce.Migration.Functions:/app
       - functions-logs:/tmp/functions-logs
@@ -88,6 +99,8 @@ services:
       timeout: 10s
       retries: 5
     restart: unless-stopped
+    networks:
+      - bigcommerce-network
 
   # Migration Dashboard (React App)
   bigcommerce-dashboard:
@@ -98,10 +111,12 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - REACT_APP_API_BASE_URL=http://localhost:7071/api/dashboard
-      - REACT_APP_SIGNALR_URL=http://localhost:7071/api
+      - REACT_APP_API_BASE_URL=http://bigcommerce-functions/api/dashboard
+      - REACT_APP_SIGNALR_URL=http://bigcommerce-functions/api
       - REACT_APP_ENVIRONMENT=development
       - CHOKIDAR_USEPOLLING=true
+      - NODE_ENV=development
+      - DOCKER_ENV=true
     volumes:
       - ./src/BigCommerce.Migration.Dashboard/src:/app/src
       - ./src/BigCommerce.Migration.Dashboard/public:/app/public
@@ -109,23 +124,153 @@ services:
     depends_on:
       - bigcommerce-functions
     restart: unless-stopped
+    networks:
+      - bigcommerce-network
 
-  # Optional: SignalR Service (for real-time updates)
-  signalr-emulator:
-    image: mcr.microsoft.com/signalr/signalr:latest
-    container_name: bigcommerce-signalr
-    ports:
-      - "8080:80"
+
+
+  # Test Services - Unit Tests
+  unit-tests:
+    build:
+      context: .
+      dockerfile: Dockerfile.tests
+      target: unit-tests
+    container_name: bigcommerce-unit-tests
     environment:
-      - ASPNETCORE_ENVIRONMENT=Development
-    restart: unless-stopped
+      - ASPNETCORE_ENVIRONMENT=Testing
+      - ConnectionStrings__AzureStorage=DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;QueueEndpoint=http://azurite:10001/devstoreaccount1;TableEndpoint=http://azurite:10002/devstoreaccount1;
+      # SignalR Test Configuration (Disabled for unit tests)
+      - SignalR__BaseUrl=http://localhost:7071
+      - SignalR__TimeoutSeconds=5
+      - SignalR__Enabled=false
+      - SignalR__EnableDebugLogging=false
+      - SignalR__EnableAsyncQueuing=false
+      - SignalR__EnableBatching=false
+      - SignalR__EnableHttpService=false
+    volumes:
+      - test-results:/testresults
+    depends_on:
+      azurite:
+        condition: service_healthy
+    profiles:
+      - testing
+      - unit-tests
+    networks:
+      - bigcommerce-network
+
+  # Test Services - Orchestration Tests
+  orchestration-tests:
+    build:
+      context: .
+      dockerfile: Dockerfile.tests
+      target: orchestration-tests
+    container_name: bigcommerce-orchestration-tests
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Testing
+      - ConnectionStrings__AzureStorage=DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;QueueEndpoint=http://azurite:10001/devstoreaccount1;TableEndpoint=http://azurite:10002/devstoreaccount1;
+    volumes:
+      - test-results:/testresults
+    depends_on:
+      azurite:
+        condition: service_healthy
+    profiles:
+      - testing
+      - orchestration-tests
+    networks:
+      - bigcommerce-network
+
+  # Test Services - Integration Tests
+  integration-tests:
+    build:
+      context: .
+      dockerfile: Dockerfile.tests
+      target: integration-tests
+    container_name: bigcommerce-integration-tests
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Testing
+      - ConnectionStrings__AzureStorage=DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;QueueEndpoint=http://azurite:10001/devstoreaccount1;TableEndpoint=http://azurite:10002/devstoreaccount1;
+      - BigCommerce__BaseUrl=https://api.bigcommerce.com
+      # SignalR Integration Test Configuration (Enabled with basic optimizations)
+      - SignalR__BaseUrl=http://bigcommerce-functions:80
+      - SignalR__TimeoutSeconds=10
+      - SignalR__Enabled=true
+      - SignalR__EnableDebugLogging=true
+      - SignalR__EnableAsyncQueuing=true
+      - SignalR__EnableBatching=false
+      - SignalR__EnableHttpService=true
+    volumes:
+      - test-results:/testresults
+    depends_on:
+      azurite:
+        condition: service_healthy
+      bigcommerce-functions:
+        condition: service_healthy
+    profiles:
+      - testing
+      - integration-tests
+    networks:
+      - bigcommerce-network
+
+  # Test Services - Performance Tests
+  performance-tests:
+    build:
+      context: .
+      dockerfile: Dockerfile.tests
+      target: performance-tests
+    container_name: bigcommerce-performance-tests
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Testing
+      - ConnectionStrings__AzureStorage=DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;QueueEndpoint=http://azurite:10001/devstoreaccount1;TableEndpoint=http://azurite:10002/devstoreaccount1;
+      - BigCommerce__BaseUrl=https://api.bigcommerce.com
+    volumes:
+      - test-results:/testresults
+    depends_on:
+      azurite:
+        condition: service_healthy
+      bigcommerce-functions:
+        condition: service_healthy
+    profiles:
+      - testing
+      - performance-tests
+    networks:
+      - bigcommerce-network
+
+  # Test Services - All Tests (run all test suites)
+  all-tests:
+    build:
+      context: .
+      dockerfile: Dockerfile.tests
+      target: all-tests
+    container_name: bigcommerce-all-tests
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Testing
+      - ConnectionStrings__AzureStorage=DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;QueueEndpoint=http://azurite:10001/devstoreaccount1;TableEndpoint=http://azurite:10002/devstoreaccount1;
+      - BigCommerce__BaseUrl=https://api.bigcommerce.com
+    volumes:
+      - test-results:/testresults
+    depends_on:
+      azurite:
+        condition: service_healthy
+      bigcommerce-functions:
+        condition: service_healthy
+    profiles:
+      - testing
+      - all-tests
+    networks:
+      - bigcommerce-network
 
 volumes:
   azurite-data:
     driver: local
+    name: bigcommerce-azurite-data
   functions-logs:
     driver: local
+    name: bigcommerce-functions-logs
+  test-results:
+    driver: local
+    name: bigcommerce-test-results
 
 networks:
-  default:
-    name: bigcommerce-migration-network 
+  bigcommerce-network:
+    name: bigcommerce-migration-network
+    driver: bridge 

@@ -207,11 +207,14 @@ namespace BigCommerce.Migration.Functions.Functions
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 response.Headers.Add("Content-Type", "application/json");
                 
+                // Return structure that matches PaginatedResponse<T> interface expected by frontend
                 var activeMigrations = new
                 {
-                    Migrations = new List<object>(), // Placeholder for now
-                    TotalCount = 0,
-                    Timestamp = DateTime.UtcNow
+                    data = new List<object>(), // Empty list for now - matches frontend expectation
+                    totalCount = 0,
+                    page = 1,
+                    pageSize = 10,
+                    totalPages = 0
                 };
 
                 await response.WriteStringAsync(JsonSerializer.Serialize(activeMigrations), cancellationToken);
@@ -246,22 +249,22 @@ namespace BigCommerce.Migration.Functions.Functions
                 
                 var healthData = new
                 {
-                    Status = "healthy",
-                    Timestamp = DateTime.UtcNow,
-                    Services = new
+                    status = "healthy",
+                    timestamp = DateTime.UtcNow.ToString("O"), // ISO 8601 format for proper parsing
+                    services = new
                     {
-                        Database = await CheckDatabaseHealth(cancellationToken),
-                        Storage = await CheckStorageHealth(cancellationToken),
-                        RateLimit = await CheckRateLimitHealth(cancellationToken),
-                        SignalR = await CheckSignalRHealth(cancellationToken)
+                        database = await CheckDatabaseHealth(cancellationToken),
+                        storage = await CheckStorageHealth(cancellationToken),
+                        rateLimit = await CheckRateLimitHealth(cancellationToken),
+                        signalR = await CheckSignalRHealth(cancellationToken)
                     },
-                    SystemMetrics = new
+                    systemMetrics = new
                     {
-                        ActiveMigrations = 0, // Placeholder
-                        TotalProcessedEntities = 0, // Placeholder
-                        AverageProcessingSpeed = 0.0, // Placeholder
-                        ErrorRate = 0.0, // Placeholder
-                        UptimeSeconds = GetUptimeSeconds()
+                        activeMigrations = 0, // Placeholder
+                        totalProcessedEntities = 0, // Placeholder
+                        averageProcessingSpeed = 0.0, // Placeholder
+                        errorRate = 0.0, // Placeholder
+                        uptimeSeconds = GetUptimeSeconds()
                     }
                 };
 

@@ -36,7 +36,9 @@ public class QueueService : IQueueService
         if (configuration == null)
             throw new ArgumentNullException(nameof(configuration));
         
+        // Try ConnectionStrings section first, then fall back to Values section (Azure Functions style)
         _connectionString = configuration.GetConnectionString("AzureWebJobsStorage") 
+            ?? configuration["AzureWebJobsStorage"]
             ?? throw new ArgumentNullException(nameof(configuration), "AzureWebJobsStorage connection string is required");
         
         _queueServiceClient = new QueueServiceClient(_connectionString);

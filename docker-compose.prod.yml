@@ -1,0 +1,228 @@
+# Docker Compose for Production Environment
+# Use with: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up
+
+version: '3.8'
+
+services:
+  # Production BigCommerce Functions
+  bigcommerce-functions:
+    build:
+      context: .
+      dockerfile: Dockerfile.functions
+      args:
+        - BUILDKIT_INLINE_CACHE=1
+    image: bigcommerce-migration/functions:latest
+    container_name: bigcommerce-functions-prod
+    restart: always
+    environment:
+      # Production Function Configuration
+      - ASPNETCORE_ENVIRONMENT=Production
+      - FUNCTIONS_WORKER_RUNTIME=dotnet-isolated
+      - WEBSITE_RUN_FROM_PACKAGE=1
+      - FUNCTIONS_EXTENSION_VERSION=~4
+      
+      # Production Azure Storage (replace with real Azure Storage)
+      - AzureWebJobsStorage=${AZURE_STORAGE_CONNECTION_STRING}
+      
+      # Production Queue Configuration
+      - MigrationStartQueueName=migration-start-prod
+      - EntityBatchQueueName=entity-batch-prod
+      - BatchCompletionQueueName=batch-completion-prod
+      - CancellationQueueName=cancellation-prod
+      - ProgressUpdateQueueName=progress-update-prod
+      - DeadLetterQueueName=dead-letter-prod
+      - RetryQueueName=retry-prod
+      
+      # Production BigCommerce Configuration
+      - BigCommerce__RateLimitRequestsPerSecond=12
+      - BigCommerce__UserAgent=BigCommerce-Migration-System/1.0-Production
+      - BigCommerce__BaseUrl=https://api.bigcommerce.com
+      - BigCommerce__RequestTimeout=00:00:30
+      - BigCommerce__MaxRetries=3
+      - BigCommerce__EnableDebugLogging=false
+      
+      # Production OpenSearch Configuration
+      - OpenSearch__Endpoint=${OPENSEARCH_ENDPOINT}
+      - OpenSearch__Username=${OPENSEARCH_USERNAME}
+      - OpenSearch__Password=${OPENSEARCH_PASSWORD}
+      - OpenSearch__DefaultIndex=migration-production
+      - OpenSearch__RequestTimeout=00:00:30
+      - OpenSearch__MaxRetries=3
+      - OpenSearch__EnableDebugMode=false
+      
+      # Production Processing Configuration
+      - AppSettings__BatchSize=20
+      - AppSettings__MaxConcurrency=8
+      - AppSettings__RetryAttempts=3
+      
+      # Production SignalR Configuration
+      - AzureSignalR=${AZURE_SIGNALR_CONNECTION_STRING}
+      
+      # Production Logging Configuration
+      - Logging__LogLevel__Default=Warning
+      - Logging__LogLevel__BigCommerce.Migration=Information
+      - Logging__LogLevel__Microsoft=Error
+      
+      # Application Insights for Production Monitoring
+      - APPLICATIONINSIGHTS_CONNECTION_STRING=${APPLICATIONINSIGHTS_CONNECTION_STRING}
+      
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - functions-logs-prod:/tmp/functions-logs:rw
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/api/health"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+      replicas: 2
+      update_config:
+        parallelism: 1
+        delay: 30s
+        failure_action: rollback
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+    networks:
+      - bigcommerce-network
+
+  # Production Dashboard
+  bigcommerce-dashboard:
+    build:
+      context: ./src/BigCommerce.Migration.Dashboard
+      dockerfile: Dockerfile
+      target: production
+      args:
+        - REACT_APP_API_BASE_URL=${REACT_APP_API_BASE_URL:-https://api.migration.company.com/api/dashboard}
+        - REACT_APP_SIGNALR_URL=${REACT_APP_SIGNALR_URL:-https://api.migration.company.com/api}
+        - REACT_APP_ENVIRONMENT=production
+    image: bigcommerce-migration/dashboard:latest
+    container_name: bigcommerce-dashboard-prod
+    restart: always
+    environment:
+      - NODE_ENV=production
+    ports:
+      - "80:80"
+      - "443:443"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    depends_on:
+      bigcommerce-functions:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+        reservations:
+          cpus: '0.25'
+          memory: 512M
+      replicas: 2
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 3
+        window: 60s
+    networks:
+      - bigcommerce-network
+
+  # Production Monitoring and Logging
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: bigcommerce-prometheus
+    restart: always
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    profiles:
+      - monitoring
+    networks:
+      - bigcommerce-network
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: bigcommerce-grafana
+    restart: always
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin123}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    profiles:
+      - monitoring
+    networks:
+      - bigcommerce-network
+
+  # Production Load Balancer (nginx)
+  nginx:
+    image: nginx:alpine
+    container_name: bigcommerce-nginx
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - nginx-logs:/var/log/nginx
+    depends_on:
+      - bigcommerce-functions
+      - bigcommerce-dashboard
+    profiles:
+      - load-balancer
+    networks:
+      - bigcommerce-network
+
+volumes:
+  functions-logs-prod:
+    driver: local
+    name: bigcommerce-functions-logs-prod
+  prometheus-data:
+    driver: local
+    name: bigcommerce-prometheus-data
+  grafana-data:
+    driver: local
+    name: bigcommerce-grafana-data
+  nginx-logs:
+    driver: local
+    name: bigcommerce-nginx-logs
+
+networks:
+  bigcommerce-network:
+    name: bigcommerce-migration-network-prod
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16 

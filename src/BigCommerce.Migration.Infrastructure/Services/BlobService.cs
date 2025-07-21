@@ -29,11 +29,25 @@ public class BlobService : IBlobService
     public BlobService(IConfiguration configuration, ILogger<BlobService> logger)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _ = configuration ?? throw new ArgumentNullException(nameof(configuration));
+        
+        // Try ConnectionStrings section first, then fall back to Values section (Azure Functions style)
         var connectionString = configuration.GetConnectionString("AzureWebJobsStorage") 
+            ?? configuration["AzureWebJobsStorage"]
             ?? throw new ArgumentNullException("AzureWebJobsStorage connection string is required");
         
         _blobServiceClient = new BlobServiceClient(connectionString);
+        
+        // ✅ Get external blob URL for OpenSearch storage (if configured)
+        // This allows storing fully qualified URLs in OpenSearch instead of local Azurite URLs
+        ExternalBlobUrl = configuration["ExternalBlobUrl"] ?? configuration["BlobStorageUrl"];
     }
+    
+    /// <summary>
+    /// External blob URL for storing fully qualified URLs in OpenSearch
+    /// If not configured, falls back to the local Azurite URL
+    /// </summary>
+    private string? ExternalBlobUrl { get; }
 
     #region CSV Report Operations
 
@@ -278,6 +292,16 @@ public class BlobService : IBlobService
             using var stream = new MemoryStream(Encoding.UTF8.GetBytes(payload));
             await blobClient.UploadAsync(stream, new BlobHttpHeaders { ContentType = contentType });
 
+            // ✅ Return external URL if configured, otherwise return local URL
+            // This ensures OpenSearch stores fully qualified URLs for direct access
+            if (!string.IsNullOrEmpty(ExternalBlobUrl))
+            {
+                var localUri = blobClient.Uri;
+                var externalUri = new Uri(ExternalBlobUrl);
+                var externalBlobUrl = $"{externalUri.Scheme}://{externalUri.Host}:{externalUri.Port}{localUri.AbsolutePath}";
+                return externalBlobUrl;
+            }
+            
             return blobClient.Uri.ToString();
         }
         catch (Exception ex)
@@ -308,6 +332,16 @@ public class BlobService : IBlobService
             using var stream = new MemoryStream(Encoding.UTF8.GetBytes(payload));
             await blobClient.UploadAsync(stream, new BlobHttpHeaders { ContentType = contentType });
 
+            // ✅ Return external URL if configured, otherwise return local URL
+            // This ensures OpenSearch stores fully qualified URLs for direct access
+            if (!string.IsNullOrEmpty(ExternalBlobUrl))
+            {
+                var localUri = blobClient.Uri;
+                var externalUri = new Uri(ExternalBlobUrl);
+                var externalBlobUrl = $"{externalUri.Scheme}://{externalUri.Host}:{externalUri.Port}{localUri.AbsolutePath}";
+                return externalBlobUrl;
+            }
+            
             return blobClient.Uri.ToString();
         }
         catch (Exception ex)

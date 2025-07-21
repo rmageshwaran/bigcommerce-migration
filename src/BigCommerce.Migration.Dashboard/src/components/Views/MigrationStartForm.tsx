@@ -47,6 +47,25 @@ interface MigrationFormData {
   };
 }
 
+// Hardcoded store configurations for development
+const storeConfigurations = {
+  production: {
+    storeId: "tmdsef6c6o",
+    accessToken: "ar247sdrwg6b5oo4c8h2n2nu2yat0w7",
+    channelId: "1"
+  },
+  staging: {
+    storeId: "in2msaitrc", 
+    accessToken: "bntqbbjvnnap8agkdbo5bekqehb473z",
+    channelId: "1"
+  },
+  development: {
+    storeId: "dev12345xyz",
+    accessToken: "dev_token_abc123def456ghi789",
+    channelId: "1"
+  }
+};
+
 const EntitySelectionCard: React.FC<{
   title: string;
   color: string;
@@ -102,10 +121,10 @@ const EntitySelectionCard: React.FC<{
 export const MigrationStartForm: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState<MigrationFormData>({
-    sourceStore: 'Production',
-    sourceStorefront: 'StagingPro StagingApp',
-    destinationStore: 'Staging',
-    destinationStorefront: 'StagingPro StagingApp',
+    sourceStore: 'production',
+    sourceStorefront: 'Main Storefront',
+    destinationStore: 'staging',
+    destinationStorefront: 'Main Storefront',
     selectedEntities: {
       blogPosts: false,
       couponCodes: false,
@@ -146,25 +165,44 @@ export const MigrationStartForm: React.FC = () => {
 
       // Map entity names to backend format
       const entityMapping: Record<string, string> = {
-        blogPosts: 'BlogPosts',
-        couponCodes: 'CouponCodes',
-        brands: 'Brands',
-        categories: 'Categories',
-        priceLists: 'PriceLists',
-        promotions: 'Promotions',
-        orders: 'Orders',
-        giftCertificates: 'GiftCertificates',
-        customers: 'Customers',
-        permanentRedirects: 'PermanentRedirects',
-        currencies: 'Currencies',
+        blogPosts: 'blog_posts',
+        couponCodes: 'coupon_codes',
+        brands: 'brands',
+        categories: 'categories',
+        priceLists: 'price_lists',
+        promotions: 'promotions',
+        orders: 'orders',
+        giftCertificates: 'gift_certificates',
+        customers: 'customers',
+        permanentRedirects: 'permanent_redirects',
+        currencies: 'currencies',
       };
+
+      // Get store configurations
+      const sourceStoreConfig = storeConfigurations[formData.sourceStore as keyof typeof storeConfigurations];
+      const destinationStoreConfig = storeConfigurations[formData.destinationStore as keyof typeof storeConfigurations];
+
+      if (!sourceStoreConfig || !destinationStoreConfig) {
+        notificationService.error('Invalid Store Selection', 'Please select valid source and destination stores');
+        return;
+      }
 
       const migrationRequest = {
-        sourceStoreId: formData.sourceStore.toLowerCase(),
-        destinationStoreId: formData.destinationStore.toLowerCase(),
         entities: selectedEntities.map(entity => entityMapping[entity] || entity),
+        sourceStore: {
+          storeId: sourceStoreConfig.storeId,
+          accessToken: sourceStoreConfig.accessToken,
+          channelId: sourceStoreConfig.channelId
+        },
+        destinationStore: {
+          storeId: destinationStoreConfig.storeId,
+          accessToken: destinationStoreConfig.accessToken,
+          channelId: destinationStoreConfig.channelId
+        }
       };
 
+      console.log('🚀 Starting migration with payload:', migrationRequest);
+      
       const apiService = getApiService();
       const response = await apiService.startMigration(migrationRequest);
       
@@ -283,7 +321,7 @@ export const MigrationStartForm: React.FC = () => {
       {/* Store Configuration */}
       <Card sx={{ mb: 4 }}>
         <CardContent sx={{ p: 3 }}>
-          <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 3, alignItems: { md: 'center' } }}>
+          <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 3, alignItems: { md: 'flex-end' } }}>
             <Box sx={{ flex: '0 0 auto', minWidth: { md: '150px' } }}>
               <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
                 Source
@@ -298,8 +336,9 @@ export const MigrationStartForm: React.FC = () => {
                     },
                   }}
                 >
-                  <MenuItem value="Production">Production</MenuItem>
-                  <MenuItem value="Staging">Staging</MenuItem>
+                  <MenuItem value="production">Production</MenuItem>
+                  <MenuItem value="staging">Staging</MenuItem>
+                  <MenuItem value="development">Development</MenuItem>
                 </Select>
               </FormControl>
             </Box>
@@ -318,7 +357,8 @@ export const MigrationStartForm: React.FC = () => {
                     },
                   }}
                 >
-                  <MenuItem value="StagingPro StagingApp">StagingPro StagingApp</MenuItem>
+                  <MenuItem value="Main Storefront">Main Storefront</MenuItem>
+                  <MenuItem value="Secondary Storefront">Secondary Storefront</MenuItem>
                 </Select>
               </FormControl>
             </Box>
@@ -341,8 +381,9 @@ export const MigrationStartForm: React.FC = () => {
                     },
                   }}
                 >
-                  <MenuItem value="Production">Production</MenuItem>
-                  <MenuItem value="Staging">Staging</MenuItem>
+                  <MenuItem value="production">Production</MenuItem>
+                  <MenuItem value="staging">Staging</MenuItem>
+                  <MenuItem value="development">Development</MenuItem>
                 </Select>
               </FormControl>
             </Box>
@@ -361,12 +402,13 @@ export const MigrationStartForm: React.FC = () => {
                     },
                   }}
                 >
-                  <MenuItem value="StagingPro StagingApp">StagingPro StagingApp</MenuItem>
+                  <MenuItem value="Main Storefront">Main Storefront</MenuItem>
+                  <MenuItem value="Secondary Storefront">Secondary Storefront</MenuItem>
                 </Select>
               </FormControl>
             </Box>
 
-            <Box sx={{ flex: '0 0 auto', textAlign: { xs: 'center', md: 'right' } }}>
+            <Box sx={{ flex: '0 0 auto', textAlign: { xs: 'center', md: 'right' }, display: 'flex', alignItems: 'flex-end' }}>
               <Button
                 variant="contained"
                 startIcon={<ArrowForwardIcon />}
@@ -376,8 +418,11 @@ export const MigrationStartForm: React.FC = () => {
                   textTransform: 'none',
                   fontWeight: 600,
                   px: 3,
-                  py: 1,
+                  py: 1.5,
                   borderRadius: '6px',
+                  height: 40, // Match the height of small input fields
+                  whiteSpace: 'nowrap',
+                  fontSize: '0.875rem',
                 }}
               >
                 {loading ? 'Starting...' : 'Start the Migration'}

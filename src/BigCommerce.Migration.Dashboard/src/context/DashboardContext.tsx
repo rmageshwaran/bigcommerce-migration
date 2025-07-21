@@ -159,19 +159,50 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
     try {
       dispatch({ type: 'SET_LOADING', payload: true });
       
-      // Test API connection
+      // Test API connection first
+      console.log('🔌 Testing API connection...');
       const apiConnected = await apiService.testConnection();
       dispatch({ type: 'SET_API_CONNECTED', payload: apiConnected });
       
-      // Connect SignalR
+      if (!apiConnected) {
+        addError({
+          code: 'API_UNAVAILABLE',
+          message: 'Backend API is not available',
+          details: 'Azure Functions may not be running on localhost:7071. Please start the backend services.',
+          timestamp: new Date()
+        });
+        
+        // Continue with SignalR connection attempt even if API fails
+        console.log('⚠️ API connection failed, but continuing with SignalR...');
+      }
+
+      // Connect SignalR (independent of API)
+      console.log('🔌 Connecting to SignalR...');
       if (!signalRService.isConnected()) {
-        await signalRService.connect();
+        try {
+          await signalRService.connect();
+          console.log('✅ SignalR connected successfully');
+        } catch (signalRError) {
+          console.warn('⚠️ SignalR connection failed:', signalRError);
+          addError({
+            code: 'SIGNALR_CONNECTION_FAILED',
+            message: 'Real-time connection failed',
+            details: 'SignalR connection could not be established. Real-time updates will not be available.',
+            timestamp: new Date()
+          });
+        }
+      }
+
+      // Only attempt data loading if API is connected
+      if (apiConnected) {
+        console.log('📊 Loading initial data...');
+        await refreshData();
+      } else {
+        console.log('⏭️ Skipping data load due to API connection failure');
       }
       
-      // Initial data load
-      await refreshData();
-      
     } catch (error) {
+      console.error('🚨 Service connection failed:', error);
       addError({
         code: 'CONNECTION_FAILED',
         message: 'Failed to connect to services',
@@ -200,23 +231,49 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
   // Refresh all data
   const refreshData = async (): Promise<void> => {
     try {
-      // Fetch system health
-      const healthData = await apiService.getSystemHealth();
-      dispatch({ type: 'UPDATE_SYSTEM_HEALTH', payload: healthData });
+      console.log('🔄 Refreshing dashboard data...');
       
-      // Fetch active migrations
-      const migrationsResponse = await apiService.getActiveMigrations();
-      migrationsResponse.data.forEach(migration => {
-        dispatch({ type: 'UPDATE_MIGRATION_PROGRESS', payload: migration });
-      });
+      // Fetch system health (non-critical)
+      try {
+        const healthData = await apiService.getSystemHealth();
+        dispatch({ type: 'UPDATE_SYSTEM_HEALTH', payload: healthData });
+        console.log('✅ System health data refreshed');
+      } catch (healthError) {
+        console.warn('⚠️ Failed to fetch system health:', healthError);
+        // Don't throw - system health is not critical
+      }
+      
+      // Fetch active migrations (non-critical)
+      try {
+        const migrationsResponse = await apiService.getActiveMigrations();
+        console.log('📊 Active migrations response:', migrationsResponse);
+        
+        // Handle response safely - check if data exists and is an array
+        if (migrationsResponse && migrationsResponse.data && Array.isArray(migrationsResponse.data)) {
+          migrationsResponse.data.forEach(migration => {
+            dispatch({ type: 'UPDATE_MIGRATION_PROGRESS', payload: migration });
+          });
+          console.log('✅ Active migrations data refreshed:', migrationsResponse.data.length, 'migrations');
+        } else {
+          console.warn('⚠️ Active migrations response has unexpected structure:', migrationsResponse);
+        }
+      } catch (migrationsError) {
+        console.warn('⚠️ Failed to fetch active migrations:', migrationsError);
+        // Don't throw - migrations data is not critical for initial load
+      }
       
     } catch (error) {
-      addError({
-        code: 'DATA_REFRESH_FAILED',
-        message: 'Failed to refresh dashboard data',
-        details: error instanceof Error ? error.message : 'Unknown error',
-        timestamp: new Date()
-      });
+      console.warn('⚠️ Data refresh encountered issues:', error);
+      // Only add error if it's a critical failure
+      if (error instanceof Error && error.message.includes('Network Error')) {
+        addError({
+          code: 'DATA_REFRESH_FAILED',
+          message: 'Failed to refresh dashboard data',
+          details: 'Network connectivity issues detected. Some data may be outdated.',
+          timestamp: new Date()
+        });
+      }
+      // Don't throw - allow the dashboard to continue functioning
     }
   };
 

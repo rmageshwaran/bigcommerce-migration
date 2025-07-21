@@ -1,0 +1,87 @@
+# Docker Compose Override for Development Environment
+# This file is automatically used with docker-compose.yml for local development
+
+version: '3.8'
+
+services:
+  # Development overrides for BigCommerce Functions
+  bigcommerce-functions:
+    environment:
+      # Development-specific environment variables
+      - ASPNETCORE_ENVIRONMENT=Development
+      - Logging__LogLevel__Default=Debug
+      - Logging__LogLevel__BigCommerce.Migration=Trace
+      - BigCommerce__EnableDebugLogging=true
+      - AppSettings__BatchSize=5  # Smaller batches for development
+      - AppSettings__MaxConcurrency=2  # Lower concurrency for development
+      
+      # Development SignalR Performance Optimizations
+      - SignalR__BaseUrl=http://localhost:7071
+      - SignalR__TimeoutSeconds=10
+      - SignalR__Enabled=true
+      - SignalR__EnableDebugLogging=true
+      - SignalR__MaxRetries=0
+      - SignalR__EnableAsyncQueuing=true
+      - SignalR__EnableBatching=true
+      - SignalR__EnableHttpService=true
+      - SignalR__Batching__BatchSize=5
+      - SignalR__Batching__BatchTimeoutMs=200
+      - SignalR__Batching__MaxQueueSize=500
+      - SignalR__Batching__Enabled=true
+    volumes:
+      # Hot reload for development
+      - ./src/BigCommerce.Migration.Functions:/app:cached
+      - functions-logs:/tmp/functions-logs
+    ports:
+      - "7071:80"
+      - "7072:443"  # HTTPS port for development
+
+  # Development overrides for Dashboard
+  bigcommerce-dashboard:
+    environment:
+      # Development-specific React environment
+      - REACT_APP_API_BASE_URL=http://localhost:7071/api/dashboard
+      - REACT_APP_SIGNALR_URL=http://localhost:7071/api
+      - REACT_APP_ENVIRONMENT=development
+      - REACT_APP_DEBUG=true
+      - CHOKIDAR_USEPOLLING=true
+      - FAST_REFRESH=true
+    volumes:
+      # Hot reload for React development
+      - ./src/BigCommerce.Migration.Dashboard/src:/app/src:cached
+      - ./src/BigCommerce.Migration.Dashboard/public:/app/public:cached
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+
+  # Development overrides for Azurite
+  azurite:
+    environment:
+      - AZURITE_ACCOUNTS=devstoreaccount1  # Single development account
+    command: "azurite --silent --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0 --location /data --debug /data/debug.log --loose"
+    ports:
+      - "10000:10000"  # Blob service
+      - "10001:10001"  # Queue service  
+      - "10002:10002"  # Table service
+      - "10003:10003"  # Table service (alternate)
+
+  # Optional: Database UI for Azurite (development only)
+  azurite-explorer:
+    image: microsoft/azure-storage-explorer
+    container_name: bigcommerce-azurite-explorer
+    ports:
+      - "8081:80"
+    environment:
+      - AZURITE_CONNECTION_STRING=DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;QueueEndpoint=http://azurite:10001/devstoreaccount1;TableEndpoint=http://azurite:10002/devstoreaccount1;
+    depends_on:
+      - azurite
+    profiles:
+      - development
+      - dev-tools
+    networks:
+      - bigcommerce-network
+
+volumes:
+  functions-logs:
+    driver: local
+    name: bigcommerce-functions-dev-logs 

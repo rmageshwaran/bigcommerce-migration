@@ -30,7 +30,11 @@ public class MigrationStorageService : IMigrationStorageService
     public MigrationStorageService(IConfiguration configuration, ILogger<MigrationStorageService> logger)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _ = configuration ?? throw new ArgumentNullException(nameof(configuration));
+        
+        // Try ConnectionStrings section first, then fall back to Values section (Azure Functions style)
         var connectionString = configuration.GetConnectionString("AzureWebJobsStorage") 
+            ?? configuration["AzureWebJobsStorage"]
             ?? throw new ArgumentNullException("AzureWebJobsStorage connection string is required");
         
         _tableServiceClient = new TableServiceClient(connectionString);

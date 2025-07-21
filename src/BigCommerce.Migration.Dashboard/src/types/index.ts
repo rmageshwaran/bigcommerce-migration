@@ -78,7 +78,7 @@ export interface MigrationOptions {
 // System Health Types
 export interface SystemHealthData {
   status: SystemStatus;
-  timestamp: Date;
+  timestamp: string | Date; // Allow both string (from API) and Date (parsed)
   services: ServiceHealthStatus;
   systemMetrics: SystemMetrics;
 }
@@ -201,6 +201,16 @@ export interface PaginatedResponse<T> {
   page: number;
   pageSize: number;
   totalPages: number;
+}
+
+export interface MigrationHistoryResponse {
+  migrations: any[];
+  totalCount: number;
+  pageSize: number;
+  currentPage: number;
+  totalPages: number;
+  hasMorePages: boolean;
+  message: string;
 }
 
 // Error Types

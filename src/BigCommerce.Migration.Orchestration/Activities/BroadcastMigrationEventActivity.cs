@@ -8,6 +8,7 @@ namespace BigCommerce.Migration.Orchestration.Activities;
 
 /// <summary>
 /// Activity for broadcasting migration events via SignalR for real-time dashboard updates
+/// ✅ ARCHITECTURAL FIX: Fixed to use configurable SignalR service with graceful degradation
 /// </summary>
 public class BroadcastMigrationEventActivity
 {
@@ -24,6 +25,7 @@ public class BroadcastMigrationEventActivity
 
     /// <summary>
     /// Broadcast migration started event
+    /// ✅ ARCHITECTURAL NOTE: Fixed to use configurable SignalR service
     /// </summary>
     [Function("BroadcastMigrationStarted")]
     public async Task<bool> BroadcastMigrationStartedAsync(
@@ -50,6 +52,7 @@ public class BroadcastMigrationEventActivity
 
     /// <summary>
     /// Broadcast migration completed event
+    /// ✅ ARCHITECTURAL FIX: Uses configurable SignalR service with graceful degradation
     /// </summary>
     [Function("BroadcastMigrationCompleted")]
     public async Task<bool> BroadcastMigrationCompletedAsync(
@@ -76,6 +79,7 @@ public class BroadcastMigrationEventActivity
 
     /// <summary>
     /// Broadcast migration failed event
+    /// ✅ ARCHITECTURAL FIX: Uses configurable SignalR service with graceful degradation
     /// </summary>
     [Function("BroadcastMigrationFailed")]
     public async Task<bool> BroadcastMigrationFailedAsync(
@@ -102,6 +106,7 @@ public class BroadcastMigrationEventActivity
 
     /// <summary>
     /// Broadcast migration cancelled event
+    /// ✅ ARCHITECTURAL FIX: Uses configurable SignalR service with graceful degradation
     /// </summary>
     [Function("BroadcastMigrationCancelled")]
     public async Task<bool> BroadcastMigrationCancelledAsync(
@@ -128,6 +133,7 @@ public class BroadcastMigrationEventActivity
 
     /// <summary>
     /// Broadcast entity phase started event
+    /// ✅ ARCHITECTURAL FIX: Uses configurable SignalR service with graceful degradation
     /// </summary>
     [Function("BroadcastEntityPhaseStarted")]
     public async Task<bool> BroadcastEntityPhaseStartedAsync(
@@ -157,6 +163,7 @@ public class BroadcastMigrationEventActivity
 
     /// <summary>
     /// Broadcast entity phase completed event
+    /// ✅ ARCHITECTURAL FIX: Uses configurable SignalR service with graceful degradation
     /// </summary>
     [Function("BroadcastEntityPhaseCompleted")]
     public async Task<bool> BroadcastEntityPhaseCompletedAsync(
@@ -186,6 +193,7 @@ public class BroadcastMigrationEventActivity
 
     /// <summary>
     /// Broadcast general migration status update event
+    /// ✅ ARCHITECTURAL FIX: Uses configurable SignalR service with graceful degradation
     /// </summary>
     [Function("BroadcastMigrationStatusUpdate")]
     public async Task<bool> BroadcastMigrationStatusUpdateAsync(

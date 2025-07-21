@@ -15,6 +15,7 @@ import {
   CheckCircle as SuccessIcon,
 } from '@mui/icons-material';
 import { useDashboard } from '../../context/DashboardContext';
+import { formatDate, formatRelativeTime } from '../../utils/dateUtils';
 
 export const MigrationOverview: React.FC = () => {
   const { state, refreshData, addError } = useDashboard();
@@ -101,7 +102,10 @@ export const MigrationOverview: React.FC = () => {
                 Status: {systemHealth.status}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Last Updated: {new Date(systemHealth.timestamp).toLocaleString()}
+                Last Updated: {formatDate(systemHealth.timestamp)}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                ({formatRelativeTime(systemHealth.timestamp)})
               </Typography>
             </CardContent>
           </Card>
@@ -120,7 +124,7 @@ export const MigrationOverview: React.FC = () => {
               <Typography>Loading migrations...</Typography>
             ) : activeMigrationsArray.length === 0 ? (
               <Alert severity="info">
-                No active migrations. Click "Test SignalR" to test real-time updates.
+                No active migrations.
               </Alert>
             ) : (
               <Box>

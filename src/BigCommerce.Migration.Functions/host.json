@@ -22,6 +22,16 @@
       "tracing": {
         "traceInputsAndOutputs": true,
         "traceReplayEvents": false
+      },
+      "notifications": {
+        "eventGrid": {
+          "publishRetryCount": 0,
+          "publishRetryInterval": "00:00:30",
+          "publishEventTypes": []
+        }
+      },
+      "webhook": {
+        "authLevel": "anonymous"
       }
     },
     "queues": {
@@ -73,7 +83,8 @@
       "Content-Type",
       "x-requested-with",
       "x-signalr-user-agent",
-      "x-ms-signalr-connectionid"
+      "x-ms-signalr-connectionid",
+      "x-functions-key"
     ]
   }
 } 

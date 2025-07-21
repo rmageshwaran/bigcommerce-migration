@@ -25,7 +25,7 @@ public class Program
             .ConfigureFunctionsWorkerDefaults(workerApplication =>
             {
                 // Add middleware pipeline in correct order
-                // 1. Global exception handler (outermost - catches all exceptions)
+                // 1. Global exception handler (catches all exceptions)
                 workerApplication.UseMiddleware<GlobalExceptionHandlerMiddleware>();
                 
                 // 2. Request validation (validates input before processing)

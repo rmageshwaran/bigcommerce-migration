@@ -11,7 +11,6 @@ import {
   Switch,
   FormControlLabel,
   Button,
-  Container,
 } from '@mui/material';
 import {
   Help as HelpIcon,
@@ -40,7 +39,6 @@ const navigationTabs: NavigationTab[] = [
 export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const [dataMigrationV2, setDataMigrationV2] = useState(true);
 
   // Determine current tab based on location
   const getCurrentTab = () => {
@@ -65,10 +63,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) =>
     // TODO: Implement help functionality
   };
 
-  const handleDataMigrationToggle = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setDataMigrationV2(event.target.checked);
-    // TODO: Implement version toggle functionality
-  };
+
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
@@ -111,30 +106,6 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) =>
 
           {/* Right side - Controls */}
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            {/* Data Migration V2 Toggle */}
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={dataMigrationV2}
-                  onChange={handleDataMigrationToggle}
-                  size="small"
-                  color="primary"
-                />
-              }
-              label={
-                <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                  Data Migration V2
-                </Typography>
-              }
-              labelPlacement="start"
-              sx={{
-                margin: 0,
-                '& .MuiFormControlLabel-label': {
-                  color: 'text.secondary',
-                },
-              }}
-            />
-
             {/* Theme Toggle */}
             <ThemeToggle />
 
@@ -164,11 +135,13 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) =>
           flexGrow: 1,
           bgcolor: 'background.default',
           pt: 3,
+          width: '100%',
+          height: '100%',
         }}
       >
-        <Container maxWidth="xl" sx={{ px: 3 }}>
+        <Box sx={{ px: 3, width: '100%', height: '100%' }}>
           {children || <Outlet />}
-        </Container>
+        </Box>
       </Box>
     </Box>
   );

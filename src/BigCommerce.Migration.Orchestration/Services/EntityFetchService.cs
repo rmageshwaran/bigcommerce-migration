@@ -3,24 +3,31 @@ using BigCommerce.Migration.Core.Models;
 using BigCommerce.Migration.Orchestration.Models;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
+using System.Net.Http;
 
 namespace BigCommerce.Migration.Orchestration.Services;
 
 /// <summary>
 /// Implementation of IEntityFetchService for fetching entities from source stores
-/// Enhanced with parallel fetching, retry logic, and sophisticated error handling
+/// Refactored to use Strategy Pattern for Open/Closed Principle compliance
+/// No longer violates OCP - new entity types can be added without modifying this class
 /// </summary>
 public class EntityFetchService : IEntityFetchService
 {
     private readonly IBigCommerceApiClient _apiClient;
+    private readonly IEntityFetchStrategyFactory _strategyFactory;
     private readonly ILogger<EntityFetchService> _logger;
     
-    // Configuration for parallel processing
+    // Configuration for parallel processing (kept for backward compatibility)
     private const int MaxConcurrency = 5; // Maximum concurrent API calls
 
-    public EntityFetchService(IBigCommerceApiClient apiClient, ILogger<EntityFetchService> logger)
+    public EntityFetchService(
+        IBigCommerceApiClient apiClient, 
+        IEntityFetchStrategyFactory strategyFactory,
+        ILogger<EntityFetchService> logger)
     {
         _apiClient = apiClient ?? throw new ArgumentNullException(nameof(apiClient));
+        _strategyFactory = strategyFactory ?? throw new ArgumentNullException(nameof(strategyFactory));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -28,167 +35,104 @@ public class EntityFetchService : IEntityFetchService
         BatchProcessingRequest request, 
         CancellationToken cancellationToken)
     {
-        return request.EntityType.ToLowerInvariant() switch
+        _logger.LogInformation("Fetching entities of type {EntityType} for batch {BatchNumber} in migration {MigrationId}", 
+            request.EntityType, request.BatchNumber, request.MigrationId);
+
+        // ✅ DEBUG: Log the decision-making process for debugging
+        _logger.LogDebug("EntityFetchService decision - UseDirectPagination: {UseDirectPagination}, HasEntityIds: {HasEntityIds}, CachedDataCount: {CachedDataCount}",
+            request.UseDirectPagination, request.EntityIds?.Any() ?? false, request.CachedEntityData?.Count ?? 0);
+
+        try
         {
-            "categories" => await FetchCategoriesAsync(request, cancellationToken),
-            "products" => await FetchProductsAsync(request, cancellationToken),
-            "brands" => await FetchBrandsAsync(request, cancellationToken),
-            "variants" => await FetchVariantsAsync(request, cancellationToken),
-            "images" => await FetchImagesAsync(request, cancellationToken),
-            "modifiers" => await FetchModifiersAsync(request, cancellationToken),
-            _ => throw new ArgumentException($"Unsupported entity type: {request.EntityType}")
-        };
+            // Handle direct pagination for efficient strategies (empty EntityIds but has UseDirectPagination)
+            if (request.UseDirectPagination && (!request.EntityIds.Any() || request.EntityIds.First().StartsWith("page-")))
+            {
+                _logger.LogDebug("Using direct pagination for {EntityType} batch {BatchNumber} in migration {MigrationId}", 
+                    request.EntityType, request.BatchNumber, request.MigrationId);
+                
+                return await FetchEntitiesWithDirectPaginationAsync(request, cancellationToken);
+            }
+            
+            // Handle cached entity data (hierarchical strategies like categories)
+            if (request.CachedEntityData != null && request.CachedEntityData.Any())
+            {
+                _logger.LogInformation("✅ Using cached entity data for {EntityType} batch {BatchNumber} in migration {MigrationId}", 
+                    request.EntityType, request.BatchNumber, request.MigrationId);
+                
+                return GetCachedEntitiesForBatch(request);
+            }
+
+            // 🎯 STRATEGY PATTERN: Delegate to appropriate strategy for entity ID-based fetching
+            // This eliminates OCP violation - new entity types can be added without modifying this code
+            _logger.LogInformation("❌ Using fetch strategy for {EntityType} batch {BatchNumber} in migration {MigrationId} (no cached data available)", 
+                request.EntityType, request.BatchNumber, request.MigrationId);
+            
+            var strategy = _strategyFactory.GetStrategy(request.EntityType);
+            
+            var result = await strategy.FetchEntitiesAsync(
+                request.EntityIds,
+                request.MigrationId,
+                request.SourceStore,
+                request.CategoryTreeContext,
+                cancellationToken);
+
+            _logger.LogInformation("Successfully fetched {Count} entities of type {EntityType} for batch {BatchNumber} in migration {MigrationId}", 
+                result.Count, request.EntityType, request.BatchNumber, request.MigrationId);
+
+            return result;
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogError(ex, "Unsupported entity type {EntityType} for batch {BatchNumber} in migration {MigrationId}", 
+                request.EntityType, request.BatchNumber, request.MigrationId);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to fetch entities of type {EntityType} for batch {BatchNumber} in migration {MigrationId}", 
+                request.EntityType, request.BatchNumber, request.MigrationId);
+            throw;
+        }
     }
 
     public async Task<List<Dictionary<string, object>>> FetchCategoriesAsync(
         BatchProcessingRequest request, 
         CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Fetching {Count} specific categories for batch {BatchNumber}/{TotalBatches} in migration {MigrationId}", 
-            request.EntityIds.Count, request.BatchNumber, request.TotalBatches, request.MigrationId);
-        
-        var fetchedCategories = new List<Dictionary<string, object>>();
-
-        try
+        // 🎯 CACHED DATA HANDLING: Check for cached data first (common for category tree scenarios)
+        if (request.CachedEntityData != null && request.CachedEntityData.Count > 0)
         {
-            // ✅ Check if we have specific entity IDs to fetch
-            if (!request.EntityIds.Any())
-            {
-                _logger.LogInformation("No specific category IDs provided for batch {BatchNumber} in migration {MigrationId}", 
-                    request.BatchNumber, request.MigrationId);
-                return fetchedCategories;
-            }
-
-            // ✅ OPTIMIZATION: Use cached category data from discovery phase (avoids all API calls!)
-            if (request.CachedEntityData != null && request.CachedEntityData.Any())
-            {
-                _logger.LogInformation("Using cached category data from discovery phase for batch {BatchNumber} in migration {MigrationId} - no API calls needed!", 
-                    request.BatchNumber, request.MigrationId);
-
-                // Filter cached data to get only the categories for this batch
-                var cachedCategoriesForBatch = request.CachedEntityData
-                    .Where(category => 
-                    {
-                        var categoryId = category.TryGetValue("id", out var id) ? id.ToString() : null;
-                        return categoryId != null && request.EntityIds.Contains(categoryId);
-                    })
-                    .ToList();
-
-                _logger.LogInformation("Found {FoundCount}/{RequestedCount} categories in cached data for batch {BatchNumber} in migration {MigrationId}", 
-                    cachedCategoriesForBatch.Count, request.EntityIds.Count, request.BatchNumber, request.MigrationId);
-
-                return cachedCategoriesForBatch;
-            }
-
-            // ✅ FALLBACK: If no cached data available, log warning and use API (should rarely happen for categories)
-            _logger.LogWarning("No cached category data available for batch {BatchNumber} in migration {MigrationId}. " +
-                "This is unexpected for categories - falling back to API calls.", 
-                request.BatchNumber, request.MigrationId);
-
-            var storeConfig = ValidateStoreConfiguration(request.SourceStore);
-            var categoryTreeId = request.CategoryTreeContext?.SourceCategoryTreeId;
-            
-            if (string.IsNullOrWhiteSpace(categoryTreeId))
-            {
-                _logger.LogError("No source category tree ID available for store {StoreId} in migration {MigrationId}. " +
-                    "Category tree resolution may have failed.", 
-                    storeConfig.StoreId, request.MigrationId);
-                return fetchedCategories;
-            }
-
-            _logger.LogInformation("Fetching {Count} specific categories {CategoryIds} using tree {CategoryTreeId} for migration {MigrationId}", 
-                request.EntityIds.Count, string.Join(",", request.EntityIds.Take(5)) + (request.EntityIds.Count > 5 ? "..." : ""), 
-                categoryTreeId, request.MigrationId);
-
-            // ✅ FALLBACK: Fetch ALL categories with pagination (just like discovery phase)
-            // This is critical for hierarchical processing - we need ALL categories to maintain parent-child relationships
-            var allCategories = await FetchAllCategoriesWithPaginationAsync(storeConfig, categoryTreeId, cancellationToken);
-            
-            if (allCategories.Any())
-            {
-                // ✅ Sort categories hierarchically (parents first)
-                var sortedCategories = SortCategoriesHierarchically(allCategories);
-                
-                // ✅ Filter to get only the requested categories, maintaining hierarchical order
-                var filteredCategories = sortedCategories
-                    .Where(category => 
-                    {
-                        var categoryId = category.TryGetValue("id", out var id) ? id.ToString() : null;
-                        return categoryId != null && request.EntityIds.Contains(categoryId);
-                    })
-                    .ToList();
-
-                fetchedCategories.AddRange(filteredCategories);
-                
-                _logger.LogInformation("API fallback: Found {FoundCount}/{RequestedCount} categories (from {TotalFetched} total) for batch {BatchNumber} in migration {MigrationId}", 
-                    filteredCategories.Count, request.EntityIds.Count, allCategories.Count, request.BatchNumber, request.MigrationId);
-            }
-            else
-            {
-                _logger.LogWarning("API fallback: No categories found in store {StoreId} tree {TreeId} for migration {MigrationId}", 
-                    storeConfig.StoreId, categoryTreeId, request.MigrationId);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to fetch categories for batch {BatchNumber} in migration {MigrationId}", 
-                request.BatchNumber, request.MigrationId);
-            throw new InvalidOperationException($"Category fetch failed for batch {request.BatchNumber} in migration {request.MigrationId}", ex);
+            _logger.LogDebug("Using cached category data for migration {MigrationId}, count: {Count}", 
+                request.MigrationId, request.CachedEntityData.Count);
+            return request.CachedEntityData;
         }
 
-        _logger.LogInformation("Successfully fetched {FetchedCount}/{RequestedCount} categories for batch {BatchNumber} in migration {MigrationId}", 
-            fetchedCategories.Count, request.EntityIds.Count, request.BatchNumber, request.MigrationId);
+        // 🎯 REFACTORED: Delegate to strategy pattern instead of duplicating logic
+        // This method is kept for backward compatibility with existing tests and interface
+        _logger.LogDebug("FetchCategoriesAsync called - delegating to strategy pattern for migration {MigrationId}", 
+            request.MigrationId);
         
-        return fetchedCategories;
+        return await FetchEntitiesAsync(request, cancellationToken);
     }
 
     public async Task<List<Dictionary<string, object>>> FetchProductsAsync(
         BatchProcessingRequest request, 
         CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Fetching products for batch {BatchNumber}/{TotalBatches} in migration {MigrationId}", 
-            request.BatchNumber, request.TotalBatches, request.MigrationId);
+        // 🎯 REFACTORED: Delegate to strategy pattern instead of duplicating logic
+        // This method is kept for backward compatibility with existing tests and interface
+        _logger.LogDebug("FetchProductsAsync called - delegating to strategy pattern for migration {MigrationId}", 
+            request.MigrationId);
         
-        // Check for cancellation at the start
-        cancellationToken.ThrowIfCancellationRequested();
-        
-        var storeConfig = ValidateStoreConfiguration(request.SourceStore);
-
         try
         {
-            // ✅ CORRECT APPROACH: Use direct pagination based on batch number
-            // Don't load all products into memory - fetch only this batch's page
-            var pageNumber = request.BatchNumber; // Batch number = page number
-            var pageSize = 50; // Standard batch size for products
-            
-            _logger.LogInformation("Fetching products page {PageNumber} with size {PageSize} for migration {MigrationId}", 
-                pageNumber, pageSize, request.MigrationId);
-
-            var products = await _apiClient.GetProductsAsync(storeConfig, pageNumber, pageSize, cancellationToken);
-
-            if (products == null)
-            {
-                _logger.LogWarning("No products returned from API for page {PageNumber} in migration {MigrationId}", 
-                    pageNumber, request.MigrationId);
-                return new List<Dictionary<string, object>>();
-            }
-
-            _logger.LogInformation("Successfully fetched {Count} products for batch {BatchNumber} in migration {MigrationId}", 
-                products.Count, request.BatchNumber, request.MigrationId);
-            
-            return products;
+            return await FetchEntitiesAsync(request, cancellationToken);
         }
-        catch (OperationCanceledException)
+        catch (HttpRequestException ex)
         {
-            _logger.LogInformation("Product fetch was cancelled for batch {BatchNumber} in migration {MigrationId}", 
-                request.BatchNumber, request.MigrationId);
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to fetch products for batch {BatchNumber} in migration {MigrationId}", 
-                request.BatchNumber, request.MigrationId);
-            throw new InvalidOperationException($"Product fetch failed for batch {request.BatchNumber} in migration {request.MigrationId}", ex);
+            var message = "Product fetch failed";
+            _logger.LogError(ex, "{Message} for migration {MigrationId}", message, request.MigrationId);
+            throw new InvalidOperationException(message, ex);
         }
     }
 
@@ -196,185 +140,167 @@ public class EntityFetchService : IEntityFetchService
         BatchProcessingRequest request, 
         CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Fetching brands for batch {BatchNumber}/{TotalBatches} in migration {MigrationId}", 
-            request.BatchNumber, request.TotalBatches, request.MigrationId);
+        // 🎯 REFACTORED: Delegate to strategy pattern instead of duplicating logic
+        // This method is kept for backward compatibility with existing tests and interface
+        _logger.LogDebug("FetchBrandsAsync called - delegating to strategy pattern for migration {MigrationId}", 
+            request.MigrationId);
         
-        var storeConfig = ValidateStoreConfiguration(request.SourceStore);
-
-        try
-        {
-            // ✅ CORRECT APPROACH: Use direct pagination based on batch number
-            // Don't load all brands into memory - fetch only this batch's page
-            var pageNumber = request.BatchNumber; // Batch number = page number
-            var pageSize = 50; // Standard batch size for brands
-            
-            var paginationRequest = new BigCommercePaginationRequest
-            {
-                Page = pageNumber,
-                Limit = pageSize,
-                SortBy = "id",
-                SortDirection = "asc"
-            };
-
-            _logger.LogInformation("Fetching brands page {PageNumber} with size {PageSize} for migration {MigrationId}", 
-                pageNumber, pageSize, request.MigrationId);
-
-            var brandResponse = await _apiClient.GetBrandPageAsync(storeConfig, paginationRequest, cancellationToken);
-
-            if (brandResponse?.Data == null)
-            {
-                _logger.LogWarning("No brands returned from API for page {PageNumber} in migration {MigrationId}", 
-                    pageNumber, request.MigrationId);
-                return new List<Dictionary<string, object>>();
-            }
-
-            // Convert BrandSummary to Dictionary<string, object>
-            var brands = brandResponse.Data.Select(brand => new Dictionary<string, object>
-            {
-                ["id"] = brand.Id,
-                ["name"] = brand.Name
-            }).ToList();
-
-            _logger.LogInformation("Successfully fetched {Count} brands for batch {BatchNumber} in migration {MigrationId}", 
-                brands.Count, request.BatchNumber, request.MigrationId);
-            
-            return brands;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to fetch brands for batch {BatchNumber} in migration {MigrationId}", 
-                request.BatchNumber, request.MigrationId);
-            throw new InvalidOperationException($"Brand fetch failed for batch {request.BatchNumber} in migration {request.MigrationId}", ex);
-        }
+        return await FetchEntitiesAsync(request, cancellationToken);
     }
 
     public async Task<List<Dictionary<string, object>>> FetchVariantsAsync(
         BatchProcessingRequest request, 
         CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Fetching variants for migration {MigrationId}", request.MigrationId);
-        var allVariants = new ConcurrentBag<Dictionary<string, object>>();
-        var storeConfig = ValidateStoreConfiguration(request.SourceStore);
-
-        // For variants, we need to fetch them per product - use parallel processing
-        if (request.EntityIds == null || !request.EntityIds.Any())
-        {
-            _logger.LogWarning("No product IDs provided for variant fetching in migration {MigrationId}", request.MigrationId);
-            return allVariants.ToList();
-        }
-
-        var productIds = ParseProductIds(request.EntityIds, request.MigrationId);
-        if (!productIds.Any())
-        {
-            _logger.LogWarning("No valid product IDs found for variant fetching in migration {MigrationId}", request.MigrationId);
-            return allVariants.ToList();
-        }
-
-        var semaphore = new SemaphoreSlim(MaxConcurrency, MaxConcurrency);
-        var tasks = productIds.Select(async productId =>
-        {
-            await semaphore.WaitAsync(cancellationToken);
-            try
-            {
-                await FetchVariantsForProductAsync(productId, storeConfig, allVariants, request.MigrationId, cancellationToken);
-            }
-            finally
-            {
-                semaphore.Release();
-            }
-        });
-
-        await Task.WhenAll(tasks);
-        _logger.LogInformation("Successfully fetched {Count} variants for migration {MigrationId}", 
-            allVariants.Count, request.MigrationId);
-        return allVariants.ToList();
+        // 🎯 REFACTORED: Delegate to strategy pattern instead of duplicating logic
+        // This method is kept for backward compatibility with existing tests and interface
+        _logger.LogDebug("FetchVariantsAsync called - delegating to strategy pattern for migration {MigrationId}", 
+            request.MigrationId);
+        
+        return await FetchEntitiesAsync(request, cancellationToken);
     }
 
     public async Task<List<Dictionary<string, object>>> FetchImagesAsync(
         BatchProcessingRequest request, 
         CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Fetching images for migration {MigrationId}", request.MigrationId);
-        var allImages = new ConcurrentBag<Dictionary<string, object>>();
-        var storeConfig = ValidateStoreConfiguration(request.SourceStore);
-
-        // For images, we need to fetch them per product - use parallel processing
-        if (request.EntityIds == null || !request.EntityIds.Any())
-        {
-            _logger.LogWarning("No product IDs provided for image fetching in migration {MigrationId}", request.MigrationId);
-            return allImages.ToList();
-        }
-
-        var productIds = ParseProductIds(request.EntityIds, request.MigrationId);
-        if (!productIds.Any())
-        {
-            _logger.LogWarning("No valid product IDs found for image fetching in migration {MigrationId}", request.MigrationId);
-            return allImages.ToList();
-        }
-
-        var semaphore = new SemaphoreSlim(MaxConcurrency, MaxConcurrency);
-        var tasks = productIds.Select(async productId =>
-        {
-            await semaphore.WaitAsync(cancellationToken);
-            try
-            {
-                await FetchImagesForProductAsync(productId, storeConfig, allImages, request.MigrationId, cancellationToken);
-            }
-            finally
-            {
-                semaphore.Release();
-            }
-        });
-
-        await Task.WhenAll(tasks);
-        _logger.LogInformation("Successfully fetched {Count} images for migration {MigrationId}", 
-            allImages.Count, request.MigrationId);
-        return allImages.ToList();
+        // 🎯 REFACTORED: Delegate to strategy pattern instead of duplicating logic
+        // This method is kept for backward compatibility with existing tests and interface
+        _logger.LogDebug("FetchImagesAsync called - delegating to strategy pattern for migration {MigrationId}", 
+            request.MigrationId);
+        
+        return await FetchEntitiesAsync(request, cancellationToken);
     }
 
     public async Task<List<Dictionary<string, object>>> FetchModifiersAsync(
         BatchProcessingRequest request, 
         CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Fetching modifiers for migration {MigrationId}", request.MigrationId);
-        var allModifiers = new ConcurrentBag<Dictionary<string, object>>();
-        var storeConfig = ValidateStoreConfiguration(request.SourceStore);
-
-        // For modifiers, we need to fetch them per product - use parallel processing
-        if (request.EntityIds == null || !request.EntityIds.Any())
-        {
-            _logger.LogWarning("No product IDs provided for modifier fetching in migration {MigrationId}", request.MigrationId);
-            return allModifiers.ToList();
-        }
-
-        var productIds = ParseProductIds(request.EntityIds, request.MigrationId);
-        if (!productIds.Any())
-        {
-            _logger.LogWarning("No valid product IDs found for modifier fetching in migration {MigrationId}", request.MigrationId);
-            return allModifiers.ToList();
-        }
-
-        var semaphore = new SemaphoreSlim(MaxConcurrency, MaxConcurrency);
-        var tasks = productIds.Select(async productId =>
-        {
-            await semaphore.WaitAsync(cancellationToken);
-            try
-            {
-                await FetchModifiersForProductAsync(productId, storeConfig, allModifiers, request.MigrationId, cancellationToken);
-            }
-            finally
-            {
-                semaphore.Release();
-            }
-        });
-
-        await Task.WhenAll(tasks);
-        _logger.LogInformation("Successfully fetched {Count} modifiers for migration {MigrationId}", 
-            allModifiers.Count, request.MigrationId);
-        return allModifiers.ToList();
+        // 🎯 REFACTORED: Delegate to strategy pattern instead of duplicating logic
+        // This method is kept for backward compatibility with existing tests and interface
+        _logger.LogDebug("FetchModifiersAsync called - delegating to strategy pattern for migration {MigrationId}", 
+            request.MigrationId);
+        
+        return await FetchEntitiesAsync(request, cancellationToken);
     }
 
     #region Private Helper Methods
+
+    /// <summary>
+    /// Fetches entities using direct pagination (batch number = page number)
+    /// Used for efficient pagination strategies that don't cache entity IDs
+    /// </summary>
+    private async Task<List<Dictionary<string, object>>> FetchEntitiesWithDirectPaginationAsync(
+        BatchProcessingRequest request, 
+        CancellationToken cancellationToken)
+    {
+        var pageNumber = request.BatchNumber; // Direct mapping: batch 1 = page 1, batch 2 = page 2, etc.
+        var batchSize = 10; // Default batch size, could be configurable
+        
+        _logger.LogDebug("Fetching page {PageNumber} for {EntityType} using direct pagination in migration {MigrationId}", 
+            pageNumber, request.EntityType, request.MigrationId);
+
+        try
+        {
+            var paginationRequest = new BigCommercePaginationRequest
+            {
+                Page = pageNumber,
+                Limit = batchSize,
+                SortBy = "id",
+                SortDirection = "asc"
+            };
+
+            // Add entity-specific parameters
+            if (request.EntityType.ToLowerInvariant() == "categories" && request.CategoryTreeContext != null)
+            {
+                paginationRequest.CategoryTreeId = request.CategoryTreeContext.SourceCategoryTreeId;
+            }
+
+            var response = await _apiClient.GetPaginatedEntitiesAsync(
+                request.SourceStore,
+                request.EntityType,
+                paginationRequest,
+                cancellationToken);
+
+            var entities = response.Data ?? new List<Dictionary<string, object>>();
+            
+            // Add original entity ID tracking for error reporting
+            foreach (var entity in entities)
+            {
+                var entityId = entity.TryGetValue("id", out var id) ? id.ToString() : null;
+                entity["_original_entity_id"] = entityId;
+            }
+
+            _logger.LogDebug("Direct pagination fetched {Count} {EntityType} entities from page {PageNumber} in migration {MigrationId}", 
+                entities.Count, request.EntityType, pageNumber, request.MigrationId);
+
+            return entities;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to fetch {EntityType} entities using direct pagination (page {PageNumber}) in migration {MigrationId}", 
+                request.EntityType, pageNumber, request.MigrationId);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Gets cached entities for the current batch from pre-loaded entity data
+    /// Used for hierarchical strategies that cache all entity data during discovery
+    /// </summary>
+    private List<Dictionary<string, object>> GetCachedEntitiesForBatch(BatchProcessingRequest request)
+    {
+        if (request.CachedEntityData == null || !request.CachedEntityData.Any())
+        {
+            _logger.LogWarning("Cached entity data is null or empty for {EntityType} batch {BatchNumber} in migration {MigrationId}", 
+                request.EntityType, request.BatchNumber, request.MigrationId);
+            return new List<Dictionary<string, object>>();
+        }
+
+        // ✅ FIX: For hierarchical entities like categories, preserve the hierarchical order from cached data
+        // Instead of filtering by EntityIds (which may not be hierarchically sorted), 
+        // use the cached data order which IS hierarchically sorted by V3HierarchicalStrategy
+        if (request.EntityType.Equals("categories", StringComparison.OrdinalIgnoreCase))
+        {
+            // Filter cached data to get only entities for this batch, preserving hierarchical order
+            var batchEntities = request.CachedEntityData
+                .Where(entity =>
+                {
+                    var entityId = entity.TryGetValue("id", out var id) ? id.ToString() : null;
+                    return entityId != null && request.EntityIds.Contains(entityId);
+                })
+                .ToList(); // Preserves the hierarchical order from cached data
+            
+            _logger.LogInformation("🔍 DEBUG: Retrieved {Count} cached {EntityType} entities in hierarchical order for batch {BatchNumber} in migration {MigrationId}", 
+                batchEntities.Count, request.EntityType, request.BatchNumber, request.MigrationId);
+            
+            // ✅ DEBUG: Log the hierarchical processing order
+            foreach (var entity in batchEntities)
+            {
+                var categoryId = entity.TryGetValue("id", out var id) ? id.ToString() : "UNKNOWN";
+                var categoryName = entity.TryGetValue("name", out var name) ? name.ToString() : "UNKNOWN";
+                var parentId = entity.TryGetValue("parent_id", out var parent) ? parent.ToString() : "UNKNOWN";
+                _logger.LogInformation("🔍 DEBUG: - Hierarchical order: Category {CategoryId} ({CategoryName}), Parent: {ParentId}", 
+                    categoryId, categoryName, parentId);
+            }
+
+            return batchEntities;
+        }
+        
+        // For non-hierarchical entities, use the original logic
+        var standardBatchEntities = request.CachedEntityData
+            .Where(entity =>
+            {
+                var entityId = entity.TryGetValue("id", out var id) ? id.ToString() : null;
+                return entityId != null && request.EntityIds.Contains(entityId);
+            })
+            .ToList();
+
+        _logger.LogDebug("Retrieved {Count} cached {EntityType} entities for batch {BatchNumber} in migration {MigrationId}", 
+            standardBatchEntities.Count, request.EntityType, request.BatchNumber, request.MigrationId);
+
+        return standardBatchEntities;
+    }
 
     private StoreConfiguration ValidateStoreConfiguration(StoreConfiguration? storeConfig)
     {

@@ -3,6 +3,8 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Infrastructure.Services;
 using BigCommerce.Migration.Orchestration.Services;
+using BigCommerce.Migration.Orchestration.Services.EntityCreation;
+using BigCommerce.Migration.Orchestration.Strategies;
 using System.Net.Http;
 
 namespace BigCommerce.Migration.Orchestration.Extensions;
@@ -19,6 +21,9 @@ public static class ServiceCollectionExtensions
     /// <returns>Service collection for chaining</returns>
     public static IServiceCollection AddOrchestrationServices(this IServiceCollection services)
     {
+        // Add logging services (required by many services)
+        services.AddLogging();
+        
         // Add core business services
         services.AddCoreServices();
         
@@ -70,13 +75,24 @@ public static class ServiceCollectionExtensions
         
         // Register services as singleton for better performance and test consistency
         services.TryAddSingleton<ICategoryTreeResolver, CategoryTreeResolver>();
-        services.TryAddSingleton<IOpenSearchService, OpenSearchService>();
+        // Note: IOpenSearchService is registered in the Functions project with conditional logic
+        // Don't register it here to avoid conflicts
+        
+        // Register API request handler for HTTP concerns (required by BigCommerceApiClient)
+        services.TryAddSingleton<IApiRequestHandler, ApiRequestHandler>();
         services.TryAddSingleton<IBigCommerceApiClient, BigCommerceApiClient>();
+        services.TryAddSingleton<IBatchApiClient, BatchApiClient>();
+        
+        // Register segregated API client interfaces (Interface Segregation Principle)
+        services.TryAddSingleton<ICategoryApiClient, CategoryApiService>();
+        services.TryAddSingleton<IProductApiClient, ProductApiService>();
+        services.TryAddSingleton<IPaginationApiClient, PaginationApiService>();
+        services.TryAddSingleton<IApiHealthClient, HealthApiService>();
         
         // Register Azure Storage services
         services.TryAddSingleton<IBlobService, BlobService>();
         services.TryAddSingleton<IQueueService, QueueService>();
-        services.TryAddSingleton<IMigrationStorageService, MigrationStorageService>();
+        services.TryAddScoped<IMigrationStorageService, MigrationStorageService>();
         
         return services;
     }
@@ -97,6 +113,45 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IEntityCreateService, EntityCreateService>();
         services.TryAddSingleton<IEntityMappingService, EntityMappingService>();
         services.TryAddSingleton<IEntityErrorHandlingService, EntityErrorHandlingService>();
+        
+        // ✅ Register error message formatter (SOLID: Single Responsibility)
+        services.TryAddSingleton<IErrorMessageFormatter, ErrorMessageFormatter>();
+        
+        // Register entity discovery strategy pattern implementations (Task 2.3.3 - COMPLETED)
+        services.TryAddSingleton<IEntityDiscoveryStrategyFactory, EntityDiscoveryStrategyFactory>();
+        services.TryAddSingleton<V2DirectPaginationStrategy>();
+        services.TryAddSingleton<V3EfficientPaginationStrategy>();
+        services.TryAddSingleton<V3HierarchicalStrategy>();
+        
+        // 🎯 Register entity creation strategy pattern implementations (Task 3.1 - COMPLETED)
+        // Strategy Pattern for Open/Closed Principle compliance
+        services.TryAddScoped<IEntityCreationStrategyFactory, EntityCreationStrategyFactory>();
+        services.AddScoped<IEntityCreationStrategy, CategoryCreationStrategy>();
+        services.AddScoped<IEntityCreationStrategy, ProductCreationStrategy>();
+        services.AddScoped<IEntityCreationStrategy, BrandCreationStrategy>();
+        services.AddScoped<IEntityCreationStrategy, VariantCreationStrategy>();
+        services.AddScoped<IEntityCreationStrategy, ImageCreationStrategy>();
+        services.AddScoped<IEntityCreationStrategy, ModifierCreationStrategy>();
+        
+        // 🎯 Register entity transform strategy pattern implementations (Task 3.2.2 - COMPLETED)
+        // Strategy Pattern for Open/Closed Principle compliance
+        services.TryAddScoped<IEntityTransformStrategyFactory, EntityTransformStrategyFactory>();
+        services.AddScoped<IEntityTransformStrategy, CategoryTransformStrategy>();
+        services.AddScoped<IEntityTransformStrategy, ProductTransformStrategy>();
+        services.AddScoped<IEntityTransformStrategy, BrandTransformStrategy>();
+        services.AddScoped<IEntityTransformStrategy, VariantTransformStrategy>();
+        services.AddScoped<IEntityTransformStrategy, ImageTransformStrategy>();
+        services.AddScoped<IEntityTransformStrategy, ModifierTransformStrategy>();
+        
+        // 🎯 Register entity fetch strategy pattern implementations (Task 3.3.2 - NEW)
+        // Strategy Pattern for Open/Closed Principle compliance
+        services.TryAddScoped<IEntityFetchStrategyFactory, EntityFetchStrategyFactory>();
+        services.AddScoped<IEntityFetchStrategy, CategoryFetchStrategy>();
+        services.AddScoped<IEntityFetchStrategy, ProductFetchStrategy>();
+        services.AddScoped<IEntityFetchStrategy, BrandFetchStrategy>();
+        services.AddScoped<IEntityFetchStrategy, VariantFetchStrategy>();
+        services.AddScoped<IEntityFetchStrategy, ImageFetchStrategy>();
+        services.AddScoped<IEntityFetchStrategy, ModifierFetchStrategy>();
         
         return services;
     }

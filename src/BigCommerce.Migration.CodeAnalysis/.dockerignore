@@ -1,0 +1,34 @@
+# Code Analysis Analyzer Project - .dockerignore
+# Exclude build artifacts
+obj/
+bin/
+TestResults/
+*.user
+*.suo
+*.tmp
+*.log
+
+# Exclude development tools
+.vs/
+.vscode/
+.idea/
+
+# Exclude OS files
+.DS_Store
+Thumbs.db
+
+# Exclude Git
+.git/
+.gitignore
+
+# Exclude NuGet packages
+packages/
+.nuget/
+
+# Exclude documentation
+*.md
+README*
+
+# This is an analyzer project - keep only source code
+!**/*.cs
+!**/*.csproj 

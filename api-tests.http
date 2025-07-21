@@ -251,6 +251,16 @@ Content-Type: {{contentType}}
 # POST {{baseUrl}}/api/migrations/completed-migration-id/cancel
 # Content-Type: {{contentType}}
 
+### TEST: Check category trees in destination store
+GET https://api.bigcommerce.com/stores/in2msaitrc/v3/catalog/trees
+X-Auth-Token: d0eazyagzihcflwt7bk9ptqdhcixk2
+Content-Type: application/json
+
+### TEST: Check category trees with channel filter
+GET https://api.bigcommerce.com/stores/in2msaitrc/v3/catalog/trees?channel_id=1  
+X-Auth-Token: d0eazyagzihcflwt7bk9ptqdhcixk2
+Content-Type: application/json
+
 ###
 ### NOTES:
 ### 

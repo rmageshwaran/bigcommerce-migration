@@ -170,22 +170,21 @@ public class EntityMappingService : IEntityMappingService
             _logger.LogDebug("Getting destination ID for migration {MigrationId}, entity type {EntityType}, source ID {SourceId}", 
                 migrationId, entityType, sourceId);
             
-            // This would need to be implemented in the storage service
-            // For now, return null as placeholder
-            string? destinationId = null;
+            // Retrieve the entity mapping from storage
+            var mapping = await _migrationStorageService.GetEntityMappingAsync(migrationId, entityType, sourceId);
             
-            if (destinationId != null)
+            if (mapping != null && !string.IsNullOrEmpty(mapping.DestinationId))
             {
                 _logger.LogDebug("Found destination ID {DestinationId} for migration {MigrationId}, entity type {EntityType}, source ID {SourceId}", 
-                    destinationId, migrationId, entityType, sourceId);
+                    mapping.DestinationId, migrationId, entityType, sourceId);
+                return mapping.DestinationId;
             }
             else
             {
                 _logger.LogDebug("No destination ID found for migration {MigrationId}, entity type {EntityType}, source ID {SourceId}", 
                     migrationId, entityType, sourceId);
+                return null;
             }
-            
-            return destinationId;
         }
         catch (Exception ex)
         {
@@ -279,30 +278,30 @@ public class EntityMappingService : IEntityMappingService
             ["shipping_methods"] = new[] { "shipping_method_id", "id", "Id", "ID" },
             ["payment_methods"] = new[] { "payment_method_id", "id", "Id", "ID" },
             ["tax_classes"] = new[] { "tax_class_id", "id", "Id", "ID" },
-            ["tax_rates"] = new[] { "tax_rate_id", "id", "Id", "ID" },
-            ["product_options"] = new[] { "product_option_id", "id", "Id", "ID" },
-            ["product_option_values"] = new[] { "product_option_value_id", "id", "Id", "ID" },
-            ["product_variants"] = new[] { "variant_id", "id", "Id", "ID" },
-            ["product_images"] = new[] { "image_id", "id", "Id", "ID" },
-            ["product_custom_fields"] = new[] { "custom_field_id", "id", "Id", "ID" },
-            ["product_bulk_pricing_rules"] = new[] { "bulk_pricing_rule_id", "id", "Id", "ID" },
-            ["product_metafields"] = new[] { "metafield_id", "id", "Id", "ID" },
-            ["category_metafields"] = new[] { "metafield_id", "id", "Id", "ID" },
-            ["brand_metafields"] = new[] { "metafield_id", "id", "Id", "ID" },
-            ["customer_metafields"] = new[] { "metafield_id", "id", "Id", "ID" },
-            ["order_metafields"] = new[] { "metafield_id", "id", "Id", "ID" }
+            ["coupons"] = new[] { "coupon_id", "id", "Id", "ID" },
+            ["redirects"] = new[] { "redirect_id", "id", "Id", "ID" },
+            ["wishlist"] = new[] { "wishlist_id", "id", "Id", "ID" },
+            ["gift_certificates"] = new[] { "gift_certificate_id", "id", "Id", "ID" },
+            ["pages"] = new[] { "page_id", "id", "Id", "ID" },
+            ["blog_posts"] = new[] { "blog_post_id", "id", "Id", "ID" },
+            ["blog_tags"] = new[] { "blog_tag_id", "id", "Id", "ID" },
+            ["banner"] = new[] { "banner_id", "id", "Id", "ID" },
+            ["newsletter_subscribers"] = new[] { "subscriber_id", "id", "Id", "ID" }
         };
 
-        // Get the possible ID fields for this entity type, or fall back to generic ones
-        var possibleIdFields = idFieldMappings.TryGetValue(entityType, out var fields) 
+        var possibleIdFields = idFieldMappings.TryGetValue(entityType.ToLowerInvariant(), out var fields)
             ? fields 
             : new[] { "id", "Id", "ID" };
-        
+
         foreach (var field in possibleIdFields)
         {
-            if (entity.TryGetValue(field, out var id) && id != null)
+            if (entity.TryGetValue(field, out var value) && value != null)
             {
-                return id.ToString()!;
+                var id = value.ToString();
+                if (!string.IsNullOrWhiteSpace(id))
+                {
+                    return id;
+                }
             }
         }
 

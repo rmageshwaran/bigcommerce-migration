@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:latest
+    container_name: azurite
+    ports:
+      - "10000:10000"
+      - "10001:10001"
+      - "10002:10002"
+    volumes:
+      - azurite-data:/data
+    command: "azurite --silent --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0 --location /data"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "1"
+    restart: unless-stopped
+
+  bigcommerce-functions:
+    build: .
+    container_name: bigcommerce-functions
+    ports:
+      - "7071:80"
+    environment:
+      - AzureWebJobsStorage=AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;DefaultEndpointsProtocol=http;BlobEndpoint=http://azurite:10000/devstoreaccount1;QueueEndpoint=http://azurite:10001/devstoreaccount1;TableEndpoint=http://azurite:10002/devstoreaccount1;
+      - FUNCTIONS_WORKER_RUNTIME=dotnet-isolated
+      - product-processing-queue=product-processing-queue
+      - EntityMigrationRequestQueueName=bigcommerce-migration-request-queue
+      - OutputQueueName=bigcommerce-migration-splitter-queue
+      - ProductProcessingQueueName=product-processing-queue
+      - OpenSearch__ApiUrl=https://search-api.vortexiq.ai/
+      - OpenSearch__UserName=admin
+      - OpenSearch__Password=admin
+      - AppSettings__BatchSize=100
+    depends_on:
+      - azurite
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+    restart: unless-stopped
+
+volumes:
+  azurite-data: 

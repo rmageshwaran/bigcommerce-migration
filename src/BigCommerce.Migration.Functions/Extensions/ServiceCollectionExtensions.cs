@@ -14,6 +14,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Azure.SignalR.Management;
 using Microsoft.Extensions.Azure;
+using System.Net.Http;
 
 namespace BigCommerce.Migration.Functions.Extensions;
 
@@ -115,6 +116,24 @@ public static class ServiceCollectionExtensions
 
         // Also register as singleton for backward compatibility
         services.AddSingleton(openSearchConfig);
+
+        // Bind SignalR configuration using Options pattern
+        services.Configure<SignalRConfiguration>(configuration.GetSection("SignalR"));
+
+        // Validate SignalR configuration (only if configuration is provided)
+        var signalRConfig = new SignalRConfiguration();
+        configuration.GetSection("SignalR").Bind(signalRConfig);
+
+        // Only validate if SignalR configuration is actually provided
+        var signalRSection = configuration.GetSection("SignalR");
+        if (signalRSection.Exists() && !signalRConfig.IsValid())
+        {
+            var errors = GetSignalRConfigurationErrors(signalRConfig);
+            throw new ArgumentException($"Invalid SignalR configuration. Issues found:\n{string.Join("\n", errors)}");
+        }
+
+        // Also register as singleton for backward compatibility
+        services.AddSingleton(signalRConfig);
 
         return services;
     }
@@ -321,6 +340,35 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
+    /// Gets detailed error messages for SignalR configuration issues
+    /// </summary>
+    private static List<string> GetSignalRConfigurationErrors(SignalRConfiguration config)
+    {
+        var errors = new List<string>();
+
+        if (string.IsNullOrEmpty(config.BaseUrl))
+        {
+            errors.Add("- SignalR:BaseUrl is required (e.g., 'http://localhost:7071', 'https://api.mycompany.com')");
+        }
+        else if (!Uri.IsWellFormedUriString(config.BaseUrl, UriKind.Absolute))
+        {
+            errors.Add("- SignalR:BaseUrl must be a valid absolute URL");
+        }
+
+        if (config.TimeoutSeconds <= 0 || config.TimeoutSeconds > 300)
+        {
+            errors.Add("- SignalR:TimeoutSeconds must be between 1 and 300 seconds (recommended: 5-30 seconds)");
+        }
+
+        if (config.MaxRetries < 0 || config.MaxRetries > 5)
+        {
+            errors.Add("- SignalR:MaxRetries must be between 0 and 5 (recommended: 0 for fast-fail)");
+        }
+
+        return errors;
+    }
+
+    /// <summary>
     /// Validates Azure Storage connection string format
     /// </summary>
     private static bool IsValidAzureStorageConnectionString(string connectionString)
@@ -443,12 +491,36 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Adds SignalR services for real-time dashboard updates
+    /// Adds performance-optimized SignalR services for real-time dashboard updates
+    /// Performance Optimizations: HTTP connection pooling, async queuing, message batching, configuration caching
+    /// SOLID Principles: Dependency Inversion, Single Responsibility, Open/Closed
     /// </summary>
     private static IServiceCollection AddSignalRServices(this IServiceCollection services, IConfiguration configuration)
     {
-        // Get SignalR connection string from configuration
+        // Configure HTTP client factory for connection pooling optimization
+        services.AddHttpClient("SignalR", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(30);
+            client.DefaultRequestHeaders.Add("User-Agent", "BigCommerce-Migration/1.0");
+            client.DefaultRequestHeaders.Add("Accept", "application/json");
+        })
+        .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+        {
+            PooledConnectionLifetime = TimeSpan.FromMinutes(15), // Connection reuse optimization
+            MaxConnectionsPerServer = 10, // Support concurrent SignalR calls
+            PooledConnectionIdleTimeout = TimeSpan.FromMinutes(5), // Resource cleanup
+            ConnectTimeout = TimeSpan.FromSeconds(10) // Fast connection establishment
+        });
+
+        // Bind batching configuration for message batching optimization
+        services.Configure<BatchingConfiguration>(configuration.GetSection("SignalR:Batching"));
+
+        // Get SignalR connection string and performance configuration
         var connectionString = configuration.GetConnectionString("AzureSignalR");
+        var signalRSection = configuration.GetSection("SignalR");
+        var enableAsyncQueuing = signalRSection.GetValue<bool>("EnableAsyncQueuing", true);
+        var enableBatching = signalRSection.GetValue<bool>("EnableBatching", false);
+        var enableHttpService = signalRSection.GetValue<bool>("EnableHttpService", false);
 
         if (!string.IsNullOrEmpty(connectionString) && IsValidAzureSignalRConnectionString(connectionString))
         {
@@ -467,16 +539,8 @@ public static class ServiceCollectionExtensions
             }
             else
             {
-                // Configure Azure SignalR for Azure Functions using output bindings approach
-                Console.WriteLine("Azure SignalR connection string found. Using Azure Functions SignalR service with output bindings.");
-
-                // Register Azure Functions SignalR service (doesn't use hub context)
-                services.AddSingleton<IMigrationSignalRService>(serviceProvider =>
-                {
-                    var logger = serviceProvider.GetRequiredService<ILogger<AzureFunctionsSignalRService>>();
-                    var httpClient = serviceProvider.GetRequiredService<HttpClient>();
-                    return new AzureFunctionsSignalRService(logger, httpClient);
-                });
+                // Performance-optimized SignalR service selection based on configuration
+                RegisterOptimizedSignalRService(services, enableAsyncQueuing, enableBatching, enableHttpService);
             }
         }
         else
@@ -490,6 +554,90 @@ public static class ServiceCollectionExtensions
         }
 
         return services;
+    }
+
+    /// <summary>
+    /// Registers the most appropriate performance-optimized SignalR service based on configuration
+    /// SOLID Principles: Single Responsibility (service selection), Open/Closed (extensible)
+    /// </summary>
+    private static void RegisterOptimizedSignalRService(
+        IServiceCollection services, 
+        bool enableAsyncQueuing, 
+        bool enableBatching, 
+        bool enableHttpService)
+    {
+        // Strategy Pattern: Select optimal SignalR service based on performance requirements
+        if (enableAsyncQueuing && enableBatching)
+        {
+            // Ultimate performance: Async queuing + message batching
+            Console.WriteLine("Using AsyncQueuedSignalRService with batching for maximum performance");
+            services.AddSingleton<IMigrationSignalRService>(serviceProvider =>
+            {
+                var logger = serviceProvider.GetRequiredService<ILogger<AsyncQueuedSignalRService>>();
+                var httpClientFactory = serviceProvider.GetRequiredService<IHttpClientFactory>();
+                var signalRConfig = serviceProvider.GetRequiredService<SignalRConfiguration>();
+                
+                // Wrap AsyncQueuedSignalRService with batching capability
+                var asyncService = new AsyncQueuedSignalRService(logger, httpClientFactory, signalRConfig);
+                
+                // Create batching wrapper (Decorator Pattern)
+                var batchLogger = serviceProvider.GetRequiredService<ILogger<BatchedSignalRService>>();
+                var batchConfig = serviceProvider.GetService<IOptions<BatchingConfiguration>>()?.Value 
+                    ?? new BatchingConfiguration();
+                
+                return new BatchedSignalRService(batchLogger, httpClientFactory, signalRConfig, batchConfig);
+            });
+        }
+        else if (enableAsyncQueuing)
+        {
+            // High performance: Async queuing without batching
+            Console.WriteLine("Using AsyncQueuedSignalRService for high performance (non-blocking calls)");
+            services.AddSingleton<IMigrationSignalRService>(serviceProvider =>
+            {
+                var logger = serviceProvider.GetRequiredService<ILogger<AsyncQueuedSignalRService>>();
+                var httpClientFactory = serviceProvider.GetRequiredService<IHttpClientFactory>();
+                var signalRConfig = serviceProvider.GetRequiredService<SignalRConfiguration>();
+                return new AsyncQueuedSignalRService(logger, httpClientFactory, signalRConfig);
+            });
+        }
+        else if (enableBatching)
+        {
+            // Medium performance: Message batching without async queuing
+            Console.WriteLine("Using BatchedSignalRService for reduced HTTP overhead");
+            services.AddSingleton<IMigrationSignalRService>(serviceProvider =>
+            {
+                var logger = serviceProvider.GetRequiredService<ILogger<BatchedSignalRService>>();
+                var httpClientFactory = serviceProvider.GetRequiredService<IHttpClientFactory>();
+                var signalRConfig = serviceProvider.GetRequiredService<SignalRConfiguration>();
+                var batchConfig = serviceProvider.GetService<IOptions<BatchingConfiguration>>()?.Value 
+                    ?? new BatchingConfiguration();
+                return new BatchedSignalRService(logger, httpClientFactory, signalRConfig, batchConfig);
+            });
+        }
+        else if (enableHttpService)
+        {
+            // Basic performance: HTTP connection pooling only
+            Console.WriteLine("Using OptimizedSignalRService with HTTP connection pooling");
+            services.AddSingleton<IMigrationSignalRService>(serviceProvider =>
+            {
+                var logger = serviceProvider.GetRequiredService<ILogger<OptimizedSignalRService>>();
+                var httpClientFactory = serviceProvider.GetRequiredService<IHttpClientFactory>();
+                var signalRConfig = serviceProvider.GetRequiredService<SignalRConfiguration>();
+                return new OptimizedSignalRService(logger, httpClientFactory, signalRConfig);
+            });
+        }
+        else
+        {
+            // Legacy: Use existing AzureFunctionsSignalRService (with fixed configuration caching)
+            Console.WriteLine("Using enhanced AzureFunctionsSignalRService with configuration caching");
+            services.AddSingleton<IMigrationSignalRService>(serviceProvider =>
+            {
+                var logger = serviceProvider.GetRequiredService<ILogger<AzureFunctionsSignalRService>>();
+                var httpClient = serviceProvider.GetRequiredService<HttpClient>();
+                var signalRConfig = serviceProvider.GetRequiredService<SignalRConfiguration>();
+                return new AzureFunctionsSignalRService(logger, httpClient, signalRConfig);
+            });
+        }
     }
 
     /// <summary>

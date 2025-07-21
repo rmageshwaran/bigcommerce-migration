@@ -14,6 +14,20 @@ services:
       - BigCommerce__EnableDebugLogging=true
       - AppSettings__BatchSize=5  # Smaller batches for development
       - AppSettings__MaxConcurrency=2  # Lower concurrency for development
+      
+      # Development SignalR Performance Optimizations
+      - SignalR__BaseUrl=http://localhost:7071
+      - SignalR__TimeoutSeconds=10
+      - SignalR__Enabled=true
+      - SignalR__EnableDebugLogging=true
+      - SignalR__MaxRetries=0
+      - SignalR__EnableAsyncQueuing=true
+      - SignalR__EnableBatching=true
+      - SignalR__EnableHttpService=true
+      - SignalR__Batching__BatchSize=5
+      - SignalR__Batching__BatchTimeoutMs=200
+      - SignalR__Batching__MaxQueueSize=500
+      - SignalR__Batching__Enabled=true
     volumes:
       # Hot reload for development
       - ./src/BigCommerce.Migration.Functions:/app:cached

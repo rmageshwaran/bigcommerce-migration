@@ -1,4 +1,5 @@
 using BigCommerce.Migration.Core.Interfaces;
+using BigCommerce.Migration.Core.Models;
 using BigCommerce.Migration.Functions.Hubs;
 using Microsoft.Extensions.Logging;
 using System.Threading;
@@ -17,11 +18,13 @@ namespace BigCommerce.Migration.Functions.Services
     {
         private readonly ILogger<AzureFunctionsSignalRService> _logger;
         private readonly HttpClient _httpClient;
+        private readonly SignalRConfiguration _signalRConfig;
 
-        public AzureFunctionsSignalRService(ILogger<AzureFunctionsSignalRService> logger, HttpClient httpClient)
+        public AzureFunctionsSignalRService(ILogger<AzureFunctionsSignalRService> logger, HttpClient httpClient, SignalRConfiguration signalRConfig)
         {
-            _logger = logger;
-            _httpClient = httpClient;
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+            _signalRConfig = signalRConfig ?? throw new ArgumentNullException(nameof(signalRConfig));
         }
 
         /// <inheritdoc />
@@ -51,7 +54,7 @@ namespace BigCommerce.Migration.Functions.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to broadcast progress update for migration {MigrationId}", migrationId);
-                throw;
+                // Don't rethrow to avoid breaking the migration workflow
             }
         }
 
@@ -74,7 +77,7 @@ namespace BigCommerce.Migration.Functions.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to broadcast status update for migration {MigrationId}", migrationId);
-                throw;
+                // Don't rethrow to avoid breaking the migration workflow
             }
         }
 
@@ -98,7 +101,7 @@ namespace BigCommerce.Migration.Functions.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to broadcast migration completed for migration {MigrationId}", migrationId);
-                throw;
+                // Don't rethrow to avoid breaking the migration workflow
             }
         }
 
@@ -122,7 +125,7 @@ namespace BigCommerce.Migration.Functions.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to broadcast migration failed for migration {MigrationId}", migrationId);
-                throw;
+                // Don't rethrow to avoid breaking the migration workflow
             }
         }
 
@@ -146,7 +149,7 @@ namespace BigCommerce.Migration.Functions.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to broadcast migration cancelled for migration {MigrationId}", migrationId);
-                throw;
+                // Don't rethrow to avoid breaking the migration workflow
             }
         }
 
@@ -161,7 +164,7 @@ namespace BigCommerce.Migration.Functions.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to broadcast entity start for migration {MigrationId}, entity {EntityType}", migrationId, entityType);
-                throw;
+                // Don't rethrow to avoid breaking the migration workflow
             }
         }
 
@@ -176,7 +179,7 @@ namespace BigCommerce.Migration.Functions.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to broadcast entity completion for migration {MigrationId}, entity {EntityType}", migrationId, entityType);
-                throw;
+                // Don't rethrow to avoid breaking the migration workflow
             }
         }
 
@@ -191,7 +194,7 @@ namespace BigCommerce.Migration.Functions.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to broadcast batch completion for migration {MigrationId}, entity {EntityType}, batch {BatchNumber}", migrationId, entityType, batchNumber);
-                throw;
+                // Don't rethrow to avoid breaking the migration workflow
             }
         }
 
@@ -206,7 +209,7 @@ namespace BigCommerce.Migration.Functions.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to broadcast system health");
-                throw;
+                // Don't rethrow to avoid breaking the migration workflow
             }
         }
 
@@ -230,7 +233,7 @@ namespace BigCommerce.Migration.Functions.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to broadcast migration started for migration {MigrationId}", migrationId);
-                throw;
+                // Don't rethrow to avoid breaking the migration workflow
             }
         }
 
@@ -245,7 +248,7 @@ namespace BigCommerce.Migration.Functions.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to broadcast entity phase start for migration {MigrationId}, entity {EntityType}", migrationId, entityType);
-                throw;
+                // Don't rethrow to avoid breaking the migration workflow
             }
         }
 
@@ -260,7 +263,7 @@ namespace BigCommerce.Migration.Functions.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to broadcast entity phase completed for migration {MigrationId}, entity {EntityType}", migrationId, entityType);
-                throw;
+                // Don't rethrow to avoid breaking the migration workflow
             }
         }
 
@@ -275,7 +278,7 @@ namespace BigCommerce.Migration.Functions.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to broadcast error notification for migration {MigrationId}", migrationId);
-                throw;
+                // Don't rethrow to avoid breaking the migration workflow
             }
         }
 
@@ -290,35 +293,59 @@ namespace BigCommerce.Migration.Functions.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to broadcast system alert for type {AlertType}", alertType);
-                throw;
+                // Don't rethrow to avoid breaking the migration workflow
             }
         }
 
         /// <summary>
-        /// Helper method to call SignalR endpoints
+        /// Helper method to call SignalR endpoints with connection fallback
         /// </summary>
         private async Task CallSignalREndpoint(string endpoint, object data, CancellationToken cancellationToken = default)
         {
+            // Check if SignalR is disabled
+            if (!_signalRConfig.Enabled)
+            {
+                if (_signalRConfig.EnableDebugLogging)
+                {
+                    _logger.LogDebug("SignalR is disabled in configuration - skipping endpoint {Endpoint}", endpoint);
+                }
+                return;
+            }
+
             try
             {
                 var json = System.Text.Json.JsonSerializer.Serialize(data);
                 var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
                 
-                var response = await _httpClient.PostAsync($"http://localhost:7071{endpoint}", content, cancellationToken);
+                // Use configurable timeout
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeoutCts.CancelAfter(TimeSpan.FromSeconds(_signalRConfig.TimeoutSeconds));
+                
+                // Use configurable base URL instead of hardcoded localhost:7071
+                var fullUrl = _signalRConfig.GetFullUrl(endpoint);
+                var response = await _httpClient.PostAsync(fullUrl, content, timeoutCts.Token);
                 
                 if (response.IsSuccessStatusCode)
                 {
-                    _logger.LogDebug("Successfully called SignalR endpoint {Endpoint}", endpoint);
+                    if (_signalRConfig.EnableDebugLogging)
+                    {
+                        _logger.LogDebug("Successfully called SignalR endpoint {Endpoint} at {FullUrl}", endpoint, fullUrl);
+                    }
                 }
                 else
                 {
-                    _logger.LogWarning("SignalR endpoint {Endpoint} returned status {StatusCode}", endpoint, response.StatusCode);
+                    _logger.LogDebug("SignalR endpoint {Endpoint} at {FullUrl} returned status {StatusCode} - this is expected when dashboard is not running", endpoint, fullUrl, response.StatusCode);
                 }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // Respect the original cancellation token
+                throw;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to call SignalR endpoint {Endpoint}", endpoint);
-                // Don't rethrow to avoid breaking the migration flow
+                _logger.LogDebug("SignalR endpoint {Endpoint} at {BaseUrl} is unavailable - this is expected when dashboard is not running. Error: {Error}", endpoint, _signalRConfig.BaseUrl, ex.Message);
+                // Don't rethrow to avoid breaking the migration flow - SignalR is optional for functionality
             }
         }
     }

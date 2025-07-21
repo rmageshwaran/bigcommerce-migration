@@ -1,31 +1,32 @@
 using BigCommerce.Migration.Core.Interfaces;
-using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace BigCommerce.Migration.Orchestration.Strategies;
 
 /// <summary>
 /// Factory for creating entity fetch strategies based on entity type
 /// Implements Open/Closed Principle by enabling new strategies without modifying existing code
+/// Uses interface collection pattern for automatic strategy discovery
 /// </summary>
 public class EntityFetchStrategyFactory : IEntityFetchStrategyFactory
 {
-    private readonly IServiceProvider _serviceProvider;
-    private readonly Dictionary<string, Type> _strategyMap;
+    private readonly Dictionary<string, IEntityFetchStrategy> _strategies;
+    private readonly ILogger<EntityFetchStrategyFactory> _logger;
 
-    public EntityFetchStrategyFactory(IServiceProvider serviceProvider)
+    public EntityFetchStrategyFactory(
+        IEnumerable<IEntityFetchStrategy> strategies,
+        ILogger<EntityFetchStrategyFactory> logger)
     {
-        _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         
-        // Map entity types to their corresponding strategy implementations
-        _strategyMap = new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["categories"] = typeof(CategoryFetchStrategy),
-            ["products"] = typeof(ProductFetchStrategy),
-            ["brands"] = typeof(BrandFetchStrategy),
-            ["variants"] = typeof(VariantFetchStrategy),
-            ["images"] = typeof(ImageFetchStrategy),
-            ["modifiers"] = typeof(ModifierFetchStrategy)
-        };
+        // Create case-insensitive dictionary for strategy lookup
+        _strategies = strategies?.ToDictionary(
+            s => s.EntityType.ToLowerInvariant(),
+            s => s,
+            StringComparer.OrdinalIgnoreCase) ?? throw new ArgumentNullException(nameof(strategies));
+
+        _logger.LogInformation("Initialized EntityFetchStrategyFactory with {StrategyCount} strategies: {EntityTypes}",
+            _strategies.Count, string.Join(", ", _strategies.Keys));
     }
 
     public IEntityFetchStrategy GetStrategy(string entityType)
@@ -38,22 +39,17 @@ public class EntityFetchStrategyFactory : IEntityFetchStrategyFactory
         // Normalize entity type to handle case variations and pluralization
         var normalizedType = NormalizeEntityType(entityType);
 
-        if (!_strategyMap.TryGetValue(normalizedType, out var strategyType))
+        if (_strategies.TryGetValue(normalizedType, out var strategy))
         {
-            throw new ArgumentException($"No fetch strategy found for entity type: {entityType}. " +
-                $"Supported types: {string.Join(", ", _strategyMap.Keys)}", nameof(entityType));
+            _logger.LogDebug("Found fetch strategy for entity type: {EntityType}", entityType);
+            return strategy;
         }
 
-        // Resolve strategy from DI container
-        var strategy = _serviceProvider.GetService(strategyType) as IEntityFetchStrategy;
+        var availableTypes = string.Join(", ", _strategies.Keys);
+        var message = $"No fetch strategy found for entity type '{entityType}'. Available types: {availableTypes}";
         
-        if (strategy == null)
-        {
-            throw new InvalidOperationException($"Failed to resolve fetch strategy for entity type: {entityType}. " +
-                $"Ensure {strategyType.Name} is registered in the DI container.");
-        }
-
-        return strategy;
+        _logger.LogError(message);
+        throw new ArgumentException(message, nameof(entityType));
     }
 
     /// <summary>

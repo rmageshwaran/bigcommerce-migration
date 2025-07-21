@@ -986,6 +986,7 @@ public class MigrationHttpFunctions
                 }
                 
                 // Extract additional error details from additionalData
+                string? detailedErrorMessage = null;
                 if (logDict.TryGetValue("additionalData", out var errorAdditionalData))
                 {
                     Dictionary<string, object>? errorAdditionalDataDict = null;
@@ -1003,6 +1004,12 @@ public class MigrationHttpFunctions
                     {
                         errorMessage = additionalErrorMessage?.ToString() ?? errorMessage;
                     }
+                    
+                    // Extract detailedErrorMessage from additionalData if available
+                    if (errorAdditionalDataDict?.TryGetValue("detailedErrorMessage", out var additionalDetailedErrorMessage) == true)
+                    {
+                        detailedErrorMessage = additionalDetailedErrorMessage?.ToString();
+                    }
                 }
                 
                 var errorInfo = new
@@ -1011,6 +1018,7 @@ public class MigrationHttpFunctions
                     category = category,
                     entityType = GetEntityTypeFromLog(logDict),
                     errorMessage = errorMessage,
+                    detailedErrorMessage = detailedErrorMessage, // Add the detailed error message
                     context = logDict.TryGetValue("context", out var ctx) ? ctx : null,
                     stackTrace = stackTrace,
                     requestPayloadBlobUrl = GetRequestPayloadBlobUrl(logDict),

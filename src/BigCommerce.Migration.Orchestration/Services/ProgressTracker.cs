@@ -102,12 +102,81 @@ public class ProgressTracker : IProgressTracker
         try
         {
             var progress = GetOrCreateProgress(migrationId);
-            lock (_lock)
+            
+            // Check if we have meaningful progress data in cache
+            var hasMeaningfulProgress = progress.TotalEntities > 0 || 
+                                       progress.ProcessedEntities > 0 || 
+                                       progress.EntityProgress.Any() ||
+                                       progress.StartTime < DateTime.UtcNow.AddMinutes(-1); // Not just created
+            
+            // If no meaningful progress data and we have storage service, try to reconstruct from storage
+            if (!hasMeaningfulProgress && _storageService != null)
             {
-                // Update calculated fields
-                CalculateOverallProgress(progress);
-                progress.LastUpdated = DateTime.UtcNow;
-                progress.ElapsedTime = progress.LastUpdated - progress.StartTime;
+                try
+                {
+                    _logger.LogDebug("Progress cache has no meaningful data for migration {MigrationId}, attempting to reconstruct from storage", migrationId);
+                    
+                    var migrationEntry = await _storageService.GetMigrationAsync(migrationId);
+                    if (migrationEntry != null)
+                    {
+                        // Get entity-level progress from storage
+                        var entityProgressEntries = await _storageService.GetEntityProgressAsync(migrationId);
+                        
+                        lock (_lock)
+                        {
+                            // Update progress with storage data
+                            progress.Status = migrationEntry.Status.ToString().ToLower();
+                            progress.StartTime = migrationEntry.CreatedAt;
+                            progress.LastUpdated = migrationEntry.UpdatedAt;
+                            progress.OverallProgressPercentage = migrationEntry.ProgressPercentage;
+                            progress.TotalEntities = migrationEntry.TotalEntities;
+                            progress.ProcessedEntities = migrationEntry.ProcessedEntities;
+                            progress.SuccessfulEntities = migrationEntry.ProcessedEntities - migrationEntry.FailedEntities;
+                            progress.FailedEntities = migrationEntry.FailedEntities;
+                            progress.CurrentPhase = migrationEntry.CurrentPhase ?? "completed";
+                            
+                            // Reconstruct entity progress
+                            progress.EntityProgress.Clear();
+                            foreach (var entry in entityProgressEntries)
+                            {
+                                progress.EntityProgress[entry.EntityType] = new EntityProgress
+                                {
+                                    EntityType = entry.EntityType,
+                                    TotalCount = entry.TotalCount,
+                                    ProcessedCount = entry.ProcessedCount,
+                                    SuccessCount = entry.SuccessCount,
+                                    FailureCount = entry.FailureCount,
+                                    ProgressPercentage = entry.ProgressPercentage,
+                                    Status = entry.Status,
+                                    StartTime = entry.StartTime,
+                                    EndTime = entry.EndTime,
+                                    ProcessingTime = entry.ProcessingTime
+                                };
+                            }
+                            
+                            // Update calculated fields
+                            CalculateOverallProgress(progress);
+                            progress.ElapsedTime = progress.LastUpdated - progress.StartTime;
+                        }
+                        
+                        _logger.LogDebug("Successfully reconstructed progress for migration {MigrationId} from storage", migrationId);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to reconstruct progress for migration {MigrationId} from storage", migrationId);
+                    // Continue with in-memory progress
+                }
+            }
+            else
+            {
+                lock (_lock)
+                {
+                    // Update calculated fields
+                    CalculateOverallProgress(progress);
+                    progress.LastUpdated = DateTime.UtcNow;
+                    progress.ElapsedTime = progress.LastUpdated - progress.StartTime;
+                }
             }
             
             // Return a copy to avoid external modification
@@ -428,6 +497,12 @@ public class ProgressTracker : IProgressTracker
             entityProgress.ProcessedCount = update.ProcessedCount;
             entityProgress.SuccessCount = update.SuccessCount;
             entityProgress.FailureCount = update.FailureCount;
+            
+            // Calculate entity progress percentage
+            if (entityProgress.TotalCount > 0)
+            {
+                entityProgress.ProgressPercentage = (double)entityProgress.ProcessedCount / entityProgress.TotalCount * 100.0;
+            }
         }
     }
     

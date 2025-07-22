@@ -222,6 +222,9 @@ public class ProgressTrackerPersistenceTests
             .Setup(x => x.UpdateMigrationAsync(It.IsAny<MigrationEntry>()))
             .ReturnsAsync(migrationEntry);
 
+        // Start entity processing to set up entity progress
+        await _progressTracker.StartEntityProcessingAsync(_testMigrationId, "categories", 100);
+
         // Simulate storage failure for entity progress
         _mockStorageService
             .Setup(x => x.CreateOrUpdateEntityProgressAsync(It.IsAny<EntityProgressEntry>()))
@@ -262,6 +265,9 @@ public class ProgressTrackerPersistenceTests
 
         var migrationEntry = CreateTestMigrationEntry();
         SetupMockStorageService(migrationEntry);
+
+        // Start entity processing to set up entity progress
+        await _progressTracker.StartEntityProcessingAsync(_testMigrationId, "categories", 100);
 
         EntityProgressEntry? capturedEntry = null;
         _mockStorageService

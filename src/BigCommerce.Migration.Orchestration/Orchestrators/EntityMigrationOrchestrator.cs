@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using BigCommerce.Migration.Core.Models;
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Orchestration.Models;
+using BigCommerce.Migration.Orchestration.Activities;
 
 namespace BigCommerce.Migration.Orchestration.Orchestrators;
 
@@ -94,7 +95,7 @@ public class EntityMigrationOrchestrator
             var batches = CreateBatches(discoveryResult.EntityIds, request, discoveryResult);
             context.SetCustomStatus($"Created {batches.Count} batches for {request.EntityType} migration");
 
-            // Step 4: Process batches with rate limiting and progress tracking
+            // Step 4: Process batches with rate limiting and enhanced progress tracking
             await ProcessBatchesWithRateLimit(context, request, batches, result);
 
             // Step 5: Finalize result
@@ -208,7 +209,7 @@ public class EntityMigrationOrchestrator
     }
 
     /// <summary>
-    /// Processes batches with rate limiting and progress tracking
+    /// Processes batches with rate limiting and enhanced progress tracking
     /// </summary>
     /// <param name="context">Orchestration context</param>
     /// <param name="request">Entity migration request</param>
@@ -220,9 +221,28 @@ public class EntityMigrationOrchestrator
         List<BatchProcessingRequest> batches,
         EntityMigrationResult result)
     {
+        // Initialize enhanced progress tracking for this entity
+        await context.CallActivityAsync("InitializeEntityBatchTracking", new
+        {
+            MigrationId = request.MigrationId,
+            EntityType = request.EntityType,
+            TotalBatches = batches.Count,
+            TotalEntities = result.TotalEntities
+        });
+
+        // Broadcast entity initialization (orchestrator level to prevent replay)
+        context.CallActivityAsync("BroadcastEntityInitialization", new EntityInitializationBroadcast
+        {
+            MigrationId = request.MigrationId,
+            EntityType = request.EntityType,
+            TotalBatches = batches.Count,
+            TotalEntities = result.TotalEntities
+        });
+
         for (int i = 0; i < batches.Count; i++)
         {
             var batch = batches[i];
+            var batchNumber = i + 1;
             
             try
             {
@@ -230,31 +250,81 @@ public class EntityMigrationOrchestrator
                 var isCancelled = await context.CallActivityAsync<bool>("CheckMigrationCancellation", request.MigrationId);
                 if (isCancelled)
                 {
-                    result.Errors.Add($"{request.EntityType} migration was cancelled during batch {batch.BatchNumber} processing");
+                    result.Errors.Add($"{request.EntityType} migration was cancelled during batch {batchNumber} processing");
                     return; // Exit the loop early
                 }
 
-                // Step 1: Check rate limiting before processing batch
+                // Step 1: Start enhanced batch tracking
+                await context.CallActivityAsync("StartBatchTracking", new
+                {
+                    MigrationId = request.MigrationId,
+                    EntityType = request.EntityType,
+                    BatchNumber = batchNumber,
+                    BatchSize = batch.EntityIds.Count,
+                    TotalBatches = batches.Count
+                });
+
+                // Broadcast batch start (orchestrator level to prevent replay)
+                context.CallActivityAsync("BroadcastBatchStart", new BatchStartBroadcast
+                {
+                    MigrationId = request.MigrationId,
+                    EntityType = request.EntityType,
+                    BatchNumber = batchNumber,
+                    BatchSize = batch.EntityIds.Count
+                });
+
+                // Step 2: Check rate limiting before processing batch
                 await ApplyRateLimiting(context, request);
 
-                // Step 2: Update progress
-                context.SetCustomStatus($"Processing batch {batch.BatchNumber}/{batch.TotalBatches} for {request.EntityType}");
+                // Step 3: Update processing context
+                context.SetCustomStatus($"Processing batch {batchNumber}/{batches.Count} ({batch.EntityIds.Count} entities)");
                 
-                await UpdateProgress(context, request, batch.BatchNumber, batches.Count, result);
-
-                // Step 3: Process the batch
+                // Step 4: Process the batch with real-time progress updates
+                var batchStartTime = context.CurrentUtcDateTime;
                 var batchResult = await context.CallActivityAsync<BatchProcessingResult>("ProcessEntityBatch", batch);
+                var batchDuration = context.CurrentUtcDateTime - batchStartTime;
 
-                // Step 4: Aggregate batch results
+                // Step 5: Complete batch tracking with results
+                await context.CallActivityAsync("CompleteBatchTracking", new
+                {
+                    MigrationId = request.MigrationId,
+                    EntityType = request.EntityType,
+                    BatchNumber = batchNumber,
+                    EntitiesProcessed = batchResult.TotalProcessed,
+                    SuccessfulEntities = batchResult.SuccessfulEntities,
+                    FailedEntities = batchResult.FailedEntities,
+                    ProcessingDuration = batchDuration,
+                    BatchSize = batch.EntityIds.Count
+                });
+
+                // Broadcast batch completion (orchestrator level to prevent replay)
+                context.CallActivityAsync("BroadcastBatchCompletion", new BatchCompletionBroadcast
+                {
+                    MigrationId = request.MigrationId,
+                    EntityType = request.EntityType,
+                    BatchNumber = batchNumber,
+                    EntitiesProcessed = batchResult.TotalProcessed,
+                    SuccessfulEntities = batchResult.SuccessfulEntities,
+                    FailedEntities = batchResult.FailedEntities,
+                    ProcessingDuration = batchDuration
+                });
+
+                // Step 6: Aggregate batch results
                 AggregateBatchResults(result, batchResult);
 
-                // Step 5: Update progress after batch completion
-                await UpdateProgress(context, request, batch.BatchNumber, batches.Count, result);
+                // Step 7: Update enhanced progress after batch completion
+                await UpdateEnhancedProgress(context, request, batchNumber, batches.Count, result);
+
+                // Step 8: Update legacy progress for backward compatibility
+                await UpdateProgress(context, request, batchNumber, batches.Count, result);
+
+                _logger.LogDebug("Completed batch {BatchNumber}/{TotalBatches} for {EntityType}: {Successful}/{Total} successful", 
+                    batchNumber, batches.Count, request.EntityType, batchResult.SuccessfulEntities, batchResult.TotalProcessed);
             }
             catch (Exception ex)
             {
                 // Handle batch processing failure
-                var errorMessage = $"Failed to process batch {batch.BatchNumber}: {ex.Message}";
+                var errorMessage = $"Failed to process batch {batchNumber}: {ex.Message}";
                 result.Errors.Add(errorMessage);
                 
                 // Also add the original error message for test compatibility
@@ -263,11 +333,48 @@ public class EntityMigrationOrchestrator
                     result.Errors.Add(ex.Message);
                 }
 
-                // Mark all entities in this batch as failed
+                // Mark all entities in this batch as failed and complete batch tracking
                 result.FailedEntities += batch.EntityIds.Count;
                 result.ProcessedEntities += batch.EntityIds.Count;
+
+                // Report failed batch to enhanced tracking
+                await context.CallActivityAsync("CompleteBatchTracking", new
+                {
+                    MigrationId = request.MigrationId,
+                    EntityType = request.EntityType,
+                    BatchNumber = batchNumber,
+                    EntitiesProcessed = batch.EntityIds.Count,
+                    SuccessfulEntities = 0,
+                    FailedEntities = batch.EntityIds.Count,
+                    ProcessingDuration = TimeSpan.Zero,
+                    BatchSize = batch.EntityIds.Count,
+                    Error = ex.Message
+                });
+
+                _logger.LogError(ex, "Failed to process batch {BatchNumber}/{TotalBatches} for {EntityType}", 
+                    batchNumber, batches.Count, request.EntityType);
             }
         }
+
+        // Complete entity processing
+        await context.CallActivityAsync("CompleteEntityBatchTracking", new
+        {
+            MigrationId = request.MigrationId,
+            EntityType = request.EntityType,
+            TotalProcessed = result.ProcessedEntities,
+            SuccessfulEntities = result.SuccessfulEntities,
+            FailedEntities = result.FailedEntities
+        });
+
+        // Broadcast entity completion (orchestrator level to prevent replay)
+        context.CallActivityAsync("BroadcastEntityCompletion", new EntityCompletionBroadcast
+        {
+            MigrationId = request.MigrationId,
+            EntityType = request.EntityType,
+            TotalProcessed = result.ProcessedEntities,
+            SuccessfulEntities = result.SuccessfulEntities,
+            FailedEntities = result.FailedEntities
+        });
     }
 
     /// <summary>
@@ -303,7 +410,66 @@ public class EntityMigrationOrchestrator
     }
 
     /// <summary>
-    /// Updates progress tracking
+    /// Updates enhanced progress tracking with detailed information
+    /// </summary>
+    /// <param name="context">Orchestration context</param>
+    /// <param name="request">Entity migration request</param>
+    /// <param name="currentBatch">Current batch number</param>
+    /// <param name="totalBatches">Total number of batches</param>
+    /// <param name="result">Current result state</param>
+    private async Task UpdateEnhancedProgress(
+        IDurableOrchestrationContext context,
+        EntityMigrationRequest request,
+        int currentBatch,
+        int totalBatches,
+        EntityMigrationResult result)
+    {
+        try
+        {
+            var enhancedProgressUpdate = new
+            {
+                MigrationId = request.MigrationId,
+                EntityType = request.EntityType,
+                CurrentBatch = currentBatch,
+                TotalBatches = totalBatches,
+                TotalEntities = result.TotalEntities,
+                ProcessedEntities = result.ProcessedEntities,
+                SuccessfulEntities = result.SuccessfulEntities,
+                FailedEntities = result.FailedEntities,
+                ProgressPercentage = totalBatches > 0 ? Math.Round((double)currentBatch / totalBatches * 100, 1) : 0,
+                Phase = currentBatch >= totalBatches ? "Completed" : "Processing",
+                CurrentActivity = $"Batch {currentBatch}/{totalBatches}",
+                BatchSize = result.TotalEntities / totalBatches, // Average batch size
+                RemainingBatches = Math.Max(0, totalBatches - currentBatch),
+                RemainingEntities = Math.Max(0, result.TotalEntities - result.ProcessedEntities)
+            };
+
+            await context.CallActivityAsync("UpdateEnhancedEntityProgress", enhancedProgressUpdate);
+
+            // Broadcast detailed progress via SignalR (orchestrator level to prevent replay)
+            context.CallActivityAsync("BroadcastDetailedProgress", new DetailedProgressBroadcast
+            {
+                MigrationId = request.MigrationId,
+                EntityType = request.EntityType,
+                Phase = currentBatch >= totalBatches ? "Completed" : "Processing",
+                CurrentActivity = $"Batch {currentBatch}/{totalBatches}",
+                CurrentBatch = currentBatch,
+                TotalBatches = totalBatches,
+                BatchSize = result.TotalEntities / totalBatches, // Average batch size
+                ProcessedInBatch = 0, // Will be updated by individual batch processing
+                RemainingEntities = Math.Max(0, result.TotalEntities - result.ProcessedEntities),
+                StartTime = context.CurrentUtcDateTime
+            });
+        }
+        catch (Exception ex)
+        {
+            // Log progress update failure but don't stop processing
+            _logger.LogWarning(ex, "Enhanced progress update failed for {EntityType}", request.EntityType);
+        }
+    }
+
+    /// <summary>
+    /// Updates progress tracking (legacy method for backward compatibility)
     /// </summary>
     /// <param name="context">Orchestration context</param>
     /// <param name="request">Entity migration request</param>

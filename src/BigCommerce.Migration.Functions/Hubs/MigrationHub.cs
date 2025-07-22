@@ -5,13 +5,15 @@ using System;
 using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace BigCommerce.Migration.Functions.Hubs
 {
     /// <summary>
     /// SignalR service for real-time migration monitoring and updates
     /// </summary>
-    public class MigrationHub
+    public class MigrationHub : IMigrationHub
     {
         private readonly ILogger<MigrationHub> _logger;
         private readonly ServiceHubContext _hubContext;
@@ -147,15 +149,74 @@ namespace BigCommerce.Migration.Functions.Hubs
         /// <param name="cancellationToken">Cancellation token</param>
         public async Task SendSystemHealth(object healthData, CancellationToken cancellationToken = default)
         {
+            if (_hubContext == null)
+            {
+                _logger.LogWarning("SignalR hub context not available. System health update not sent.");
+                return;
+            }
+
             try
             {
                 await _hubContext.Clients.All.SendAsync("SystemHealth", healthData, cancellationToken).ConfigureAwait(false);
-                
                 _logger.LogDebug("Sent system health update to all clients");
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error sending system health update");
+            }
+        }
+
+        /// <summary>
+        /// Send message to specific migration group
+        /// </summary>
+        /// <param name="migrationId">Migration ID</param>
+        /// <param name="eventName">Event name</param>
+        /// <param name="data">Event data</param>
+        /// <param name="cancellationToken">Cancellation token</param>
+        public async Task SendToMigrationGroup(string migrationId, string eventName, object data, CancellationToken cancellationToken = default)
+        {
+            if (_hubContext == null)
+            {
+                _logger.LogWarning("SignalR hub context not available. Event {EventName} for migration {MigrationId} not sent.", eventName, migrationId);
+                return;
+            }
+
+            try
+            {
+                var groupName = GetMigrationGroupName(migrationId);
+                await _hubContext.Clients.Group(groupName).SendAsync(eventName, data, cancellationToken).ConfigureAwait(false);
+                
+                _logger.LogDebug("Sent {EventName} event to migration group {MigrationId}", eventName, migrationId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error sending {EventName} event to migration group {MigrationId}", eventName, migrationId);
+            }
+        }
+
+        /// <summary>
+        /// Send message to all connected clients
+        /// </summary>
+        /// <param name="eventName">Event name</param>
+        /// <param name="data">Event data</param>
+        /// <param name="cancellationToken">Cancellation token</param>
+        public async Task SendToAllClients(string eventName, object data, CancellationToken cancellationToken = default)
+        {
+            if (_hubContext == null)
+            {
+                _logger.LogWarning("SignalR hub context not available. Event {EventName} not sent to all clients.", eventName);
+                return;
+            }
+
+            try
+            {
+                await _hubContext.Clients.All.SendAsync(eventName, data, cancellationToken).ConfigureAwait(false);
+                
+                _logger.LogDebug("Sent {EventName} event to all connected clients", eventName);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error sending {EventName} event to all clients", eventName);
             }
         }
 
@@ -219,28 +280,23 @@ namespace BigCommerce.Migration.Functions.Hubs
         }
 
         /// <summary>
-        /// Get active connections count
+        /// Get active connections count for a migration
         /// </summary>
-        /// <returns>Number of active connections</returns>
-        public static int GetActiveConnectionsCount()
+        /// <param name="migrationId">Migration ID</param>
+        /// <returns>Number of active connections monitoring this migration</returns>
+        public int GetActiveConnectionsCount(string migrationId)
         {
-            return _connections.Count;
+            return _connections.Values.Count(c => c.MigrationId == migrationId);
         }
 
         /// <summary>
-        /// Get connections for specific migration
+        /// Get all active connections for a migration
         /// </summary>
         /// <param name="migrationId">Migration ID</param>
-        /// <returns>Number of connections monitoring this migration</returns>
-        public static int GetMigrationConnectionsCount(string migrationId)
+        /// <returns>List of connections monitoring this migration</returns>
+        public IEnumerable<UserConnection> GetActiveConnections(string migrationId)
         {
-            var count = 0;
-            foreach (var connection in _connections.Values)
-            {
-                if (connection.MigrationId == migrationId)
-                    count++;
-            }
-            return count;
+            return _connections.Values.Where(c => c.MigrationId == migrationId);
         }
 
         /// <summary>

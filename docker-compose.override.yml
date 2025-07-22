@@ -39,11 +39,13 @@ services:
   # Development overrides for Dashboard
   bigcommerce-dashboard:
     environment:
-      # Development-specific React environment
-      - REACT_APP_API_BASE_URL=http://localhost:7071/api/dashboard
-      - REACT_APP_SIGNALR_URL=http://localhost:7071/api
-      - REACT_APP_ENVIRONMENT=development
-      - REACT_APP_DEBUG=true
+      # Development-specific Vite environment (VITE_ prefix required)
+      - VITE_API_BASE_URL=http://localhost:7071/api
+      - VITE_SIGNALR_HUB_URL=http://localhost:7071
+      - VITE_ENVIRONMENT=development
+      - VITE_ENABLE_DEBUG_LOGGING=true
+      - VITE_ENABLE_REALTIME=true
+      - VITE_ENABLE_NOTIFICATIONS=true
       - CHOKIDAR_USEPOLLING=true
       - FAST_REFRESH=true
     volumes:

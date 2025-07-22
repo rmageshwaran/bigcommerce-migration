@@ -49,11 +49,11 @@ public static class EntityMigrationDurableOrchestrator
                 entityType, migrationId);
 
             // Step 1: Check for cancellation before starting
-            var cancellationCheck = await context.CallActivityAsync<CheckCancellationResult>(
+            var isCancelled = await context.CallActivityAsync<bool>(
                 "CheckMigrationCancellation",
                 migrationId);
 
-            if (cancellationCheck.IsCancelled)
+            if (isCancelled)
             {
                 result.IsSuccess = false;
                 result.ErrorMessage = $"Migration was cancelled before {entityType} processing began";
@@ -145,11 +145,11 @@ public static class EntityMigrationDurableOrchestrator
             for (int batchNumber = 1; batchNumber <= totalBatches; batchNumber++)
             {
                 // Check for cancellation before each batch
-                var batchCancellationCheck = await context.CallActivityAsync<CheckCancellationResult>(
+                var isBatchCancelled = await context.CallActivityAsync<bool>(
                     "CheckMigrationCancellation",
                     migrationId);
 
-                if (batchCancellationCheck.IsCancelled)
+                if (isBatchCancelled)
                 {
                     result.IsSuccess = false;
                     result.ErrorMessage = $"Migration was cancelled during {entityType} batch {batchNumber} processing";

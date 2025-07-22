@@ -638,6 +638,23 @@ public static class ServiceCollectionExtensions
                 return new AzureFunctionsSignalRService(logger, httpClient, signalRConfig);
             });
         }
+
+        // ✅ CRITICAL FIX: Register IMigrationHub for SignalR communication
+        services.AddSingleton<IMigrationHub>(serviceProvider =>
+        {
+            var logger = serviceProvider.GetRequiredService<ILogger<MigrationHub>>();
+            var hubContext = serviceProvider.GetService<ServiceHubContext>(); // Optional for emulator scenarios
+            return new MigrationHub(logger, hubContext);
+        });
+
+        // ✅ CRITICAL FIX: Register IEnhancedMigrationSignalRService for BroadcastProgressActivity
+        services.AddSingleton<IEnhancedMigrationSignalRService>(serviceProvider =>
+        {
+            var logger = serviceProvider.GetRequiredService<ILogger<EnhancedMigrationSignalRService>>();
+            var baseSignalRService = serviceProvider.GetRequiredService<IMigrationSignalRService>();
+            var migrationHub = serviceProvider.GetRequiredService<IMigrationHub>();
+            return new EnhancedMigrationSignalRService(baseSignalRService, migrationHub, logger);
+        });
     }
 
     /// <summary>

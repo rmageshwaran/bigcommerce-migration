@@ -112,11 +112,11 @@ public static class MigrationDurableOrchestrator
             input.CategoryTreeContext = resolvedCategoryTreeContext;
 
             // Step 4: Check for cancellation before starting entity processing
-            var cancellationCheck = await context.CallActivityAsync<CheckCancellationResult>(
+            var isCancelled = await context.CallActivityAsync<bool>(
                 "CheckMigrationCancellation",
                 migrationId);
 
-            if (cancellationCheck.IsCancelled)
+            if (isCancelled)
             {
                 result.Status = "Cancelled";
                 result.ErrorMessage = "Migration was cancelled before entity processing began";
@@ -156,11 +156,11 @@ public static class MigrationDurableOrchestrator
                     });
 
                 // Check for cancellation before each entity
-                var entityCancellationCheck = await context.CallActivityAsync<CheckCancellationResult>(
+                var isEntityCancelled = await context.CallActivityAsync<bool>(
                     "CheckMigrationCancellation",
                     migrationId);
 
-                if (entityCancellationCheck.IsCancelled)
+                if (isEntityCancelled)
                 {
                     result.Status = "Cancelled";
                     result.ErrorMessage = $"Migration was cancelled during {entityType} processing";

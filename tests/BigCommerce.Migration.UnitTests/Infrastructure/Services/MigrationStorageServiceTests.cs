@@ -187,6 +187,30 @@ public class MigrationStorageServiceTests
 
     #endregion
 
+    #region Entity Progress Tests
+
+    [Fact]
+    public void MigrationStorageService_HasCorrectEntityProgressMethods()
+    {
+        // Arrange
+        var serviceType = typeof(MigrationStorageService);
+
+        // Act & Assert - Verify entity progress methods exist with correct signatures
+        var createOrUpdateEntityProgressMethod = serviceType.GetMethod("CreateOrUpdateEntityProgressAsync");
+        createOrUpdateEntityProgressMethod.Should().NotBeNull();
+
+        var getEntityProgressMethod = serviceType.GetMethod("GetEntityProgressAsync", new[] { typeof(string), typeof(string) });
+        getEntityProgressMethod.Should().NotBeNull();
+
+        var getEntityProgressListMethod = serviceType.GetMethod("GetEntityProgressAsync", new[] { typeof(string), typeof(string) });
+        getEntityProgressListMethod.Should().NotBeNull();
+
+        var deleteEntityProgressMethod = serviceType.GetMethod("DeleteEntityProgressAsync");
+        deleteEntityProgressMethod.Should().NotBeNull();
+    }
+
+    #endregion
+
     // Note: Integration tests with actual Azure Table Storage would be in a separate test project
     // These unit tests focus on constructor behavior, parameter validation, and method signatures
 } 

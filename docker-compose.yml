@@ -44,7 +44,7 @@ services:
       - RetryQueueName=retry
       
       # BigCommerce Configuration
-      - BigCommerce__RateLimitRequestsPerSecond=12
+      - BigCommerce__RateLimitRequestsPerSecond=14
       - BigCommerce__UserAgent=BigCommerce-Migration-System/1.0-Docker
       - BigCommerce__BaseUrl=https://api.bigcommerce.com
       - BigCommerce__RequestTimeout=00:00:30
@@ -111,9 +111,11 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - REACT_APP_API_BASE_URL=http://bigcommerce-functions/api/dashboard
-      - REACT_APP_SIGNALR_URL=http://bigcommerce-functions/api
-      - REACT_APP_ENVIRONMENT=development
+      - VITE_API_BASE_URL=http://bigcommerce-functions/api
+      - VITE_SIGNALR_HUB_URL=http://bigcommerce-functions
+      - VITE_ENVIRONMENT=development
+      - VITE_ENABLE_DEBUG_LOGGING=true
+      - VITE_ENABLE_REALTIME=true
       - CHOKIDAR_USEPOLLING=true
       - NODE_ENV=development
       - DOCKER_ENV=true

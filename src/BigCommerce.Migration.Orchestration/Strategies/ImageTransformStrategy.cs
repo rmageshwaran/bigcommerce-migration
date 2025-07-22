@@ -27,8 +27,6 @@ public class ImageTransformStrategy : IEntityTransformStrategy
         CategoryTreeContext? categoryTreeContext = null,
         CancellationToken cancellationToken = default)
     {
-        _logger.LogDebug("Transforming image for migration {MigrationId}", migrationId);
-        
         var transformed = new Dictionary<string, object>(entity);
 
         // Handle product mapping if available

@@ -42,9 +42,6 @@ public class V2DirectPaginationStrategy : IEntityDiscoveryStrategy
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            _logger.LogInformation("Using V2 direct pagination strategy for {EntityType} - skipping discovery phase", 
-                request.EntityType);
-
             // V2 APIs: Skip discovery phase completely
             // Processing will use direct pagination (page 1, 2, 3...) instead of pre-discovered entity IDs
             return new EntityDiscoveryResult

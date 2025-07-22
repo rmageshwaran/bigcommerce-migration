@@ -42,9 +42,6 @@ public class ProgressTracker : IProgressTracker
         if (update == null)
             throw new ArgumentNullException(nameof(update));
         
-        _logger.LogDebug("Updating progress for migration {MigrationId}: {EntityType} - {Phase}", 
-            migrationId, update.EntityType, update.Phase);
-        
         try
         {
             // Update in-memory cache
@@ -96,8 +93,6 @@ public class ProgressTracker : IProgressTracker
         
         if (string.IsNullOrEmpty(migrationId))
             throw new ArgumentException("Migration ID cannot be null or empty", nameof(migrationId));
-        
-        _logger.LogDebug("Getting progress for migration {MigrationId}", migrationId);
         
         try
         {
@@ -415,9 +410,6 @@ public class ProgressTracker : IProgressTracker
         if (progress == null)
             throw new ArgumentNullException(nameof(progress));
         
-        _logger.LogDebug("Notifying progress update for migration {MigrationId}: {OverallProgress}%", 
-            migrationId, progress.OverallProgressPercentage);
-        
         try
         {
             // Broadcast real-time progress notification via SignalR
@@ -427,9 +419,6 @@ public class ProgressTracker : IProgressTracker
                 {
                     await _signalRService.BroadcastProgressUpdateAsync(migrationId, progress, cancellationToken);
                     
-                    _logger.LogDebug("Broadcasted progress notification for {MigrationId}: {OverallProgress}% complete, " +
-                        "{ProcessedEntities}/{TotalEntities} entities processed", 
-                        migrationId, progress.OverallProgressPercentage, progress.ProcessedEntities, progress.TotalEntities);
                 }
                 catch (Exception ex)
                 {
@@ -630,9 +619,6 @@ public class ProgressTracker : IProgressTracker
                 // Update the migration in storage
                 await _storageService.UpdateMigrationAsync(migrationEntry);
                 
-                _logger.LogDebug("Persisted migration progress to storage for migration {MigrationId}: {ProgressPercentage}% complete, " +
-                    "{ProcessedEntities}/{TotalEntities} entities processed", 
-                    migrationId, progress.OverallProgressPercentage, progress.ProcessedEntities, progress.TotalEntities);
             }
 
             // Persist entity-level progress data
@@ -659,10 +645,6 @@ public class ProgressTracker : IProgressTracker
 
                     await _storageService.CreateOrUpdateEntityProgressAsync(entityProgressEntry);
                     
-                    _logger.LogDebug("Persisted entity progress to storage for migration {MigrationId}, entity {EntityType}: " +
-                        "{ProcessedCount}/{TotalCount} entities processed, {ProgressPercentage}% complete", 
-                        migrationId, entityProgress.Key, entityProgress.Value.ProcessedCount, entityProgress.Value.TotalCount, 
-                        entityProgress.Value.ProgressPercentage);
                 }
                 catch (Exception ex)
                 {

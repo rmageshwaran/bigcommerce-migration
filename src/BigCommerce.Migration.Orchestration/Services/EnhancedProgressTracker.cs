@@ -235,8 +235,6 @@ public class EnhancedProgressTracker : ProgressTracker
             // Broadcast batch started event
             await _enhancedSignalRService.BroadcastBatchStartedAsync(migrationId, entityType, batchDetails, cancellationToken);
             
-            Logger.LogDebug("Started batch {BatchNumber} for {EntityType} in migration {MigrationId} ({BatchSize} entities)", 
-                batchNumber, entityType, migrationId, batchSize);
         }
         catch (Exception ex)
         {
@@ -314,8 +312,6 @@ public class EnhancedProgressTracker : ProgressTracker
             // Update remaining workload
             await UpdateAndBroadcastRemainingWorkload(migrationId, enhancedProgress, cancellationToken);
             
-            Logger.LogDebug("Completed batch {BatchNumber} for {EntityType} in migration {MigrationId}: {Successful}/{Total} successful", 
-                batchNumber, entityType, migrationId, successfulEntities, entitiesProcessed);
         }
         catch (Exception ex)
         {

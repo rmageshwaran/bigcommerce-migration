@@ -49,9 +49,6 @@ public class V3EfficientPaginationStrategy : IEntityDiscoveryStrategy
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            _logger.LogInformation("Using V3 efficient pagination strategy for {EntityType} - metadata only approach", 
-                request.EntityType);
-
             // OPTIMIZATION: Only fetch first page to get total count and pagination metadata
             var paginationRequest = new BigCommercePaginationRequest
             {
@@ -63,9 +60,6 @@ public class V3EfficientPaginationStrategy : IEntityDiscoveryStrategy
                 SortDirection = "asc"
             };
 
-            _logger.LogDebug("Fetching first page of {EntityType} to determine total count and pagination metadata", 
-                request.EntityType);
-
             var response = await _apiClient.GetPaginatedEntitiesAsync(
                 request.SourceStore,
                 request.EntityType,
@@ -76,9 +70,6 @@ public class V3EfficientPaginationStrategy : IEntityDiscoveryStrategy
             var totalCount = response.TotalItems ?? 0;
             var totalPages = response.TotalPages ?? 1;
             var pageSize = response.PerPage;
-
-            _logger.LogInformation("V3 efficient pagination discovery completed for {EntityType}: {TotalCount} entities across {TotalPages} pages", 
-                request.EntityType, totalCount, totalPages);
 
             // ✅ MEMORY EFFICIENT: Return pagination metadata instead of all entity IDs
             // Batch processing will use page-based fetching during processing

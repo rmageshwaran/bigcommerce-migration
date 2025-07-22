@@ -32,8 +32,6 @@ public class RateLimitService : IRateLimitService
         if (string.IsNullOrEmpty(storeId))
             throw new ArgumentException("Store ID cannot be null or empty", nameof(storeId));
         
-        _logger.LogDebug("Checking if request can be made for store: {StoreId}", storeId);
-        
         try
         {
             var storeLimit = GetOrCreateStoreLimit(storeId);
@@ -61,9 +59,6 @@ public class RateLimitService : IRateLimitService
         if (string.IsNullOrEmpty(endpoint))
             throw new ArgumentException("Endpoint cannot be null or empty", nameof(endpoint));
         
-        _logger.LogDebug("Recording API call for store {StoreId}, endpoint {Endpoint}, time {ResponseTime}ms, success {IsSuccessful}", 
-            storeId, endpoint, responseTime, isSuccessful);
-        
         try
         {
             var storeLimit = GetOrCreateStoreLimit(storeId);
@@ -90,8 +85,6 @@ public class RateLimitService : IRateLimitService
         
         if (string.IsNullOrEmpty(storeId))
             throw new ArgumentException("Store ID cannot be null or empty", nameof(storeId));
-        
-        _logger.LogDebug("Getting rate limit status for store: {StoreId}", storeId);
         
         try
         {
@@ -128,8 +121,6 @@ public class RateLimitService : IRateLimitService
         if (string.IsNullOrEmpty(storeId))
             throw new ArgumentException("Store ID cannot be null or empty", nameof(storeId));
         
-        _logger.LogDebug("Calculating delay for store: {StoreId}", storeId);
-        
         try
         {
             var storeLimit = GetOrCreateStoreLimit(storeId);
@@ -153,8 +144,6 @@ public class RateLimitService : IRateLimitService
         
         if (string.IsNullOrEmpty(storeId))
             throw new ArgumentException("Store ID cannot be null or empty", nameof(storeId));
-        
-        _logger.LogDebug("Checking rate limit for store: {StoreId}", storeId);
         
         try
         {
@@ -190,8 +179,6 @@ public class RateLimitService : IRateLimitService
         
         if (string.IsNullOrEmpty(storeId))
             throw new ArgumentException("Store ID cannot be null or empty", nameof(storeId));
-        
-        _logger.LogDebug("Checking and waiting for rate limit for store: {StoreId}", storeId);
         
         try
         {

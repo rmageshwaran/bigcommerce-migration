@@ -603,25 +603,21 @@ namespace BigCommerce.Migration.Infrastructure.Services
         private async Task InitializeAdaptiveConcurrencyAsync(PerformanceConfiguration config, CancellationToken cancellationToken)
         {
             await Task.CompletedTask.ConfigureAwait(false);
-            _logger.LogDebug("Initialized adaptive concurrency controller");
         }
 
         private async Task InitializeBulkProcessingAsync(PerformanceConfiguration config, CancellationToken cancellationToken)
         {
             await Task.CompletedTask.ConfigureAwait(false);
-            _logger.LogDebug("Initialized intelligent bulk processor");
         }
 
         private async Task InitializeStorageOptimizationAsync(PerformanceConfiguration config, CancellationToken cancellationToken)
         {
             await Task.CompletedTask.ConfigureAwait(false);
-            _logger.LogDebug("Initialized storage index optimizer");
         }
 
         private async Task InitializeConnectionPoolingAsync(PerformanceConfiguration config, CancellationToken cancellationToken)
         {
             await Task.CompletedTask.ConfigureAwait(false);
-            _logger.LogDebug("Initialized connection pool optimizer");
         }
 
         // Migration phase execution methods

@@ -28,14 +28,17 @@ public class CategoryFetchStrategy : IEntityFetchStrategy
         CategoryTreeContext? categoryTreeContext = null,
         CancellationToken cancellationToken = default)
     {
-        // LSP COMPLIANCE: Consistent parameter validation across all strategies
-        if (entityIds == null) throw new ArgumentNullException(nameof(entityIds));
-        if (string.IsNullOrWhiteSpace(migrationId)) throw new ArgumentNullException(nameof(migrationId));
-        if (sourceStore == null) throw new ArgumentNullException(nameof(sourceStore));
-        
-        // Handle cancellation first
         cancellationToken.ThrowIfCancellationRequested();
-
+        if (entityIds == null || string.IsNullOrWhiteSpace(migrationId) || sourceStore == null)
+        {
+            _logger.LogWarning("Invalid fetch strategy input: entityIds, migrationId, or sourceStore is null/empty. Returning empty list.");
+            return new List<Dictionary<string, object>>();
+        }
+        if (entityIds.Count == 0)
+        {
+            return new List<Dictionary<string, object>>();
+        }
+        
         _logger.LogInformation("Fetching {Count} specific categories for migration {MigrationId}", 
             entityIds.Count, migrationId);
         
@@ -45,13 +48,6 @@ public class CategoryFetchStrategy : IEntityFetchStrategy
 
         // Determine category tree ID for fetching
         var categoryTreeId = categoryTreeContext?.SourceCategoryTreeId ?? "1"; // Default to tree 1
-        
-        // Handle empty entity IDs case
-        if (entityIds.Count == 0)
-        {
-            _logger.LogInformation("No category IDs provided, returning empty list for migration {MigrationId}", migrationId);
-            return new List<Dictionary<string, object>>();
-        }
         
         _logger.LogDebug("Using category tree ID {CategoryTreeId} for fetching categories", categoryTreeId);
 

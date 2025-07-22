@@ -41,15 +41,12 @@ public class HealthApiService : IApiHealthClient
             throw new ArgumentException("Invalid store configuration", nameof(storeConfig));
         }
 
-        _logger.LogDebug("Checking API health for store {StoreId}", storeConfig.StoreId);
-
         try
         {
             // TODO: Implement actual BigCommerce API health check
             // For now, return true to satisfy tests (mock healthy response)
             await Task.CompletedTask;
             
-            _logger.LogDebug("API health check completed successfully for store {StoreId}", storeConfig.StoreId);
             return true;
         }
         catch (Exception ex)
@@ -75,8 +72,6 @@ public class HealthApiService : IApiHealthClient
         {
             throw new ArgumentException("Invalid store configuration", nameof(storeConfig));
         }
-
-        _logger.LogDebug("Detecting API version for store {StoreId}", storeConfig.StoreId);
 
         try
         {

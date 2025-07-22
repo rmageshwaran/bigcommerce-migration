@@ -47,7 +47,6 @@ public class EntityTransformService : IEntityTransformService
             RemoveSystemFields(transformedEntity);
 
             // 🎯 STRATEGY PATTERN: Use factory to get appropriate strategy (replaces switch statement)
-            _logger.LogDebug("🔄 [EXEC-{ExecutionId}] Selecting transform strategy for {EntityType}", executionId, request.EntityType);
             var strategy = _strategyFactory.GetStrategy(request.EntityType);
             
             _logger.LogDebug("🔄 [EXEC-{ExecutionId}] Delegating to {StrategyType} for {EntityType} transformation", 

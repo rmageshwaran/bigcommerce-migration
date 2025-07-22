@@ -356,7 +356,6 @@ public class LSP_StrategyContractTests
                     _testMigrationId,
                     _testStoreConfig,
                     cancellationToken: cts.Token);
-                
                 exceptionTypes.Add(typeof(void)); // No exception
             }
             catch (Exception ex)
@@ -365,16 +364,13 @@ public class LSP_StrategyContractTests
             }
         }
 
-        // LSP VALIDATION: All strategies must handle cancellation the same way
+        // PRODUCTION-SAFE: All strategies must behave the same way (either all throw, or all return)
         var uniqueExceptionTypes = exceptionTypes.Distinct().ToList();
         uniqueExceptionTypes.Should().HaveCount(1, 
-            "LSP Violation: All strategies must handle cancellation consistently");
-        
-        if (exceptionTypes.First() != typeof(void))
-        {
-            exceptionTypes.First().Should().Be(typeof(OperationCanceledException),
-                "All strategies should throw OperationCanceledException for cancelled tokens");
-        }
+            "All strategies must handle cancellation consistently (either all throw, or all return)");
+        // Accept either OperationCanceledException or void (empty list)
+        (uniqueExceptionTypes.First() == typeof(OperationCanceledException) || uniqueExceptionTypes.First() == typeof(void))
+            .Should().BeTrue("All strategies should either throw OperationCanceledException or return for cancelled tokens");
     }
 
     #endregion

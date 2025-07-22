@@ -55,9 +55,6 @@ public class ProductApiService : IProductApiClient
             throw new ArgumentException("Limit must be between 1 and 250", nameof(limit));
         }
 
-        _logger.LogDebug("Getting products for store {StoreId}, page {Page}, limit {Limit}", 
-            storeConfig.StoreId, page, limit);
-
         try
         {
             // TODO: Implement actual BigCommerce API call
@@ -96,9 +93,6 @@ public class ProductApiService : IProductApiClient
             throw new ArgumentNullException(nameof(products));
         }
 
-        _logger.LogDebug("Creating {Count} products for store {StoreId}", 
-            products.Count, storeConfig.StoreId);
-
         try
         {
             // TODO: Implement actual BigCommerce API call
@@ -136,9 +130,6 @@ public class ProductApiService : IProductApiClient
         {
             throw new ArgumentException("Product ID must be greater than 0", nameof(productId));
         }
-
-        _logger.LogDebug("Getting variants for product {ProductId} in store {StoreId}", 
-            productId, storeConfig.StoreId);
 
         try
         {
@@ -179,9 +170,6 @@ public class ProductApiService : IProductApiClient
             throw new ArgumentException("Product ID must be greater than 0", nameof(productId));
         }
 
-        _logger.LogDebug("Getting images for product {ProductId} in store {StoreId}", 
-            productId, storeConfig.StoreId);
-
         try
         {
             // TODO: Implement actual BigCommerce API call
@@ -220,9 +208,6 @@ public class ProductApiService : IProductApiClient
         {
             throw new ArgumentException("Product ID must be greater than 0", nameof(productId));
         }
-
-        _logger.LogDebug("Getting modifiers for product {ProductId} in store {StoreId}", 
-            productId, storeConfig.StoreId);
 
         try
         {

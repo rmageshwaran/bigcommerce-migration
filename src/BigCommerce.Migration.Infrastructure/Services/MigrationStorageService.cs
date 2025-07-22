@@ -665,8 +665,6 @@ public class MigrationStorageService : IMigrationStorageService
             };
 
             var tableClient = await GetTableClientAsync(CancellationTokensTableName);
-            _logger.LogInformation("🔍 STORAGE DEBUG: Got table client for {TableName}, Client: {ClientName}", 
-                CancellationTokensTableName, tableClient.Name);
             
             var tableEntity = new TableEntity("cancellation", migrationId)
             {
@@ -677,11 +675,6 @@ public class MigrationStorageService : IMigrationStorageService
                 ["ProcessedAt"] = cancellationToken.ProcessedAt,
                 ["Status"] = cancellationToken.Status
             };
-
-            _logger.LogInformation("🔍 STORAGE DEBUG: About to call UpsertEntityAsync with PartitionKey='cancellation', RowKey='{MigrationId}'", 
-                migrationId);
-            _logger.LogInformation("🔍 STORAGE DEBUG: Entity data - IsProcessed={IsProcessed}, Status='{Status}', Reason='{Reason}'", 
-                cancellationToken.IsProcessed, cancellationToken.Status, cancellationToken.Reason);
 
             await tableClient.UpsertEntityAsync(tableEntity);
             
@@ -710,17 +703,9 @@ public class MigrationStorageService : IMigrationStorageService
                 migrationId, migrationId.Length, migrationId.Contains('"'));
 
             var tableClient = await GetTableClientAsync(CancellationTokensTableName);
-            _logger.LogInformation("🔍 STORAGE DEBUG: Got table client for {TableName}, Client: {ClientName}", 
-                CancellationTokensTableName, tableClient.Name);
-
-            _logger.LogInformation("🔍 STORAGE DEBUG: About to call GetEntityIfExistsAsync with PartitionKey='cancellation', RowKey='{MigrationId}'", 
-                migrationId);
             
             var response = await tableClient.GetEntityIfExistsAsync<TableEntity>("cancellation", migrationId);
             
-            _logger.LogInformation("🔍 STORAGE DEBUG: GetEntityIfExistsAsync returned HasValue={HasValue} for {MigrationId}", 
-                response.HasValue, migrationId);
-
             if (!response.HasValue)
             {
                 _logger.LogInformation("🔍 STORAGE DEBUG: No cancellation token found for migration {MigrationId} - migration is not cancelled", migrationId);
@@ -728,8 +713,6 @@ public class MigrationStorageService : IMigrationStorageService
             }
 
             var entity = response.Value!;
-            _logger.LogInformation("🔍 STORAGE DEBUG: Found entity with PartitionKey='{PartitionKey}', RowKey='{RowKey}' for {MigrationId}", 
-                entity.PartitionKey, entity.RowKey, migrationId);
             
             var result = new CancellationTokenEntry
             {
@@ -740,9 +723,6 @@ public class MigrationStorageService : IMigrationStorageService
                 ProcessedAt = entity.GetDateTime("ProcessedAt"),
                 Status = entity.GetString("Status") ?? string.Empty
             };
-            
-            _logger.LogInformation("🔍 STORAGE DEBUG: Returning cancellation token: {MigrationId}, IsProcessed={IsProcessed}, Status='{Status}'", 
-                result.MigrationId, result.IsProcessed, result.Status);
             
             return result;
         }

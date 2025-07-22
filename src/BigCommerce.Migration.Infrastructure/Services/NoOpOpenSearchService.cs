@@ -30,7 +30,6 @@ public class NoOpOpenSearchService : IOpenSearchService
     /// <returns>Always returns true for no-op implementation</returns>
     public Task<bool> LogMigrationEventAsync(string eventType, string entityId, object eventData, CancellationToken cancellationToken = default)
     {
-        _logger.LogDebug("No-op: LogMigrationEventAsync called with eventType: {EventType}, entityId: {EntityId}", eventType, entityId);
         return Task.FromResult(true);
     }
 
@@ -44,7 +43,6 @@ public class NoOpOpenSearchService : IOpenSearchService
     /// <returns>Always returns true for no-op implementation</returns>
     public Task<bool> LogPerformanceMetricsAsync(string operationName, TimeSpan duration, object metrics, CancellationToken cancellationToken = default)
     {
-        _logger.LogDebug("No-op: LogPerformanceMetricsAsync called with operationName: {OperationName}, duration: {Duration}", operationName, duration);
         return Task.FromResult(true);
     }
 
@@ -58,7 +56,6 @@ public class NoOpOpenSearchService : IOpenSearchService
     /// <returns>Always returns true for no-op implementation</returns>
     public Task<bool> LogErrorAsync(string context, Exception exception, object? additionalData = null, CancellationToken cancellationToken = default)
     {
-        _logger.LogDebug("No-op: LogErrorAsync called with context: {Context}, exception: {Exception}", context, exception?.Message ?? "null");
         return Task.FromResult(true);
     }
 
@@ -72,7 +69,6 @@ public class NoOpOpenSearchService : IOpenSearchService
     /// <returns>Empty collection for no-op implementation</returns>
     public Task<IEnumerable<object>> SearchLogsAsync(string searchQuery, DateTime fromDate, DateTime toDate, CancellationToken cancellationToken = default)
     {
-        _logger.LogDebug("No-op: SearchLogsAsync called with query: {Query}", searchQuery);
         return Task.FromResult(Enumerable.Empty<object>());
     }
 
@@ -84,8 +80,6 @@ public class NoOpOpenSearchService : IOpenSearchService
     /// <returns>Empty results and zero count for no-op implementation</returns>
     public Task<(IEnumerable<object> Results, long TotalCount)> SearchLogsOptimizedAsync(OpenSearchQuery queryRequest, CancellationToken cancellationToken = default)
     {
-        _logger.LogDebug("No-op: SearchLogsOptimizedAsync called with Level: {Level}, MigrationId: {MigrationId}", 
-            queryRequest?.Level ?? "null", queryRequest?.MigrationId ?? "null");
         return Task.FromResult((Enumerable.Empty<object>(), 0L));
     }
 
@@ -99,7 +93,6 @@ public class NoOpOpenSearchService : IOpenSearchService
     /// <returns>Empty dictionary for no-op implementation</returns>
     public Task<Dictionary<string, object>> SearchLogsBatchAsync(IEnumerable<string> migrationIds, DateTime fromDate, DateTime toDate, CancellationToken cancellationToken = default)
     {
-        _logger.LogDebug("No-op: SearchLogsBatchAsync called with {Count} migration IDs", migrationIds?.Count() ?? 0);
         return Task.FromResult(new Dictionary<string, object>());
     }
 
@@ -110,7 +103,6 @@ public class NoOpOpenSearchService : IOpenSearchService
     /// <returns>Always returns true for no-op implementation</returns>
     public Task<bool> IsHealthyAsync(CancellationToken cancellationToken = default)
     {
-        _logger.LogDebug("No-op: IsHealthyAsync called - returning true");
         return Task.FromResult(true);
     }
 
@@ -125,8 +117,6 @@ public class NoOpOpenSearchService : IOpenSearchService
     /// <returns>Always returns true for no-op implementation</returns>
     public Task<bool> LogEntityBatchProcessingAsync(string migrationId, string entityType, int batchNumber, object batchData, CancellationToken cancellationToken = default)
     {
-        _logger.LogDebug("No-op: LogEntityBatchProcessingAsync called with migrationId: {MigrationId}, entityType: {EntityType}, batchNumber: {BatchNumber}", 
-            migrationId, entityType, batchNumber);
         return Task.FromResult(true);
     }
 } 

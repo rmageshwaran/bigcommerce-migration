@@ -27,8 +27,6 @@ public class ProductTransformStrategy : IEntityTransformStrategy
         CategoryTreeContext? categoryTreeContext = null,
         CancellationToken cancellationToken = default)
     {
-        _logger.LogDebug("Transforming product for migration {MigrationId}", migrationId);
-        
         var transformed = new Dictionary<string, object>(entity);
 
         // Handle category mapping if context is available
@@ -42,8 +40,6 @@ public class ProductTransformStrategy : IEntityTransformStrategy
                     // For now, we'll keep the original category IDs
                     // In a full implementation, you'd have a mapping service to handle this
                     mappedCategories.Add(category);
-                    _logger.LogDebug("Keeping original category {CategoryId} for product in migration {MigrationId}", 
-                        category, migrationId);
                 }
                 transformed["categories"] = mappedCategories;
             }
@@ -57,7 +53,6 @@ public class ProductTransformStrategy : IEntityTransformStrategy
         if (!transformed.ContainsKey("name"))
         {
             transformed["name"] = "Unnamed Product";
-            _logger.LogWarning("Product missing name field, using default for migration {MigrationId}", migrationId);
         }
 
         if (!transformed.ContainsKey("type"))

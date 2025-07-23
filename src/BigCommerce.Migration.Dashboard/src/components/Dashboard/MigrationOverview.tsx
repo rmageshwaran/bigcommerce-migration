@@ -13,11 +13,15 @@ import {
   Refresh as RefreshIcon,
   Error as ErrorIcon,
   CheckCircle as SuccessIcon,
+  PlayArrow as StartIcon,
+  BugReport as DebugIcon
 } from '@mui/icons-material';
 import { useDashboard } from '../../context/DashboardContext';
 import { formatDate, formatRelativeTime } from '../../utils/dateUtils';
+import { useNavigate } from 'react-router-dom';
 
 export const MigrationOverview: React.FC = () => {
+  const navigate = useNavigate();
   const { state, refreshData, addError } = useDashboard();
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -35,6 +39,18 @@ export const MigrationOverview: React.FC = () => {
     } finally {
       setIsRefreshing(false);
     }
+  };
+
+  const handleStartMigration = () => {
+    navigate('/start');
+  };
+
+  const handleDebugSignalR = () => {
+    navigate('/test/signalr');
+  };
+
+  const handleViewDashboard = () => {
+    navigate('/enhanced');
   };
 
   const {
@@ -56,6 +72,22 @@ export const MigrationOverview: React.FC = () => {
           Migration Overview
         </Typography>
         <Stack direction="row" spacing={2}>
+          <Button
+            variant="contained"
+            color="primary"
+            onClick={handleViewDashboard}
+            size="small"
+          >
+            Migration Dashboard
+          </Button>
+          <Button
+            variant="outlined"
+            startIcon={<DebugIcon />}
+            onClick={handleDebugSignalR}
+            size="small"
+          >
+            Debug SignalR
+          </Button>
           <Button
             variant="outlined"
             startIcon={<RefreshIcon />}
@@ -124,22 +156,52 @@ export const MigrationOverview: React.FC = () => {
               <Typography>Loading migrations...</Typography>
             ) : activeMigrationsArray.length === 0 ? (
               <Alert severity="info">
-                No active migrations.
+                <Typography variant="body1" gutterBottom>
+                  <strong>No active migrations found.</strong>
+                </Typography>
+                <Typography variant="body2" paragraph>
+                  To see real-time migration progress tracking, you need to start a migration first.
+                </Typography>
+                <Stack direction="row" spacing={2} alignItems="center">
+                  <Button 
+                    variant="contained" 
+                    size="small" 
+                    onClick={handleStartMigration}
+                  >
+                    Start Migration
+                  </Button>
+                  <Typography variant="caption" color="text.secondary">
+                    This will open the migration configuration form
+                  </Typography>
+                </Stack>
               </Alert>
             ) : (
               <Box>
                 {activeMigrationsArray.map((migration) => (
                   <Card key={migration.migrationId} variant="outlined" sx={{ mb: 2 }}>
                     <CardContent>
-                      <Typography variant="subtitle1" gutterBottom>
-                        Migration: {migration.migrationId}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary" gutterBottom>
-                        Status: {migration.status}
-                      </Typography>
-                      <Typography variant="caption">
-                        {migration.processedEntities} / {migration.totalEntities} entities
-                      </Typography>
+                      <Box display="flex" justifyContent="space-between" alignItems="center">
+                        <Box>
+                          <Typography variant="subtitle1" gutterBottom>
+                            Migration: {migration.migrationId}
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary" gutterBottom>
+                            Status: {migration.status}
+                          </Typography>
+                          <Typography variant="caption">
+                            {migration.processedEntities} / {migration.totalEntities} entities
+                          </Typography>
+                        </Box>
+                        <Stack direction="row" spacing={1}>
+                          <Button
+                            variant="contained"
+                            size="small"
+                            onClick={() => navigate(`/enhanced?migrationId=${migration.migrationId}`)}
+                          >
+                            View Dashboard
+                          </Button>
+                        </Stack>
+                      </Box>
                     </CardContent>
                   </Card>
                 ))}

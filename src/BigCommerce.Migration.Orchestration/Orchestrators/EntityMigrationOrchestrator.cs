@@ -14,6 +14,7 @@ namespace BigCommerce.Migration.Orchestration.Orchestrators;
 public class EntityMigrationOrchestrator
 {
     private readonly ILogger<EntityMigrationOrchestrator> _logger;
+    private readonly IProgressEventPublisher _progressEventPublisher;
 
     // Default batch sizes by entity type [[memory:2322834]]
     private static readonly Dictionary<string, int> DefaultBatchSizes = new()
@@ -26,9 +27,10 @@ public class EntityMigrationOrchestrator
         ["modifiers"] = 30
     };
 
-    public EntityMigrationOrchestrator(ILogger<EntityMigrationOrchestrator> logger)
+    public EntityMigrationOrchestrator(ILogger<EntityMigrationOrchestrator> logger, IProgressEventPublisher progressEventPublisher)
     {
         _logger = logger;
+        _progressEventPublisher = progressEventPublisher;
     }
 
     /// <summary>
@@ -221,23 +223,28 @@ public class EntityMigrationOrchestrator
         List<BatchProcessingRequest> batches,
         EntityMigrationResult result)
     {
-        // Initialize enhanced progress tracking for this entity
-        await context.CallActivityAsync("InitializeEntityBatchTracking", new
+        // Initialize enhanced progress tracking for this entity via queue event
+        try
         {
-            MigrationId = request.MigrationId,
-            EntityType = request.EntityType,
-            TotalBatches = batches.Count,
-            TotalEntities = result.TotalEntities
-        });
+            var entityProgressEvent = new EntityProgressEvent
+            {
+                MigrationId = request.MigrationId,
+                EntityType = request.EntityType,
+                TotalCount = result.TotalEntities,
+                ProcessedCount = 0,
+                SuccessCount = 0,
+                FailureCount = 0,
+                Status = "initializing",
+                ProcessingTime = TimeSpan.Zero
+            };
 
-        // Broadcast entity initialization (orchestrator level to prevent replay)
-        context.CallActivityAsync("BroadcastEntityInitialization", new EntityInitializationBroadcast
+            await _progressEventPublisher.PublishEntityProgressAsync(entityProgressEvent);
+        }
+        catch (Exception ex)
         {
-            MigrationId = request.MigrationId,
-            EntityType = request.EntityType,
-            TotalBatches = batches.Count,
-            TotalEntities = result.TotalEntities
-        });
+            _logger.LogWarning(ex, "Failed to publish entity initialization event for {EntityType}", request.EntityType);
+            // Don't throw - progress events should not break the migration
+        }
 
         for (int i = 0; i < batches.Count; i++)
         {
@@ -254,24 +261,29 @@ public class EntityMigrationOrchestrator
                     return; // Exit the loop early
                 }
 
-                // Step 1: Start enhanced batch tracking
-                await context.CallActivityAsync("StartBatchTracking", new
+                // Step 1: Start enhanced batch tracking via queue event
+                try
                 {
-                    MigrationId = request.MigrationId,
-                    EntityType = request.EntityType,
-                    BatchNumber = batchNumber,
-                    BatchSize = batch.EntityIds.Count,
-                    TotalBatches = batches.Count
-                });
+                    var batchProgressEvent = new BatchProgressEvent
+                    {
+                        MigrationId = request.MigrationId,
+                        EntityType = request.EntityType,
+                        BatchNumber = batchNumber,
+                        TotalBatches = batches.Count,
+                        BatchSize = batch.EntityIds.Count,
+                        ProcessedCount = 0,
+                        FailedCount = 0,
+                        Status = "started",
+                        ProcessingTime = TimeSpan.Zero
+                    };
 
-                // Broadcast batch start (orchestrator level to prevent replay)
-                context.CallActivityAsync("BroadcastBatchStart", new BatchStartBroadcast
+                    await _progressEventPublisher.PublishBatchProgressAsync(batchProgressEvent);
+                }
+                catch (Exception ex)
                 {
-                    MigrationId = request.MigrationId,
-                    EntityType = request.EntityType,
-                    BatchNumber = batchNumber,
-                    BatchSize = batch.EntityIds.Count
-                });
+                    _logger.LogWarning(ex, "Failed to publish batch start event for {EntityType} batch {BatchNumber}", request.EntityType, batchNumber);
+                    // Don't throw - progress events should not break the migration
+                }
 
                 // Step 2: Check rate limiting before processing batch
                 await ApplyRateLimiting(context, request);
@@ -284,30 +296,29 @@ public class EntityMigrationOrchestrator
                 var batchResult = await context.CallActivityAsync<BatchProcessingResult>("ProcessEntityBatch", batch);
                 var batchDuration = context.CurrentUtcDateTime - batchStartTime;
 
-                // Step 5: Complete batch tracking with results
-                await context.CallActivityAsync("CompleteBatchTracking", new
+                // Step 5: Complete batch tracking with results via queue event
+                try
                 {
-                    MigrationId = request.MigrationId,
-                    EntityType = request.EntityType,
-                    BatchNumber = batchNumber,
-                    EntitiesProcessed = batchResult.TotalProcessed,
-                    SuccessfulEntities = batchResult.SuccessfulEntities,
-                    FailedEntities = batchResult.FailedEntities,
-                    ProcessingDuration = batchDuration,
-                    BatchSize = batch.EntityIds.Count
-                });
+                    var batchProgressEvent = new BatchProgressEvent
+                    {
+                        MigrationId = request.MigrationId,
+                        EntityType = request.EntityType,
+                        BatchNumber = batchNumber,
+                        TotalBatches = batches.Count,
+                        BatchSize = batch.EntityIds.Count,
+                        ProcessedCount = batchResult.TotalProcessed,
+                        FailedCount = batchResult.FailedEntities,
+                        Status = batchResult.FailedEntities > 0 ? "completed_with_errors" : "completed",
+                        ProcessingTime = batchDuration
+                    };
 
-                // Broadcast batch completion (orchestrator level to prevent replay)
-                context.CallActivityAsync("BroadcastBatchCompletion", new BatchCompletionBroadcast
+                    await _progressEventPublisher.PublishBatchProgressAsync(batchProgressEvent);
+                }
+                catch (Exception ex)
                 {
-                    MigrationId = request.MigrationId,
-                    EntityType = request.EntityType,
-                    BatchNumber = batchNumber,
-                    EntitiesProcessed = batchResult.TotalProcessed,
-                    SuccessfulEntities = batchResult.SuccessfulEntities,
-                    FailedEntities = batchResult.FailedEntities,
-                    ProcessingDuration = batchDuration
-                });
+                    _logger.LogWarning(ex, "Failed to publish batch completion event for {EntityType} batch {BatchNumber}", request.EntityType, batchNumber);
+                    // Don't throw - progress events should not break the migration
+                }
 
                 // Step 6: Aggregate batch results
                 AggregateBatchResults(result, batchResult);
@@ -337,44 +348,72 @@ public class EntityMigrationOrchestrator
                 result.FailedEntities += batch.EntityIds.Count;
                 result.ProcessedEntities += batch.EntityIds.Count;
 
-                // Report failed batch to enhanced tracking
-                await context.CallActivityAsync("CompleteBatchTracking", new
+                // Report failed batch to enhanced tracking via queue event
+                try
                 {
-                    MigrationId = request.MigrationId,
-                    EntityType = request.EntityType,
-                    BatchNumber = batchNumber,
-                    EntitiesProcessed = batch.EntityIds.Count,
-                    SuccessfulEntities = 0,
-                    FailedEntities = batch.EntityIds.Count,
-                    ProcessingDuration = TimeSpan.Zero,
-                    BatchSize = batch.EntityIds.Count,
-                    Error = ex.Message
-                });
+                    var batchProgressEvent = new BatchProgressEvent
+                    {
+                        MigrationId = request.MigrationId,
+                        EntityType = request.EntityType,
+                        BatchNumber = batchNumber,
+                        TotalBatches = batches.Count,
+                        BatchSize = batch.EntityIds.Count,
+                        ProcessedCount = batch.EntityIds.Count,
+                        FailedCount = batch.EntityIds.Count,
+                        Status = "failed",
+                        ProcessingTime = TimeSpan.Zero
+                    };
+
+                    await _progressEventPublisher.PublishBatchProgressAsync(batchProgressEvent);
+
+                    // Also publish error event
+                    var errorEvent = new ErrorProgressEvent
+                    {
+                        MigrationId = request.MigrationId,
+                        EntityType = request.EntityType,
+                        BatchNumber = batchNumber,
+                        Message = ex.Message,
+                        Details = ex.ToString(),
+                        Severity = "error",
+                        IsContinuable = true,
+                        Timestamp = context.CurrentUtcDateTime
+                    };
+
+                    await _progressEventPublisher.PublishErrorAsync(errorEvent);
+                }
+                catch (Exception publishEx)
+                {
+                    _logger.LogWarning(publishEx, "Failed to publish batch failure event for {EntityType} batch {BatchNumber}", request.EntityType, batchNumber);
+                    // Don't throw - progress events should not break the migration
+                }
 
                 _logger.LogError(ex, "Failed to process batch {BatchNumber}/{TotalBatches} for {EntityType}", 
                     batchNumber, batches.Count, request.EntityType);
             }
         }
 
-        // Complete entity processing
-        await context.CallActivityAsync("CompleteEntityBatchTracking", new
+        // Complete entity processing via queue event
+        try
         {
-            MigrationId = request.MigrationId,
-            EntityType = request.EntityType,
-            TotalProcessed = result.ProcessedEntities,
-            SuccessfulEntities = result.SuccessfulEntities,
-            FailedEntities = result.FailedEntities
-        });
+            var entityProgressEvent = new EntityProgressEvent
+            {
+                MigrationId = request.MigrationId,
+                EntityType = request.EntityType,
+                TotalCount = result.TotalEntities,
+                ProcessedCount = result.ProcessedEntities,
+                SuccessCount = result.SuccessfulEntities,
+                FailureCount = result.FailedEntities,
+                Status = result.FailedEntities > 0 ? "completed_with_errors" : "completed",
+                ProcessingTime = result.ProcessingTime
+            };
 
-        // Broadcast entity completion (orchestrator level to prevent replay)
-        context.CallActivityAsync("BroadcastEntityCompletion", new EntityCompletionBroadcast
+            await _progressEventPublisher.PublishEntityProgressAsync(entityProgressEvent);
+        }
+        catch (Exception ex)
         {
-            MigrationId = request.MigrationId,
-            EntityType = request.EntityType,
-            TotalProcessed = result.ProcessedEntities,
-            SuccessfulEntities = result.SuccessfulEntities,
-            FailedEntities = result.FailedEntities
-        });
+            _logger.LogWarning(ex, "Failed to publish entity completion event for {EntityType}", request.EntityType);
+            // Don't throw - progress events should not break the migration
+        }
     }
 
     /// <summary>
@@ -444,22 +483,46 @@ public class EntityMigrationOrchestrator
                 RemainingEntities = Math.Max(0, result.TotalEntities - result.ProcessedEntities)
             };
 
-            await context.CallActivityAsync("UpdateEnhancedEntityProgress", enhancedProgressUpdate);
-
-            // Broadcast detailed progress via SignalR (orchestrator level to prevent replay)
-            context.CallActivityAsync("BroadcastDetailedProgress", new DetailedProgressBroadcast
+            // Publish enhanced entity progress via queue event
+            try
             {
-                MigrationId = request.MigrationId,
-                EntityType = request.EntityType,
-                Phase = currentBatch >= totalBatches ? "Completed" : "Processing",
-                CurrentActivity = $"Batch {currentBatch}/{totalBatches}",
-                CurrentBatch = currentBatch,
-                TotalBatches = totalBatches,
-                BatchSize = result.TotalEntities / totalBatches, // Average batch size
-                ProcessedInBatch = 0, // Will be updated by individual batch processing
-                RemainingEntities = Math.Max(0, result.TotalEntities - result.ProcessedEntities),
-                StartTime = context.CurrentUtcDateTime
-            });
+                var entityProgressEvent = new EntityProgressEvent
+                {
+                    MigrationId = request.MigrationId,
+                    EntityType = request.EntityType,
+                    TotalCount = result.TotalEntities,
+                    ProcessedCount = result.ProcessedEntities,
+                    SuccessCount = result.SuccessfulEntities,
+                    FailureCount = result.FailedEntities,
+                    Status = currentBatch >= totalBatches ? "completed" : "processing"
+                };
+
+                await _progressEventPublisher.PublishEntityProgressAsync(entityProgressEvent);
+
+                // Also publish batch progress if we have batch information
+                if (currentBatch > 0)
+                {
+                    var batchProgressEvent = new BatchProgressEvent
+                    {
+                        MigrationId = request.MigrationId,
+                        EntityType = request.EntityType,
+                        BatchNumber = currentBatch,
+                        TotalBatches = totalBatches,
+                        BatchSize = result.TotalEntities / totalBatches, // Average batch size
+                        ProcessedCount = result.ProcessedEntities,
+                        FailedCount = result.FailedEntities,
+                        Status = currentBatch >= totalBatches ? "completed" : "processing",
+                        ProcessingTime = TimeSpan.FromSeconds(1) // Approximate
+                    };
+
+                    await _progressEventPublisher.PublishBatchProgressAsync(batchProgressEvent);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to publish enhanced progress event for {EntityType}", request.EntityType);
+                // Don't throw - progress events should not break the migration
+            }
         }
         catch (Exception ex)
         {
@@ -498,7 +561,27 @@ public class EntityMigrationOrchestrator
                 ProgressPercentage = totalBatches > 0 ? Math.Round((double)currentBatch / totalBatches * 100, 1) : 0
             };
 
-            await context.CallActivityAsync("UpdateEntityProgress", progressUpdate);
+            // Publish entity progress via queue event
+            try
+            {
+                var entityProgressEvent = new EntityProgressEvent
+                {
+                    MigrationId = request.MigrationId,
+                    EntityType = request.EntityType,
+                    TotalCount = result.TotalEntities,
+                    ProcessedCount = result.ProcessedEntities,
+                    SuccessCount = result.SuccessfulEntities,
+                    FailureCount = result.FailedEntities,
+                    Status = currentBatch >= totalBatches ? "completed" : "processing"
+                };
+
+                await _progressEventPublisher.PublishEntityProgressAsync(entityProgressEvent);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to publish entity progress event for {EntityType}", request.EntityType);
+                // Don't throw - progress events should not break the migration
+            }
         }
         catch (Exception ex)
         {

@@ -43,23 +43,6 @@ public static class MigrationDurableOrchestrator
         {
             logger.LogInformation("Starting migration orchestration for MigrationId: {MigrationId}", migrationId);
 
-            // Broadcast migration started event
-            await context.CallActivityAsync<bool>(
-                "BroadcastMigrationStarted",
-                new
-                {
-                    MigrationId = migrationId,
-                    Data = new
-                    {
-                        Status = "Started",
-                        SourceStore = input.MigrationRequest?.SourceStore?.StoreId ?? string.Empty,
-                        DestinationStore = input.MigrationRequest?.DestinationStore?.StoreId ?? string.Empty,
-                        RequestedEntities = input.MigrationRequest?.Entities ?? new List<string>(),
-                        StartTime = context.CurrentUtcDateTime,
-                        TotalEntityTypes = input.MigrationRequest?.Entities?.Count ?? 0
-                    }
-                });
-
             // Step 1: Initialize Migration
             logger.LogInformation("Step 1: Initializing migration for MigrationId: {MigrationId}", migrationId);
             var initializeResult = await context.CallActivityAsync<InitializeMigrationResult>(
@@ -134,27 +117,6 @@ public static class MigrationDurableOrchestrator
                 logger.LogInformation("Processing entity type: {EntityType} for MigrationId: {MigrationId}", 
                     entityType, migrationId);
 
-                // Broadcast entity phase started event
-                await context.CallActivityAsync<bool>(
-                    "BroadcastEntityPhaseStarted",
-                    new
-                    {
-                        MigrationId = migrationId,
-                        EntityType = entityType,
-                        Data = new
-                        {
-                            Status = "EntityStarted",
-                            EntityType = entityType,
-                            StartTime = context.CurrentUtcDateTime,
-                            OverallProgress = new
-                            {
-                                CompletedEntityTypes = result.EntityResults.Count,
-                                TotalEntityTypes = entityOrder.Count,
-                                PercentComplete = (double)result.EntityResults.Count / entityOrder.Count * 100
-                            }
-                        }
-                    });
-
                 // Check for cancellation before each entity
                 var isEntityCancelled = await context.CallActivityAsync<bool>(
                     "CheckMigrationCancellation",
@@ -199,35 +161,6 @@ public static class MigrationDurableOrchestrator
                                             "Processed: {ProcessedCount} entities", 
                             entityType, migrationId, entityResult.ProcessedEntities);
                     }
-
-                    // Broadcast entity phase completed event
-                    await context.CallActivityAsync<bool>(
-                        "BroadcastEntityPhaseCompleted",
-                        new
-                        {
-                            MigrationId = migrationId,
-                            EntityType = entityType,
-                            Data = new
-                            {
-                                Status = "EntityCompleted",
-                                EntityType = entityType,
-                                EndTime = context.CurrentUtcDateTime,
-                                Results = new
-                                {
-                                    ProcessedEntities = entityResult.ProcessedEntities,
-                                    SuccessfulEntities = entityResult.SuccessfulEntities,
-                                    FailedEntities = entityResult.FailedEntities,
-                                    IsSuccess = entityResult.IsSuccess,
-                                    ProcessingTime = entityResult.EndTime - entityResult.StartTime
-                                },
-                                OverallProgress = new
-                                {
-                                    CompletedEntityTypes = result.EntityResults.Count,
-                                    TotalEntityTypes = entityOrder.Count,
-                                    PercentComplete = (double)result.EntityResults.Count / entityOrder.Count * 100
-                                }
-                            }
-                        });
                 }
                 catch (Exception ex)
                 {
@@ -272,8 +205,7 @@ public static class MigrationDurableOrchestrator
                 // Complete migration - update storage service for HTTP API
                 await CompleteMigrationAsync(context, migrationId, result, MigrationStatus.Failed, result.ErrorMessage);
                 
-                // Broadcast migration failed event
-                await BroadcastMigrationEventAsync(context, migrationId, result, "BroadcastMigrationFailed", "Failed", totalProcessed, totalSuccessful, totalFailed, result.ErrorMessage);
+                // Migration failed event will be handled by queue-based system
             }
             else if (totalFailed == 0)
             {
@@ -285,8 +217,7 @@ public static class MigrationDurableOrchestrator
                 // Complete migration - update storage service for HTTP API
                 await CompleteMigrationAsync(context, migrationId, result, MigrationStatus.Completed);
                 
-                // Broadcast migration completed event
-                await BroadcastMigrationEventAsync(context, migrationId, result, "BroadcastMigrationCompleted", "Completed", totalProcessed, totalSuccessful, totalFailed);
+                // Migration completed event will be handled by queue-based system
             }
             else if (totalSuccessful > 0)
             {
@@ -299,8 +230,7 @@ public static class MigrationDurableOrchestrator
                 // Complete migration - update storage service for HTTP API
                 await CompleteMigrationAsync(context, migrationId, result, MigrationStatus.Completed, result.ErrorMessage);
                 
-                // Broadcast migration completed with errors event
-                await BroadcastMigrationEventAsync(context, migrationId, result, "BroadcastMigrationCompleted", "CompletedWithErrors", totalProcessed, totalSuccessful, totalFailed, result.ErrorMessage);
+                // Migration completed with errors event will be handled by queue-based system
             }
             else if (totalSuccessful == 0 && totalFailed > 0)
             {
@@ -312,8 +242,7 @@ public static class MigrationDurableOrchestrator
                 // Complete migration - update storage service for HTTP API
                 await CompleteMigrationAsync(context, migrationId, result, MigrationStatus.Failed, result.ErrorMessage);
                 
-                // Broadcast migration failed event
-                await BroadcastMigrationEventAsync(context, migrationId, result, "BroadcastMigrationFailed", "Failed", totalProcessed, totalSuccessful, totalFailed, result.ErrorMessage);
+                // Migration failed event will be handled by queue-based system
             }
             else
             {
@@ -334,8 +263,7 @@ public static class MigrationDurableOrchestrator
             result.ErrorMessage = "Migration orchestration was cancelled";
             result.EndTime = context.CurrentUtcDateTime;
             
-            // Broadcast migration cancelled event
-            await BroadcastMigrationEventAsync(context, migrationId, result, "BroadcastMigrationCancelled", "Cancelled", result.TotalEntitiesProcessed, result.TotalEntitiesSuccessful, result.TotalEntitiesFailed, result.ErrorMessage);
+            // Migration cancelled event will be handled by queue-based system
             
             return result;
         }
@@ -392,43 +320,6 @@ public static class MigrationDurableOrchestrator
                     TotalBytesTransferred = 0
                 }
             }
-        });
-    }
-
-    /// <summary>
-    /// Helper method to broadcast migration status events with consistent data structure
-    /// </summary>
-    private static async Task BroadcastMigrationEventAsync(
-        TaskOrchestrationContext context,
-        string migrationId,
-        MigrationOrchestrationResult result,
-        string activityName,
-        string status,
-        int totalProcessed,
-        int totalSuccessful,
-        int totalFailed,
-        string? errorMessage = null)
-    {
-        var data = new
-        {
-            Status = status,
-            EndTime = result.EndTime,
-            Duration = result.Duration,
-            TotalEntitiesProcessed = totalProcessed,
-            TotalEntitiesSuccessful = totalSuccessful,
-            TotalEntitiesFailed = totalFailed,
-            EntityResults = result.EntityResults
-        };
-
-        // Add error message if provided
-        var broadcastData = errorMessage != null 
-            ? new { data.Status, data.EndTime, data.Duration, data.TotalEntitiesProcessed, data.TotalEntitiesSuccessful, data.TotalEntitiesFailed, data.EntityResults, ErrorMessage = errorMessage }
-            : (object)data;
-
-        await context.CallActivityAsync<bool>(activityName, new
-        {
-            MigrationId = migrationId,
-            Data = broadcastData
         });
     }
 

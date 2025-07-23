@@ -15,8 +15,8 @@ services:
       - AppSettings__BatchSize=5  # Smaller batches for development
       - AppSettings__MaxConcurrency=2  # Lower concurrency for development
       
-      # Development SignalR Performance Optimizations
-      - SignalR__BaseUrl=http://localhost:7071
+      # FIXED: Use internal container URL for SignalR
+      - SignalR__BaseUrl=http://bigcommerce-functions
       - SignalR__TimeoutSeconds=10
       - SignalR__Enabled=true
       - SignalR__EnableDebugLogging=true
@@ -39,9 +39,9 @@ services:
   # Development overrides for Dashboard
   bigcommerce-dashboard:
     environment:
-      # Development-specific Vite environment (VITE_ prefix required)
+      # Browser access - both API and SignalR need external port
       - VITE_API_BASE_URL=http://localhost:7071/api
-      - VITE_SIGNALR_HUB_URL=http://localhost:7071
+      - VITE_SIGNALR_HUB_URL=http://localhost:7071/api
       - VITE_ENVIRONMENT=development
       - VITE_ENABLE_DEBUG_LOGGING=true
       - VITE_ENABLE_REALTIME=true

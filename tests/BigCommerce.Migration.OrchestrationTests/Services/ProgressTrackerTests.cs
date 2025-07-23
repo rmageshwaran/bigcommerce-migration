@@ -12,13 +12,15 @@ namespace BigCommerce.Migration.OrchestrationTests.Services;
 public class ProgressTrackerTests
 {
     private readonly Mock<ILogger<ProgressTracker>> _mockLogger;
+    private readonly Mock<IProgressEventPublisher> _mockProgressEventPublisher;
     private readonly ProgressTracker _service;
     private readonly string _testMigrationId = "test-migration-123";
 
     public ProgressTrackerTests()
     {
         _mockLogger = new Mock<ILogger<ProgressTracker>>();
-        _service = new ProgressTracker(_mockLogger.Object);
+        _mockProgressEventPublisher = new Mock<IProgressEventPublisher>();
+        _service = new ProgressTracker(_mockLogger.Object, _mockProgressEventPublisher.Object);
     }
 
     [Fact]

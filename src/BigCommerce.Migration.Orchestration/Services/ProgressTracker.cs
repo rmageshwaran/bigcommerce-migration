@@ -14,20 +14,23 @@ public class ProgressTracker : IProgressTracker
     private readonly ILogger<ProgressTracker> _logger;
     private readonly ConcurrentDictionary<string, MigrationProgress> _progressCache;
     private readonly object _lock = new object();
-    private readonly IMigrationSignalRService? _signalRService;
+    private readonly IProgressEventPublisher _progressEventPublisher;
     private readonly IMigrationStorageService? _storageService;
     
     /// <summary>
     /// Initializes a new instance of the ProgressTracker
     /// </summary>
     /// <param name="logger">Logger instance</param>
-    /// <param name="signalRService">SignalR service for real-time updates</param>
+    /// <param name="progressEventPublisher">Progress event publisher for queue-based SignalR broadcasting</param>
     /// <param name="storageService">Storage service for persisting progress</param>
-    public ProgressTracker(ILogger<ProgressTracker> logger, IMigrationSignalRService? signalRService = null, IMigrationStorageService? storageService = null)
+    public ProgressTracker(
+        ILogger<ProgressTracker> logger, 
+        IProgressEventPublisher progressEventPublisher,
+        IMigrationStorageService? storageService = null)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _progressEventPublisher = progressEventPublisher ?? throw new ArgumentNullException(nameof(progressEventPublisher));
         _progressCache = new ConcurrentDictionary<string, MigrationProgress>();
-        _signalRService = signalRService; // Optional for backward compatibility
         _storageService = storageService; // Optional for backward compatibility
     }
     
@@ -52,18 +55,8 @@ public class ProgressTracker : IProgressTracker
                 CalculateOverallProgress(progress);
             }
             
-            // Broadcast real-time progress update
-            if (_signalRService != null)
-            {
-                try
-                {
-                    await _signalRService.BroadcastProgressUpdateAsync(migrationId, CreateProgressCopy(progress), cancellationToken);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to broadcast progress update for migration {MigrationId}", migrationId);
-                }
-            }
+            // Publish progress update event to queue for SignalR broadcasting
+            await PublishMigrationProgressEventAsync(migrationId, progress, cancellationToken);
             
             // Persist progress to storage for durability across application restarts
             if (_storageService != null)
@@ -226,19 +219,8 @@ public class ProgressTracker : IProgressTracker
                 CalculateOverallProgress(progress);
             }
             
-            // Broadcast entity start notification
-            if (_signalRService != null)
-            {
-                try
-                {
-                    await _signalRService.BroadcastEntityStartAsync(migrationId, entityType, totalCount, cancellationToken);
-                    await _signalRService.BroadcastProgressUpdateAsync(migrationId, CreateProgressCopy(progress), cancellationToken);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to broadcast entity start notification for migration {MigrationId}, entity {EntityType}", migrationId, entityType);
-                }
-            }
+            // Publish entity start event to queue for SignalR broadcasting
+            await PublishEntityProgressEventAsync(migrationId, entityType, progress, cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -296,29 +278,8 @@ public class ProgressTracker : IProgressTracker
                 CalculateProcessingSpeed(progress);
             }
             
-            // Broadcast batch completion notification
-            if (_signalRService != null)
-            {
-                try
-                {
-                    var batchResults = new
-                    {
-                        BatchNumber = batchNumber,
-                        EntityType = entityType,
-                        ProcessedCount = processedCount,
-                        SuccessCount = successCount,
-                        FailureCount = failureCount,
-                        Timestamp = DateTime.UtcNow
-                    };
-                    
-                    await _signalRService.BroadcastBatchCompletionAsync(migrationId, entityType, batchNumber, batchResults, cancellationToken);
-                    await _signalRService.BroadcastProgressUpdateAsync(migrationId, CreateProgressCopy(progress), cancellationToken);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to broadcast batch completion for migration {MigrationId}, entity {EntityType}, batch {BatchNumber}", migrationId, entityType, batchNumber);
-                }
-            }
+            // Publish batch completion event to queue for SignalR broadcasting
+            await PublishBatchProgressEventAsync(migrationId, entityType, batchNumber, processedCount, successCount, failureCount, cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -365,32 +326,8 @@ public class ProgressTracker : IProgressTracker
                 }
             }
             
-            // Broadcast entity completion notification
-            if (_signalRService != null)
-            {
-                try
-                {
-                    var entityResults = progress.EntityProgress.ContainsKey(entityType) ? progress.EntityProgress[entityType] : null;
-                    var results = new
-                    {
-                        EntityType = entityType,
-                        Status = "completed",
-                        TotalCount = entityResults?.TotalCount ?? 0,
-                        ProcessedCount = entityResults?.ProcessedCount ?? 0,
-                        SuccessCount = entityResults?.SuccessCount ?? 0,
-                        FailureCount = entityResults?.FailureCount ?? 0,
-                        ProcessingTime = entityResults?.ProcessingTime ?? TimeSpan.Zero,
-                        Timestamp = DateTime.UtcNow
-                    };
-                    
-                    await _signalRService.BroadcastEntityCompletionAsync(migrationId, entityType, results, cancellationToken);
-                    await _signalRService.BroadcastProgressUpdateAsync(migrationId, CreateProgressCopy(progress), cancellationToken);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to broadcast entity completion for migration {MigrationId}, entity {EntityType}", migrationId, entityType);
-                }
-            }
+            // Publish entity completion event to queue for SignalR broadcasting
+            await PublishEntityProgressEventAsync(migrationId, entityType, progress, cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -412,26 +349,12 @@ public class ProgressTracker : IProgressTracker
         
         try
         {
-            // Broadcast real-time progress notification via SignalR
-            if (_signalRService != null)
-            {
-                try
-                {
-                    await _signalRService.BroadcastProgressUpdateAsync(migrationId, progress, cancellationToken);
-                    
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to broadcast progress notification for migration {MigrationId}", migrationId);
-                }
-            }
-            else
-            {
-                // Fallback to logging when SignalR service is not available
-                _logger.LogInformation("Progress notification for {MigrationId}: {OverallProgress}% complete, " +
-                    "{ProcessedEntities}/{TotalEntities} entities processed", 
-                    migrationId, progress.OverallProgressPercentage, progress.ProcessedEntities, progress.TotalEntities);
-            }
+            // Publish progress notification event to queue for SignalR broadcasting
+            await PublishMigrationProgressEventAsync(migrationId, progress, cancellationToken);
+            
+            _logger.LogInformation("Progress notification for {MigrationId}: {OverallProgress}% complete, " +
+                "{ProcessedEntities}/{TotalEntities} entities processed", 
+                migrationId, progress.OverallProgressPercentage, progress.ProcessedEntities, progress.TotalEntities);
         }
         catch (OperationCanceledException)
         {
@@ -658,6 +581,104 @@ public class ProgressTracker : IProgressTracker
         {
             _logger.LogWarning(ex, "Failed to persist progress to storage for migration {MigrationId}", migrationId);
             // Don't rethrow - progress persistence is not critical for migration execution
+        }
+    }
+
+    /// <summary>
+    /// Publishes a migration progress event to the queue for SignalR broadcasting
+    /// SOLID: Single Responsibility - handles only migration progress event publishing
+    /// </summary>
+    private async Task PublishMigrationProgressEventAsync(string migrationId, MigrationProgress progress, CancellationToken cancellationToken)
+    {
+        try
+        {
+            _logger.LogInformation("📊 [PROGRESS-TRACKER] Publishing migration progress event for MigrationId: {MigrationId}, Progress: {Progress}%, Status: {Status}, Entities: {ProcessedEntities}/{TotalEntities}", 
+                migrationId, progress.OverallProgressPercentage, progress.Status, progress.ProcessedEntities, progress.TotalEntities);
+
+            var progressEvent = new MigrationProgressEvent
+            {
+                MigrationId = migrationId,
+                OverallProgress = progress.OverallProgressPercentage,
+                Status = progress.Status,
+                TotalEntities = progress.TotalEntities,
+                ProcessedEntities = progress.ProcessedEntities,
+                FailedEntities = progress.FailedEntities,
+                CurrentEntityType = progress.CurrentEntity,
+                EstimatedTimeRemaining = progress.EstimatedTimeRemaining
+            };
+
+            _logger.LogInformation("📡 [PROGRESS-TRACKER] Calling ProgressEventPublisher for MigrationId: {MigrationId}", migrationId);
+            await _progressEventPublisher.PublishMigrationProgressAsync(progressEvent, cancellationToken);
+            _logger.LogInformation("✅ [PROGRESS-TRACKER] Successfully published migration progress event for MigrationId: {MigrationId}", migrationId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "💥 [PROGRESS-TRACKER] Failed to publish migration progress event for migration {MigrationId}", migrationId);
+            // Don't rethrow - progress events should not break the migration
+        }
+    }
+
+    /// <summary>
+    /// Publishes an entity progress event to the queue for SignalR broadcasting
+    /// SOLID: Single Responsibility - handles only entity progress event publishing
+    /// </summary>
+    private async Task PublishEntityProgressEventAsync(string migrationId, string entityType, MigrationProgress progress, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var entityProgress = progress.EntityProgress.ContainsKey(entityType) ? progress.EntityProgress[entityType] : null;
+            
+            var entityEvent = new EntityProgressEvent
+            {
+                MigrationId = migrationId,
+                EntityType = entityType,
+                TotalCount = entityProgress?.TotalCount ?? 0,
+                ProcessedCount = entityProgress?.ProcessedCount ?? 0,
+                SuccessCount = entityProgress?.SuccessCount ?? 0,
+                FailureCount = entityProgress?.FailureCount ?? 0,
+                Status = entityProgress?.Status ?? "starting",
+                ProcessingTime = entityProgress?.ProcessingTime
+            };
+
+            await _progressEventPublisher.PublishEntityProgressAsync(entityEvent, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to publish entity progress event for migration {MigrationId}, entity {EntityType}", migrationId, entityType);
+            // Don't rethrow - progress events should not break the migration
+        }
+    }
+
+    /// <summary>
+    /// Publishes a batch progress event to the queue for SignalR broadcasting
+    /// SOLID: Single Responsibility - handles only batch progress event publishing
+    /// </summary>
+    private async Task PublishBatchProgressEventAsync(string migrationId, string entityType, int batchNumber, int processedCount, int successCount, int failureCount, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var progress = GetOrCreateProgress(migrationId);
+            var entityProgress = progress.EntityProgress.ContainsKey(entityType) ? progress.EntityProgress[entityType] : null;
+            
+            var batchEvent = new BatchProgressEvent
+            {
+                MigrationId = migrationId,
+                EntityType = entityType,
+                BatchNumber = batchNumber,
+                TotalBatches = 0, // This could be calculated if we track total batches
+                BatchSize = processedCount,
+                ProcessedCount = processedCount,
+                FailedCount = failureCount,
+                Status = failureCount > 0 ? "completed_with_errors" : "completed",
+                ProcessingTime = TimeSpan.FromSeconds(1) // Approximate - could be tracked more precisely
+            };
+
+            await _progressEventPublisher.PublishBatchProgressAsync(batchEvent, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to publish batch progress event for migration {MigrationId}, entity {EntityType}, batch {BatchNumber}", migrationId, entityType, batchNumber);
+            // Don't rethrow - progress events should not break the migration
         }
     }
 } 

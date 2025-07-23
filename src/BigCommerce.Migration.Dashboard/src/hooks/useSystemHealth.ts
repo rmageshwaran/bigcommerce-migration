@@ -89,7 +89,7 @@ export const useSystemHealth = (
   // Set up SignalR listeners and initial data fetch
   useEffect(() => {
     // Subscribe to SignalR events
-    const healthUnsubscribe = signalRService.on('systemHealth', handleHealthUpdate);
+    const healthUnsubscribe = signalRService.on('SystemHealthUpdated', handleHealthUpdate);
     const connectionUnsubscribe = signalRService.on('connectionStateChanged', handleConnectionStateChange);
 
     // Initial connection state

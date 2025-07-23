@@ -151,7 +151,7 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
   const [state, dispatch] = useReducer(dashboardReducer, initialState);
   const { autoConnect = true } = config;
 
-  const signalRService = getSignalRService(config.signalRUrl);
+  const signalRService = getSignalRService(); // Use default configuration
   const apiService = getApiService(config.apiBaseUrl ? { baseURL: config.apiBaseUrl } : undefined);
 
   // Connect to services
@@ -332,26 +332,28 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
 
     // Migration progress updates
     const progressUnsubscribe = signalRService.on('migrationProgress', (progress: MigrationProgress) => {
+      console.log('🎯 DashboardContext received migrationProgress:', progress);
       dispatch({ type: 'UPDATE_MIGRATION_PROGRESS', payload: progress });
     });
 
     // Migration status updates (completed, failed, cancelled, etc.)
     const statusUnsubscribe = signalRService.on('MigrationStatus', (statusData) => {
+      console.log('🎯 DashboardContext received MigrationStatus:', statusData);
       // Handle different types of migration status updates
-      if (statusData.Status === 'completed') {
+      if (statusData.status === 'completed') {
         // Calculate duration if possible (fallback to "just now" if no duration data)
-        const duration = statusData.Data?.duration || 'just now';
-        const migrationName = statusData.Data?.name || `Migration ${statusData.MigrationId}`;
+        const duration = statusData.data?.duration || 'just now';
+        const migrationName = statusData.data?.name || `Migration ${statusData.migrationId}`;
         
         notificationService.migrationCompleted(
-          statusData.MigrationId,
+          statusData.migrationId,
           migrationName,
           duration
         );
         
         // Update migration progress to show completion
         const completedProgress: MigrationProgress = {
-          migrationId: statusData.MigrationId,
+          migrationId: statusData.migrationId,
           status: 'completed',
           totalEntities: 0,
           processedEntities: 0,
@@ -369,27 +371,27 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
           errorRate: 0
         };
         dispatch({ type: 'UPDATE_MIGRATION_PROGRESS', payload: completedProgress });
-      } else if (statusData.Status === 'failed') {
-        const migrationName = statusData.Data?.name || `Migration ${statusData.MigrationId}`;
-        const errorMessage = statusData.Error?.message || statusData.Data?.error || 'Unknown error occurred';
+      } else if (statusData.status === 'failed') {
+        const migrationName = statusData.data?.name || `Migration ${statusData.migrationId}`;
+        const errorMessage = statusData.error?.message || statusData.data?.error || 'Unknown error occurred';
         
         notificationService.migrationFailed(
-          statusData.MigrationId,
+          statusData.migrationId,
           migrationName,
           errorMessage
         );
-      } else if (statusData.Status === 'cancelled') {
-        const migrationName = statusData.Data?.name || `Migration ${statusData.MigrationId}`;
+      } else if (statusData.status === 'cancelled') {
+        const migrationName = statusData.data?.name || `Migration ${statusData.migrationId}`;
         
         notificationService.migrationCancelled(
-          statusData.MigrationId,
+          statusData.migrationId,
           migrationName
         );
-      } else if (statusData.Status === 'started') {
-        const migrationName = statusData.Data?.name || `Migration ${statusData.MigrationId}`;
+      } else if (statusData.status === 'started') {
+        const migrationName = statusData.data?.name || `Migration ${statusData.migrationId}`;
         
         notificationService.migrationStarted(
-          statusData.MigrationId,
+          statusData.migrationId,
           migrationName
         );
       }

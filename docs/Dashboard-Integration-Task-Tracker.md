@@ -244,7 +244,7 @@ Total Progress: 20% (2/10 tasks completed)
 
 ### **Tools & Environments**
 - Development: `http://localhost:7071`
-- Dashboard: `http://localhost:5173`
+- Dashboard: `http://localhost:3000`
 - Monitoring: OpenSearch Dashboard
 - Testing: Playwright, Jest, MSTest
 

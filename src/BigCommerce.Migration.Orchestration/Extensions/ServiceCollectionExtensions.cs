@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Configuration;
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Infrastructure.Services;
 using BigCommerce.Migration.Orchestration.Services;
@@ -94,6 +95,8 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IQueueService, QueueService>();
         services.TryAddScoped<IMigrationStorageService, MigrationStorageService>();
         
+        // NOTE: QueueServiceClient registration removed - ProgressEventPublisher now creates client directly like QueueService
+        
         return services;
     }
     
@@ -105,6 +108,9 @@ public static class ServiceCollectionExtensions
         // Register orchestration services as singleton
         services.TryAddSingleton<IRateLimitService, RateLimitService>();
         services.TryAddSingleton<IBatchSizeCalculator, BatchSizeCalculator>();
+        
+        // Register progress event publisher for queue-based SignalR integration
+        services.TryAddSingleton<IProgressEventPublisher, ProgressEventPublisher>();
         services.TryAddSingleton<IProgressTracker, ProgressTracker>();
         
         // Register entity processing services (newly created during refactoring)

@@ -18,6 +18,7 @@ public class MigrationOrchestratorTests
 {
     private readonly Mock<IDurableOrchestrationContext> _contextMock;
     private readonly Mock<ILogger<MigrationOrchestrator>> _loggerMock;
+    private readonly Mock<IProgressEventPublisher> _mockProgressEventPublisher;
     private readonly MigrationOrchestrator _orchestrator;
     private readonly MigrationOrchestrationRequest _testRequest;
 
@@ -25,7 +26,8 @@ public class MigrationOrchestratorTests
     {
         _contextMock = new Mock<IDurableOrchestrationContext>();
         _loggerMock = new Mock<ILogger<MigrationOrchestrator>>();
-        _orchestrator = new MigrationOrchestrator(_loggerMock.Object);
+        _mockProgressEventPublisher = new Mock<IProgressEventPublisher>();
+        _orchestrator = new MigrationOrchestrator(_loggerMock.Object, _mockProgressEventPublisher.Object);
         
         _testRequest = new MigrationOrchestrationRequest
         {
@@ -295,9 +297,9 @@ public class MigrationOrchestratorTests
         _contextMock.Setup(x => x.CurrentUtcDateTime)
                    .Returns(DateTime.UtcNow);
 
-        // Setup initialization to fail
-        _contextMock.Setup(x => x.CallActivityAsync("InitializeMigration", It.IsAny<object>()))
-                   .ThrowsAsync(new Exception("Migration initialization failed"));
+        // Setup store validation to fail (replaced InitializeMigration with queue-based events)
+        _contextMock.Setup(x => x.CallActivityAsync<ValidationResult>("ValidateMigrationStores", It.IsAny<object>()))
+                   .ThrowsAsync(new Exception("Store validation failed"));
 
         // Act
         var result = await _orchestrator.RunMigrationOrchestrator(_contextMock.Object);
@@ -305,7 +307,7 @@ public class MigrationOrchestratorTests
         // Assert
         Assert.NotNull(result);
         Assert.Equal(MigrationStatus.Failed, result.Status);
-        Assert.Contains("Migration initialization failed", result.Errors);
+        Assert.Contains("Store validation failed", result.Errors);
     }
 
     [Fact]
@@ -452,10 +454,12 @@ public class MigrationOrchestratorTests
         Assert.Contains("products", result.EntityResults.Keys);
         Assert.Contains("brands", result.EntityResults.Keys);
         
-        // Verify all lifecycle activities were called
-        _contextMock.Verify(x => x.CallActivityAsync("InitializeMigration", It.IsAny<object>()), Times.Once);
+        // Verify essential activities were called (queue-based progress events replaced InitializeMigration/CompleteMigration)
         _contextMock.Verify(x => x.CallActivityAsync<ValidationResult>("ValidateMigrationStores", It.IsAny<object>()), Times.Once);
-        _contextMock.Verify(x => x.CallActivityAsync("CompleteMigration", It.IsAny<object>()), Times.Once);
+        
+        // Verify progress events were published to queue (via IProgressEventPublisher)
+        _mockProgressEventPublisher.Verify(x => x.PublishMigrationProgressAsync(It.IsAny<Core.Models.MigrationProgressEvent>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+        _mockProgressEventPublisher.Verify(x => x.PublishStatusAsync(It.IsAny<Core.Models.StatusProgressEvent>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
     }
 
     [Fact]

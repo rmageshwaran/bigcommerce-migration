@@ -1,3 +1,15 @@
+/**
+ * @deprecated This hook has been superseded by useDetailedMigrationProgress.
+ * Please use useDetailedMigrationProgress instead for enhanced features including:
+ * - Batch-level progress tracking
+ * - Current processing context
+ * - Performance trends and milestones
+ * - More detailed real-time metrics
+ * 
+ * This hook will be removed in a future version.
+ * Migration: Replace `useRealTimeMigrationProgress` with `useDetailedMigrationProgress`
+ */
+
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { 
   MigrationProgress, 
@@ -230,17 +242,202 @@ export const useRealTimeMigrationProgress = (
     }));
   }, [enablePerformanceTracking]);
 
+  // Enhanced event handlers for detailed progress tracking
+  const handleDetailedProgress = useCallback((detailedProgress: any) => {
+    setState(prev => ({
+      ...prev,
+      progress: detailedProgress,
+      lastUpdated: new Date(),
+      isLoading: false
+    }));
+    
+    addEvent('progress', detailedProgress, 
+      `Detailed progress update: ${detailedProgress.currentPhase} - ${detailedProgress.currentEntity}`);
+    
+    if (enablePerformanceTracking && detailedProgress.performance) {
+      updatePerformanceData(detailedProgress.performance.currentProcessingSpeed);
+    }
+  }, [addEvent, enablePerformanceTracking]);
+
+  const handleProcessingContext = useCallback((context: any) => {
+    setState(prev => ({
+      ...prev,
+      entityStatus: {
+        ...prev.entityStatus,
+        [context.currentEntity]: {
+          status: 'running',
+          progress: {
+            processedCount: 0,
+            totalCount: 0,
+            successCount: 0,
+            failureCount: 0,
+            progressPercentage: 0
+          },
+          lastUpdate: new Date(),
+          currentActivity: context.currentActivity,
+          currentBatch: context.currentBatchNumber,
+          phase: context.currentPhase
+        }
+      }
+    }));
+    
+    addEvent('entity', context, 
+      `Processing: ${context.currentEntity} - ${context.currentActivity}`);
+  }, [addEvent]);
+
+  const handleBatchEvent = useCallback((eventType: string, batchEvent: any) => {
+    console.log(`🎯 DEBUG: handleBatchEvent called with eventType: ${eventType}`, batchEvent);
+    
+    const { migrationId: eventMigrationId, entityType, batchDetails, summary } = batchEvent;
+    
+    if (eventMigrationId !== migrationId) {
+      console.log(`🎯 DEBUG: Migration ID mismatch - expected: ${migrationId}, got: ${eventMigrationId}`);
+      return;
+    }
+    
+    console.log(`🎯 DEBUG: Processing ${eventType} for ${entityType} in migration ${migrationId}`);
+    
+    setState(prev => ({
+      ...prev,
+      entityStatus: {
+        ...prev.entityStatus,
+        [entityType]: {
+          ...prev.entityStatus[entityType],
+          status: eventType === 'BatchCompleted' ? 'completed' : 'running',
+          lastUpdate: new Date()
+        }
+      }
+    }));
+    
+    const message = eventType === 'BatchStarted' 
+      ? `Started batch ${batchDetails?.batchNumber} for ${entityType}`
+      : eventType === 'BatchCompleted'
+      ? `Completed batch ${summary?.batchNumber} for ${entityType} (${summary?.successfulEntities}/${summary?.entitiesProcessed} successful)`
+      : `Batch progress for ${entityType}`;
+    
+    console.log(`🎯 DEBUG: Adding event with message: ${message}`);
+    addEvent('batch', batchEvent, message);
+  }, [migrationId, addEvent]);
+
+  const handleRemainingWorkload = useCallback((workload: any) => {
+    setState(prev => ({
+      ...prev,
+      progress: prev.progress ? {
+        ...prev.progress,
+        estimatedTimeRemaining: workload.estimatedTimeRemaining || 0
+      } : prev.progress
+    }));
+    
+    addEvent('progress', workload, 
+      `Remaining: ${workload.remainingEntities} entities, ${Math.round(workload.estimatedTimeRemaining / 1000)}s`);
+  }, [addEvent]);
+
+  const handlePerformanceMetrics = useCallback((metrics: any) => {
+    setState(prev => ({
+      ...prev,
+      performanceMetrics: metrics,
+      performanceHistory: [
+        ...prev.performanceHistory.slice(-29), // Keep last 30 entries
+        {
+          timestamp: new Date(),
+          rate: metrics.currentProcessingSpeed || 0,
+          progress: metrics.averageProcessingSpeed || 0
+        }
+      ]
+    }));
+    
+    if (enablePerformanceTracking) {
+      updatePerformanceData(metrics.currentProcessingSpeed);
+    }
+    
+    addEvent('progress', metrics, 
+      `Speed: ${metrics.currentProcessingSpeed?.toFixed(1) || 0} entities/s`);
+  }, [addEvent, enablePerformanceTracking]);
+
+  const handleMilestone = useCallback((milestone: any) => {
+    if (milestone.migrationId !== migrationId && milestone.MigrationId !== migrationId) return;
+    
+    addEvent('progress', milestone, 
+      `Milestone: ${milestone.milestone || milestone.Milestone} - ${milestone.message || milestone.Message}`);
+    
+    if (enableNotifications) {
+      // Show milestone notification
+      console.log(`🎯 Migration Milestone: ${milestone.milestone || milestone.Milestone}`);
+    }
+  }, [migrationId, addEvent, enableNotifications]);
+
+  // Performance tracking helper
+  const updatePerformanceData = useCallback((currentSpeed: number) => {
+    if (!enablePerformanceTracking) return;
+    
+    performanceTracker.current.rates.push(currentSpeed || 0);
+    performanceTracker.current.timestamps.push(new Date());
+    
+    // Keep only last 100 measurements
+    if (performanceTracker.current.rates.length > 100) {
+      performanceTracker.current.rates.shift();
+      performanceTracker.current.timestamps.shift();
+    }
+  }, [enablePerformanceTracking]);
+
   // Handle migration progress updates
   const handleProgressUpdate = useCallback((progressData: MigrationProgress) => {
     if (progressData.migrationId !== migrationId) return;
 
-    setState(prev => ({
-      ...prev,
-      progress: progressData,
-      isLoading: false,
-      lastUpdated: new Date(),
-      lastHeartbeat: new Date()
-    }));
+    setState(prev => {
+      const newEntityStatus = { ...prev.entityStatus };
+      
+      // Process EntityProgress data from API response if available
+      if (progressData.entityProgress) {
+        Object.entries(progressData.entityProgress).forEach(([entityType, entityProgress]) => {
+          // Map API status to expected status type
+          const mapStatus = (status: string): 'pending' | 'running' | 'completed' | 'failed' => {
+            switch (status?.toLowerCase()) {
+              case 'processing':
+              case 'in_progress':
+              case 'running':
+                return 'running';
+              case 'completed':
+              case 'finished':
+                return 'completed';
+              case 'failed':
+              case 'error':
+                return 'failed';
+              default:
+                return 'pending';
+            }
+          };
+
+          const mappedStatus = mapStatus(entityProgress.status || 'pending');
+
+          newEntityStatus[entityType] = {
+            status: mappedStatus,
+            progress: {
+              entityType: entityProgress.entityType || entityType,
+              totalCount: entityProgress.totalCount || 0,
+              processedCount: entityProgress.processedCount || 0,
+              successCount: entityProgress.successCount || 0,
+              failureCount: entityProgress.failureCount || 0,
+              progressPercentage: entityProgress.progressPercentage || 0,
+              status: mappedStatus,
+              startTime: new Date(entityProgress.startTime || Date.now()),
+              endTime: entityProgress.endTime ? new Date(entityProgress.endTime) : undefined,
+              processingTime: entityProgress.processingTime || 0
+            },
+            lastUpdate: new Date()
+          };
+        });
+      }
+
+      return {
+        ...prev,
+        progress: progressData,
+        entityStatus: newEntityStatus,
+        isLoading: false,
+        lastUpdated: new Date(),
+        lastHeartbeat: new Date()
+      };
+    });
 
     updatePerformanceMetrics(progressData);
     addEvent('progress', progressData, `Progress: ${progressData.overallProgressPercentage?.toFixed(1)}%`);
@@ -353,6 +550,11 @@ export const useRealTimeMigrationProgress = (
     }
   }, [addError]);
 
+  // Handle error events
+  const handleErrorEvent = useCallback((errorData: any) => {
+    addError(`Error: ${errorData.message}`, errorData.details);
+  }, [addError]);
+
   // Connection management
   const connect = useCallback(async () => {
     try {
@@ -361,18 +563,28 @@ export const useRealTimeMigrationProgress = (
       await signalRService.current.connect();
       await signalRService.current.joinMigrationGroup(migrationId);
       
-      // Set up event listeners
-      const unsubscribeProgress = signalRService.current.on('migrationProgress', handleProgressUpdate);
-      const unsubscribeStatus = signalRService.current.on('MigrationStatus', handleStatusUpdate);
+      // Set up event listeners for basic events
+      const unsubscribeProgress = signalRService.current.on('MigrationProgressUpdated', handleProgressUpdate);
+      const unsubscribeStatus = signalRService.current.on('MigrationStatusChanged', handleStatusUpdate);
+      const unsubscribeBatch = signalRService.current.on('BatchProgressUpdated', (event: any) => handleBatchEvent('BatchProgress', event));
+      const unsubscribeEntity = signalRService.current.on('EntityProgressUpdated', handleEntityUpdate);
+      const unsubscribeErrors = signalRService.current.on('ErrorOccurred', handleErrorEvent);
       const unsubscribeConnectionState = signalRService.current.on('connectionStateChanged', handleConnectionStateChange);
       
-      unsubscribeCallbacks.current = [unsubscribeProgress, unsubscribeStatus, unsubscribeConnectionState];
+      unsubscribeCallbacks.current = [
+        unsubscribeProgress, 
+        unsubscribeStatus, 
+        unsubscribeBatch,
+        unsubscribeEntity,
+        unsubscribeErrors,
+        unsubscribeConnectionState
+      ];
       
     } catch (error) {
       addError('Failed to connect to real-time updates', error);
       setState(prev => ({ ...prev, connectionState: 'disconnected' }));
     }
-  }, [migrationId, handleProgressUpdate, handleStatusUpdate, handleConnectionStateChange, addError]);
+  }, [migrationId, handleProgressUpdate, handleStatusUpdate, handleBatchEvent, handleEntityUpdate, handleErrorEvent, handleConnectionStateChange, addError]);
 
   const disconnect = useCallback(async () => {
     try {
@@ -386,9 +598,11 @@ export const useRealTimeMigrationProgress = (
         pollTimer.current = null;
       }
       
+      // Leave migration group but DON'T disconnect the shared SignalR connection
+      // The connection is shared across all dashboard components
       await signalRService.current.leaveMigrationGroup(migrationId);
-      await signalRService.current.disconnect();
       
+      // Only update local state - don't disconnect the shared connection
       setState(prev => ({ 
         ...prev, 
         isConnected: false, 
@@ -440,26 +654,26 @@ export const useRealTimeMigrationProgress = (
 
   // Event subscription helpers
   const onProgressUpdate = useCallback((callback: (progress: MigrationProgress) => void) => {
-    const unsubscribe = signalRService.current.on('migrationProgress', callback);
+    const unsubscribe = signalRService.current.on('MigrationProgressUpdated', callback);
     return unsubscribe;
   }, []);
 
   const onStatusChange = useCallback((callback: (status: MigrationStatus) => void) => {
-    const unsubscribe = signalRService.current.on('MigrationStatus', (data: any) => {
+    const unsubscribe = signalRService.current.on('MigrationStatusChanged', (data: any) => {
       callback(data.status || data.Status);
     });
     return unsubscribe;
   }, []);
 
   const onEntityUpdate = useCallback((callback: (entityType: string, status: EntityProgress) => void) => {
-    const unsubscribe = signalRService.current.on('entityUpdate', (data: any) => {
+    const unsubscribe = signalRService.current.on('EntityProgressUpdated', (data: any) => {
       callback(data.entityType, data.progress);
     });
     return unsubscribe;
   }, []);
 
   const onError = useCallback((callback: (error: any) => void) => {
-    const unsubscribe = signalRService.current.on('error', callback);
+    const unsubscribe = signalRService.current.on('ErrorOccurred', callback);
     return unsubscribe;
   }, []);
 
@@ -468,7 +682,7 @@ export const useRealTimeMigrationProgress = (
     if (autoConnect) {
       connect();
       
-      // Set up fallback polling
+      // Set up fallback polling only when not connected
       pollTimer.current = setInterval(() => {
         if (!state.isConnected) {
           refresh();
@@ -476,17 +690,13 @@ export const useRealTimeMigrationProgress = (
       }, pollInterval);
     }
 
+    // Only disconnect if we're actually unmounting or migrationId changes
     return () => {
-      disconnect();
+      if (state.isConnected) {
+        disconnect();
+      }
     };
-  }, [autoConnect, connect, disconnect, pollInterval, refresh, state.isConnected]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      disconnect();
-    };
-  }, [disconnect]);
+  }, [autoConnect, connect, disconnect, pollInterval, refresh, state.isConnected, migrationId]);
 
   return {
     // State

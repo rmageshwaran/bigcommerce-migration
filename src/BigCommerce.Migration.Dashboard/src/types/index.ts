@@ -254,4 +254,111 @@ export interface SearchOptions {
   query: string;
   fields: string[];
   caseSensitive: boolean;
+}
+
+// Enhanced Migration Progress Types for Real-time Tracking
+
+export interface EnhancedMigrationProgress {
+  migrationId: string;
+  currentPhase: string;
+  currentEntity: string;
+  lastUpdated: Date;
+  startTime: Date;
+  elapsedTime: number; // milliseconds
+  currentProcessing: ProcessingContext;
+  batchProgress: BatchProgressSummary;
+  remainingWork: RemainingWorkload;
+  performance: RealTimeMetrics;
+}
+
+export interface ProcessingContext {
+  currentEntity: string;
+  currentBatchNumber: number;
+  currentPhase: string;
+  currentActivity: string;
+  currentBatchStartTime: Date;
+  currentBatch: CurrentBatchDetails;
+}
+
+export interface CurrentBatchDetails {
+  batchNumber: number;
+  batchSize: number;
+  processedInBatch: number;
+  batchProgressPercentage: number;
+  batchProcessingSpeed: number; // entities per second
+  batchElapsedTime: number; // milliseconds
+  estimatedBatchTimeRemaining: number; // milliseconds
+}
+
+export interface BatchProgressSummary {
+  totalBatches: number;
+  completedBatches: number;
+  processingBatches: number;
+  remainingBatches: number;
+  batchCompletionPercentage: number;
+}
+
+export interface RemainingWorkload {
+  remainingEntities: number;
+  remainingBatches: number;
+  estimatedTimeRemaining: number; // milliseconds
+}
+
+export interface RealTimeMetrics {
+  currentProcessingSpeed: number; // entities per second
+  averageProcessingSpeed: number; // entities per second
+  peakProcessingSpeed: number; // entities per second
+  currentApiCallRate: number; // calls per second
+  currentErrorRate: number; // errors per second
+}
+
+export interface BatchCompletionSummary {
+  batchNumber: number;
+  entitiesProcessed: number;
+  successfulEntities: number;
+  failedEntities: number;
+  processingDuration: number; // milliseconds
+  processingSpeed: number; // entities per second
+  errorRate: number;
+}
+
+export interface MilestoneEvent {
+  migrationId: string;
+  milestone: string;
+  message: string;
+  timeToMilestone: number; // milliseconds
+  entitiesProcessed: number;
+  averageSpeed: number;
+  estimatedTimeToCompletion: number; // milliseconds
+}
+
+// Real-time Event Types
+export interface BatchEvent {
+  migrationId: string;
+  entityType: string;
+  batchDetails?: CurrentBatchDetails;
+  summary?: BatchCompletionSummary;
+  timestamp: Date;
+}
+
+export interface EntityPhaseTransition {
+  migrationId: string;
+  entityType: string;
+  fromPhase: string;
+  toPhase: string;
+  transitionData: any;
+  timestamp: Date;
+}
+
+export interface EntityCompletion {
+  migrationId: string;
+  entityType: string;
+  completionData: {
+    totalProcessed: number;
+    successfulEntities: number;
+    failedEntities: number;
+    successRate: number;
+    completedAt: Date;
+  };
+  timestamp: Date;
 } 

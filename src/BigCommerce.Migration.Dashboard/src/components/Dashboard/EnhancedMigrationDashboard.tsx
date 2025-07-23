@@ -83,7 +83,7 @@ export const EnhancedMigrationDashboard: React.FC<EnhancedMigrationDashboardProp
     autoConnect,
     enableNotifications,
     enablePerformanceTracking: true,
-    pollInterval: 10000
+    pollInterval: 0 // Temporarily disable polling to test if this is causing refreshes
   });
 
   // Handle migration completion
@@ -181,8 +181,8 @@ export const EnhancedMigrationDashboard: React.FC<EnhancedMigrationDashboardProp
               <Typography variant="h5" fontWeight="600">
                 Enhanced Migration Dashboard
               </Typography>
-              <Typography variant="subtitle1" color="textSecondary">
-                Migration {migrationId.slice(-8)}
+              <Typography variant="subtitle1" color="textSecondary" sx={{ fontFamily: 'monospace', fontSize: '0.9rem' }}>
+                Migration {migrationId}
               </Typography>
               <Box display="flex" alignItems="center" gap={2} mt={1}>
                 <Chip
@@ -230,7 +230,7 @@ export const EnhancedMigrationDashboard: React.FC<EnhancedMigrationDashboardProp
         </CardContent>
       </Card>
 
-      {displayValues && (
+      {displayValues ? (
         <>
           {/* Main Progress Bar with Enhanced Details */}
           <Card sx={{ mb: 3 }}>
@@ -276,7 +276,7 @@ export const EnhancedMigrationDashboard: React.FC<EnhancedMigrationDashboardProp
                     <strong>Total Progress:</strong> {progress?.processedEntities || 0} / {progress?.totalEntities || 0} entities
                   </Typography>
                   <Typography variant="body2" color="textSecondary">
-                    <strong>Success Rate:</strong> {progress?.totalEntities ? ((progress.successfulEntities / progress.totalEntities) * 100).toFixed(1) : 0}%
+                    <strong>Success Rate:</strong> {progress?.processedEntities ? ((progress.successfulEntities / progress.processedEntities) * 100).toFixed(1) : 0}%
                   </Typography>
                 </Grid>
                 <Grid item xs={12} md={6}>
@@ -567,6 +567,24 @@ export const EnhancedMigrationDashboard: React.FC<EnhancedMigrationDashboardProp
             </CardContent>
           </Card>
         </>
+      ) : (
+        <Box display="flex" justifyContent="center" alignItems="center" height="400px">
+          <Stack alignItems="center" spacing={2}>
+            <Typography variant="h6">Enhanced Migration Data Unavailable</Typography>
+            <Typography color="textSecondary">
+              Showing basic migration info. Real-time updates might be delayed or unavailable.
+            </Typography>
+            <Typography variant="body2" color="textSecondary">
+              Total Progress: {progress?.processedEntities || 0} / {progress?.totalEntities || 0} entities
+            </Typography>
+            <Typography variant="body2" color="textSecondary">
+              Elapsed Time: {Math.floor((progress?.elapsedTime || 0) / 60)}m {Math.floor((progress?.elapsedTime || 0) % 60)}s
+            </Typography>
+            <Typography variant="body2" color="textSecondary">
+              Estimated Remaining: {Math.floor(progress?.remainingWork?.estimatedTimeRemaining || 0) / 60}m {Math.floor(progress?.remainingWork?.estimatedTimeRemaining || 0) % 60}s
+            </Typography>
+          </Stack>
+        </Box>
       )}
 
       {/* Snackbar for notifications */}

@@ -153,7 +153,12 @@ public class RateLimitService : IRateLimitService
                 CleanupExpiredRequests(storeLimit);
                 var requestsInWindow = storeLimit.RequestTimes.Count;
                 var canProceed = requestsInWindow < 12;
-                var delayMs = canProceed ? 0 : CalculateDelayMs(storeLimit);
+                
+                // ✅ TESTING: Use reduced delay (5 seconds) for better real-time observation
+                var delayMs = canProceed ? 0 : 5000; // 5 seconds instead of original 60 seconds
+                
+                _logger.LogDebug("Rate limit check for store {StoreId}: {RequestsInWindow}/12 requests, CanProceed: {CanProceed}, DelayMs: {DelayMs}", 
+                    storeId, requestsInWindow, canProceed, delayMs);
                 
                 return new RateLimitResult
                 {

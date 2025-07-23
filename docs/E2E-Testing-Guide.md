@@ -69,7 +69,7 @@ npm install
 npm run dev
 ```
 
-Dashboard will be available at: `http://localhost:5173`
+Dashboard will be available at: `http://localhost:3000`
 
 ---
 
@@ -131,7 +131,7 @@ await connection.start();
 
 #### **Step 3: Verify Dashboard Updates**
 
-Navigate to `http://localhost:5173` and verify:
+Navigate to `http://localhost:3000` and verify:
 
 1. **✅ Migration Card Updates** - Real-time progress bars
 2. **✅ Batch Progress Grid** - Individual batch status  

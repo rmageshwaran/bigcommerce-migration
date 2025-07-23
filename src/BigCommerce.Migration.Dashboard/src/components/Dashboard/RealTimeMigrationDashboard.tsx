@@ -1,3 +1,15 @@
+/**
+ * @deprecated This component has been superseded by EnhancedMigrationDashboard.
+ * Please use EnhancedMigrationDashboard instead for better features including:
+ * - Batch-level progress tracking
+ * - Current processing context  
+ * - Performance trends and milestones
+ * - More detailed real-time metrics
+ * 
+ * This component will be removed in a future version.
+ * Migration: Replace `RealTimeMigrationDashboard` with `EnhancedMigrationDashboard`
+ */
+
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   Box,
@@ -310,7 +322,7 @@ export const RealTimeMigrationDashboard: React.FC<RealTimeMigrationDashboardProp
     autoConnect,
     enableNotifications: notificationsEnabled,
     enablePerformanceTracking: true,
-    pollInterval: 10000 // 10 seconds fallback polling
+    pollInterval: 30000 // 30 seconds fallback polling
   });
 
   // Handle migration completion
@@ -401,8 +413,8 @@ export const RealTimeMigrationDashboard: React.FC<RealTimeMigrationDashboardProp
         <CardContent>
           <Box display="flex" justifyContent="space-between" alignItems="center">
             <Box>
-              <Typography variant="h5" fontWeight="600">
-                Migration {migrationId.slice(-8)}
+              <Typography variant="h5" fontWeight="600" sx={{ fontFamily: 'monospace', fontSize: '1.1rem' }}>
+                Migration {migrationId}
               </Typography>
               <Box display="flex" alignItems="center" gap={2} mt={1}>
                 <Chip

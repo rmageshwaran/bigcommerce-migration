@@ -186,6 +186,9 @@ public static class EntityMigrationDurableOrchestrator
                 logger.LogInformation("Processing {EntityType} batch {BatchNumber}/{TotalBatches} ({EntityCount} entities) for MigrationId: {MigrationId}", 
                     entityType, batchNumber, totalBatches, batchEntityIds.Count, migrationId);
 
+                // TODO: Replace with queue-based batch start broadcasting
+                // Removed SignalR broadcast activities - will be replaced with queue processors
+
                 try
                 {
                     // Process the batch
@@ -217,6 +220,9 @@ public static class EntityMigrationDurableOrchestrator
                                         "Processed: {ProcessedCount}, Successful: {SuccessfulCount}, Failed: {FailedCount}", 
                         entityType, batchNumber, totalBatches, migrationId, 
                         batchResult.TotalProcessed, batchResult.SuccessfulEntities, batchResult.FailedEntities);
+
+                    // TODO: Replace with queue-based batch completion broadcasting
+                    // Removed SignalR broadcast activities - will be replaced with queue processors
 
                     // Update progress after each batch
                     await context.CallActivityAsync(

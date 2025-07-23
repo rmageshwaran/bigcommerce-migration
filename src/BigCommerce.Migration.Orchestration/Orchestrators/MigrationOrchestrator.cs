@@ -14,6 +14,7 @@ namespace BigCommerce.Migration.Orchestration.Orchestrators;
 public class MigrationOrchestrator
 {
     private readonly ILogger<MigrationOrchestrator> _logger;
+    private readonly IProgressEventPublisher _progressEventPublisher;
 
     // Entity processing order based on dependencies
     private static readonly string[] EntityProcessingOrder = new[]
@@ -26,9 +27,10 @@ public class MigrationOrchestrator
         "modifiers"      // Depends on categories and products
     };
 
-    public MigrationOrchestrator(ILogger<MigrationOrchestrator> logger)
+    public MigrationOrchestrator(ILogger<MigrationOrchestrator> logger, IProgressEventPublisher progressEventPublisher)
     {
         _logger = logger;
+        _progressEventPublisher = progressEventPublisher;
     }
 
     /// <summary>
@@ -83,14 +85,40 @@ public class MigrationOrchestrator
             // Generate deterministic correlation ID for this migration ✅ Use deterministic GUID
             var correlationId = context.NewGuid();
             
-            // Step 2: Initialize migration
+            // Step 2: Initialize migration via queue event
             context.SetCustomStatus("Initializing migration");
-            await context.CallActivityAsync("InitializeMigration", new
+            try
             {
-                MigrationId = request.MigrationId,
-                CorrelationId = correlationId,
-                Request = request
-            });
+                var migrationProgressEvent = new MigrationProgressEvent
+                {
+                    MigrationId = request.MigrationId,
+                    OverallProgress = 0,
+                    Status = "initializing",
+                    TotalEntities = 0,
+                    ProcessedEntities = 0,
+                    FailedEntities = 0,
+                    CurrentEntityType = "",
+                    EstimatedTimeRemaining = null
+                };
+
+                await _progressEventPublisher.PublishMigrationProgressAsync(migrationProgressEvent);
+
+                var statusEvent = new StatusProgressEvent
+                {
+                    MigrationId = request.MigrationId,
+                    Status = "initializing",
+                    Message = "Migration initialization started",
+                    Metadata = new { Entities = request.OriginalRequest.Entities },
+                    Timestamp = context.CurrentUtcDateTime
+                };
+
+                await _progressEventPublisher.PublishStatusAsync(statusEvent);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to publish migration initialization events for migration {MigrationId}", request.MigrationId);
+                // Don't throw - progress events should not break the migration
+            }
 
             // Step 3: Validate stores and resolve dependencies
             context.SetCustomStatus("Validating stores");
@@ -206,13 +234,47 @@ public class MigrationOrchestrator
                 }
             }
 
-            // Step 6: Complete migration
+            // Step 6: Complete migration via queue events
             context.SetCustomStatus("Completing migration");
-            await context.CallActivityAsync("CompleteMigration", new
+            try
             {
-                MigrationId = request.MigrationId,
-                Result = result
-            });
+                var migrationSummary = result.GetStatisticsSummary();
+                
+                var migrationProgressEvent = new MigrationProgressEvent
+                {
+                    MigrationId = request.MigrationId,
+                    OverallProgress = 100,
+                    Status = result.Status.ToString().ToLowerInvariant(),
+                    TotalEntities = migrationSummary.TotalEntities,
+                    ProcessedEntities = migrationSummary.SuccessfulEntities + migrationSummary.FailedEntities,
+                    FailedEntities = migrationSummary.FailedEntities,
+                    CurrentEntityType = "",
+                    EstimatedTimeRemaining = TimeSpan.Zero
+                };
+
+                await _progressEventPublisher.PublishMigrationProgressAsync(migrationProgressEvent);
+
+                var statusEvent = new StatusProgressEvent
+                {
+                    MigrationId = request.MigrationId,
+                    Status = result.Status.ToString().ToLowerInvariant(),
+                    Message = result.Errors.Any() ? "Migration completed with errors" : "Migration completed successfully",
+                    Metadata = new { 
+                        TotalEntities = migrationSummary.TotalEntities,
+                        SuccessfulEntities = migrationSummary.SuccessfulEntities,
+                        FailedEntities = migrationSummary.FailedEntities,
+                        SuccessRate = migrationSummary.SuccessRate
+                    },
+                    Timestamp = context.CurrentUtcDateTime
+                };
+
+                await _progressEventPublisher.PublishStatusAsync(statusEvent);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to publish migration completion events for migration {MigrationId}", request.MigrationId);
+                // Don't throw - progress events should not break the migration
+            }
 
             // Step 7: Set final status
             result.Status = result.Errors.Any() ? MigrationStatus.Failed : MigrationStatus.Completed;

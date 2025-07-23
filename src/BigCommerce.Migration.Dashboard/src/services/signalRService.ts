@@ -17,11 +17,12 @@ export class SignalRService {
   private reconnectInterval = 5000; // 5 seconds
   private listeners: Map<string, Set<(data: any) => void>> = new Map();
   private hubUrl: string;
+  private currentMigrationId: string | null = null;
 
   constructor(hubUrl?: string) {
     // Use environment configuration with optional override
-    // For Azure SignalR Service, we need to use the negotiate endpoint
-    this.hubUrl = hubUrl || `${config.api.baseUrl}/negotiate`;
+    // Connect to Azure Functions negotiate endpoint which handles Azure SignalR service
+    this.hubUrl = hubUrl || config.signalR.hubUrl;
     this.maxReconnectAttempts = config.signalR.reconnectAttempts;
     
     if (config.features.enableDebugLogging) {
@@ -32,45 +33,156 @@ export class SignalRService {
       });
     }
     
-    this.initializeConnection();
+    // Connection will be initialized when connect() is called
   }
 
   /**
    * Initialize SignalR connection with backend integration
    */
-  private initializeConnection(): void {
-    this.connection = new signalR.HubConnectionBuilder()
-      .withUrl(this.hubUrl, {
-        skipNegotiation: false, // Use negotiate endpoint
-        transport: signalR.HttpTransportType.WebSockets,
-        accessTokenFactory: () => {
-          // Return API key for Azure Functions authentication
-          return config.auth.apiKey || '';
-        }
-      })
-      .withAutomaticReconnect({
-        nextRetryDelayInMilliseconds: retryContext => {
-          // Exponential backoff with max retry limit
-          const delay = Math.min(1000 * Math.pow(2, retryContext.previousRetryCount), 30000);
-          
-          if (retryContext.previousRetryCount >= this.maxReconnectAttempts) {
-            if (config.features.enableDebugLogging) {
-              console.warn(`🔄 SignalR max reconnect attempts (${this.maxReconnectAttempts}) reached`);
-            }
-            return null; // Stop retrying
-          }
-          
-          return delay;
-        }
-      })
-      .configureLogging(config.features.enableDebugLogging ? signalR.LogLevel.Debug : signalR.LogLevel.Warning)
-      .build();
+  private async initializeConnection(): Promise<void> {
+    console.log('🔌 Initializing SignalR connection...');
+    
+    const maxAttempts = 3;
+    let attempt = 1;
+    
+    while (attempt <= maxAttempts) {
+      try {
+        // Step 1: Get SignalR connection info from our custom negotiate endpoint
+        // Construct full URL for cross-origin requests
+        const negotiateUrl = this.hubUrl.startsWith('http') 
+          ? this.hubUrl 
+          : `http://localhost:7071${this.hubUrl}`;
+        
+        console.log(`🔗 Negotiating SignalR connection at: ${negotiateUrl} (attempt ${attempt}/${maxAttempts})`);
+        
+        const negotiateResponse = await fetch(negotiateUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+            // Remove x-functions-key since the endpoint is AuthorizationLevel.Anonymous
+          },
+          body: JSON.stringify({})
+        });
 
-    this.setupEventHandlers();
+        if (!negotiateResponse.ok) {
+          throw new Error(`Failed to negotiate SignalR connection: ${negotiateResponse.status} ${negotiateResponse.statusText}`);
+        }
+
+        const connectionInfo = await negotiateResponse.json();
+        console.log('✅ Got SignalR connection info:', connectionInfo);
+
+        // Step 2: Create SignalR connection using the provided URL and access token
+        this.connection = new signalR.HubConnectionBuilder()
+          .withUrl(connectionInfo.Url, {
+            accessTokenFactory: () => connectionInfo.AccessToken,
+            skipNegotiation: true, // We already negotiated manually
+            transport: signalR.HttpTransportType.WebSockets, // Must use only WebSockets when skipping negotiation
+            withCredentials: false
+          })
+          .configureLogging(signalR.LogLevel.Debug)
+          .build();
+
+        this.setupEventHandlers();
+        return; // Success - exit the retry loop
+        
+      } catch (error) {
+        console.error(`❌ SignalR initialization attempt ${attempt}/${maxAttempts} failed:`, error);
+        
+        if (attempt === maxAttempts) {
+          console.error('❌ All SignalR initialization attempts failed');
+          throw error;
+        }
+        
+        // Wait before retrying (exponential backoff)
+        const delay = 1000 * Math.pow(2, attempt - 1); // 1s, 2s, 4s
+        console.log(`⏳ Retrying SignalR initialization in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        attempt++;
+      }
+    }
+  }
+
+  /**
+   * Transform backend data (PascalCase) to frontend data (camelCase)
+   */
+  private transformBackendProgress(backendData: any): any {
+    if (!backendData) return null;
+
+    const totalEntities = backendData.TotalEntities || backendData.totalEntities || 0;
+    const processedEntities = backendData.ProcessedEntities || backendData.processedEntities || 0;
+    const successfulEntities = backendData.SuccessfulEntities || backendData.successfulEntities || processedEntities; // Default to processed if not specified
+    const failedEntities = backendData.FailedEntities || backendData.failedEntities || 0;
+    const overallProgress = backendData.OverallProgress || backendData.overallProgressPercentage || 0;
+    const entitiesPerSecond = backendData.EntitiesPerSecond || backendData.entitiesPerSecond || 0;
+    
+    // Calculate elapsed time (simple calculation based on progress)
+    const estimatedTotalTime = entitiesPerSecond > 0 ? (totalEntities / entitiesPerSecond) : 0;
+    const elapsedTime = estimatedTotalTime > 0 ? (estimatedTotalTime * (overallProgress / 100)) : 0;
+    const estimatedTimeRemaining = estimatedTotalTime > elapsedTime ? (estimatedTotalTime - elapsedTime) : 0;
+
+    return {
+      migrationId: backendData.MigrationId || backendData.migrationId || '',
+      status: (backendData.Status || backendData.status || 'unknown').toLowerCase(),
+      startTime: backendData.StartTime || backendData.startTime || new Date(),
+      lastUpdated: new Date(),
+      elapsedTime: Math.round(elapsedTime),
+      estimatedTimeRemaining: Math.round(estimatedTimeRemaining),
+      totalEntities,
+      processedEntities,
+      successfulEntities,
+      failedEntities,
+      overallProgressPercentage: overallProgress,
+      entityProgress: backendData.EntityProgress || backendData.entityProgress || {},
+      currentPhase: backendData.CurrentPhase || backendData.currentPhase || 'Processing',
+      currentEntity: backendData.CurrentEntity || backendData.currentEntity || 'categories',
+      entitiesPerSecond,
+      errorRate: processedEntities > 0 ? (failedEntities / processedEntities) * 100 : 0,
+      
+      // Enhanced nested structures for detailed dashboard
+      currentProcessing: {
+        currentEntity: backendData.CurrentEntity || backendData.currentEntity || 'categories',
+        currentActivity: backendData.CurrentActivity || backendData.currentActivity || 'Processing entities',
+        currentBatchNumber: backendData.CurrentBatchNumber || backendData.currentBatchNumber || Math.ceil(processedEntities / 50) || 1,
+        currentBatch: {
+          batchProgressPercentage: backendData.BatchProgress || backendData.batchProgress || (overallProgress % 10) * 10,
+          batchSize: backendData.BatchSize || backendData.batchSize || 50,
+          processedInBatch: backendData.ProcessedInBatch || backendData.processedInBatch || (processedEntities % 50),
+          batchProcessingSpeed: entitiesPerSecond
+        }
+      },
+      
+      batchProgress: {
+        totalBatches: Math.ceil(totalEntities / 50) || 1,
+        completedBatches: Math.floor(processedEntities / 50) || 0
+      },
+      
+      remainingWork: {
+        remainingEntities: totalEntities - processedEntities,
+        remainingBatches: Math.ceil((totalEntities - processedEntities) / 50) || 0,
+        estimatedTimeRemaining: Math.round(estimatedTimeRemaining)
+      },
+      
+      performance: {
+        currentProcessingSpeed: entitiesPerSecond,
+        averageProcessingSpeed: entitiesPerSecond,
+        performanceTrend: entitiesPerSecond > 5 ? 'improving' : entitiesPerSecond > 2 ? 'stable' : 'declining'
+      }
+    };
   }
 
   /**
    * Set up connection event handlers
+   * 
+   * ✅ EVENT MAPPING: Backend Queue Events → Frontend Internal Events
+   * Backend sends:           Frontend translates to:
+   * - MigrationProgressUpdated  → 'migrationProgress'
+   * - MigrationStatusChanged    → 'MigrationStatus'  
+   * - EntityProgressUpdated     → 'DetailedProgress' + 'entityUpdate'
+   * - BatchProgressUpdated      → 'BatchStarted' + 'BatchProgress' + 'BatchCompleted'
+   * - ErrorOccurred             → 'error'
+   * 
+   * This translation layer allows frontend hooks to use consistent internal 
+   * event names regardless of backend changes.
    */
   private setupEventHandlers(): void {
     if (!this.connection) return;
@@ -104,25 +216,79 @@ export class SignalRService {
       });
     });
 
-    // Message handlers
-    this.connection.on('MigrationProgress', (progress: MigrationProgress) => {
-      this.notifyListeners('migrationProgress', progress);
+    // Core Progress Events (Queue-based from backend)
+    this.connection.on('MigrationProgressUpdated', (backendProgress: any) => {
+      console.log('🎯 DEBUG: Received MigrationProgressUpdated (raw):', backendProgress);
+      const transformedProgress = this.transformBackendProgress(backendProgress);
+      console.log('🎯 DEBUG: Transformed to frontend format:', transformedProgress);
+      this.notifyListeners('migrationProgress', transformedProgress);
     });
 
-    this.connection.on('MigrationStatus', (status: any) => {
-      this.notifyListeners('MigrationStatus', status);
+    this.connection.on('MigrationStatusChanged', (backendStatus: any) => {
+      console.log('🎯 DEBUG: Received MigrationStatusChanged (raw):', backendStatus);
+      const transformedStatus = {
+        migrationId: backendStatus.MigrationId || backendStatus.migrationId,
+        status: (backendStatus.Status || backendStatus.status || 'unknown').toLowerCase(),
+        message: backendStatus.Message || backendStatus.message,
+        data: backendStatus.Data || backendStatus.data,
+        error: backendStatus.Error || backendStatus.error
+      };
+      console.log('🎯 DEBUG: Transformed status:', transformedStatus);
+      this.notifyListeners('MigrationStatus', transformedStatus);
     });
 
+    this.connection.on('EntityProgressUpdated', (entityProgress: any) => {
+      console.log('🎯 DEBUG: Received EntityProgressUpdated:', entityProgress);
+      this.notifyListeners('DetailedProgress', entityProgress);
+      // Also notify entity-specific listeners
+      this.notifyListeners('entityUpdate', entityProgress);
+    });
+
+    this.connection.on('BatchProgressUpdated', (batchProgress: any) => {
+      console.log('🎯 DEBUG: Received BatchProgressUpdated:', batchProgress);
+      this.notifyListeners('BatchStarted', batchProgress);
+      this.notifyListeners('BatchProgress', batchProgress);
+      this.notifyListeners('BatchCompleted', batchProgress);
+    });
+
+    this.connection.on('ErrorOccurred', (errorEvent: any) => {
+      console.log('🎯 DEBUG: Received ErrorOccurred:', errorEvent);
+      this.notifyListeners('error', { 
+        message: errorEvent.Message || errorEvent.message || 'Migration error occurred',
+        severity: errorEvent.Severity || 'error',
+        entityType: errorEvent.EntityType,
+        entityId: errorEvent.EntityId,
+        details: errorEvent.Details,
+        timestamp: new Date() 
+      });
+    });
+
+    // Legacy event handlers (keeping for backward compatibility during migration)
+    // TODO: Remove these after confirming queue-based events work correctly
+    this.connection.on('PerformanceMetrics', (metrics: any) => {
+      console.log('🎯 DEBUG: Received PerformanceMetrics (legacy):', metrics);
+      this.notifyListeners('PerformanceMetrics', metrics);
+    });
+
+    this.connection.on('RemainingWorkload', (workload: any) => {
+      console.log('🎯 DEBUG: Received RemainingWorkload (legacy):', workload);
+      this.notifyListeners('RemainingWorkload', workload);
+    });
+
+    // System Health Events (independent of queue system)
     this.connection.on('SystemHealth', (healthData: SystemHealthData) => {
+      console.log('🎯 DEBUG: Received SystemHealth:', healthData);
       this.notifyListeners('systemHealth', healthData);
     });
 
     this.connection.on('systemHealth', (healthData: SystemHealthData) => {
+      console.log('🎯 DEBUG: Received systemHealth (lowercase):', healthData);
       this.notifyListeners('systemHealth', healthData);
     });
 
+    // Generic Error Handler (fallback)
     this.connection.on('Error', (error: string) => {
-      console.error('SignalR server error:', error);
+      console.error('SignalR server error (generic):', error);
       this.notifyListeners('error', { message: error, timestamp: new Date() });
     });
 
@@ -143,9 +309,13 @@ export class SignalRService {
   /**
    * Start the SignalR connection
    */
-  public async connect(): Promise<void> {
+  public   async connect(): Promise<void> {
     if (!this.connection) {
-      throw new Error('SignalR connection not initialized');
+      await this.initializeConnection();
+    }
+
+    if (!this.connection) {
+      throw new Error('Failed to initialize SignalR connection');
     }
 
     if (this.connectionState === 'Connected') {
@@ -160,18 +330,40 @@ export class SignalRService {
       this.connectionState = 'Connecting';
       this.notifyListeners('connectionStateChanged', { state: this.connectionState });
       
+      console.log('🔄 Starting SignalR connection...');
       await this.connection.start();
       this.connectionState = 'Connected';
       this.reconnectAttempts = 0;
       
-      console.info('SignalR connected successfully');
+      console.log('✅ SignalR connected successfully');
+      console.log(`🔗 SignalR connection ID: ${this.connection.connectionId}`);
+      
+      // Automatically join migration group if we have a current migration ID
+      if (this.currentMigrationId) {
+        await this.joinMigrationGroup(this.currentMigrationId);
+      }
+      
       this.notifyListeners('connectionStateChanged', { 
         state: this.connectionState,
         connectionId: this.connection.connectionId 
       });
     } catch (error) {
       this.connectionState = 'Disconnected';
-      console.error('SignalR connection failed:', error);
+      console.error('❌ SignalR connection failed:', error);
+      
+      // Log additional error details for CORS debugging
+      if (error instanceof Error) {
+        console.error('Error name:', error.name);
+        console.error('Error message:', error.message);
+        console.error('Error stack:', error.stack);
+        
+        // Check for CORS-specific errors
+        if (error.message.includes('CORS') || error.message.includes('cross-origin')) {
+          console.error('🚫 CORS ERROR DETECTED - This is a browser security restriction');
+          console.error('Hub URL being used:', this.hubUrl);
+          console.error('Config API key:', config.auth.apiKey ? 'Present' : 'Missing');
+        }
+      }
       this.notifyListeners('connectionStateChanged', { 
         state: this.connectionState, 
         error 
@@ -204,17 +396,48 @@ export class SignalRService {
   /**
    * Join a migration monitoring group
    */
-  public async joinMigrationGroup(migrationId: string, userId = 'dashboard-user'): Promise<void> {
-    if (!this.connection || this.connectionState !== 'Connected') {
-      throw new Error('SignalR not connected');
+  public async joinMigrationGroup(migrationId: string): Promise<void> {
+    this.currentMigrationId = migrationId;
+    
+    if (!this.connection || this.connection.state !== signalR.HubConnectionState.Connected) {
+      console.log('🔗 Monitoring migration group: ' + migrationId + ' (will join after connection)');
+      return;
+    }
+
+    if (!this.connection.connectionId) {
+      console.warn('⚠️ No connection ID available for group join');
+      return;
     }
 
     try {
-      await this.connection.invoke('JoinMigrationGroup', migrationId, userId);
-      console.info(`Joined migration group: ${migrationId}`);
+      console.log(`🔗 Joining migration group: ${migrationId}`);
+      
+      // Call the backend HTTP endpoint to join the group
+      const response = await fetch(`${config.api.baseUrl}/signalr/join/${migrationId}?connectionId=${this.connection.connectionId}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-functions-key': config.auth.apiKey
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to join migration group: ${response.status} ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      console.log(`✅ Successfully joined migration group for migration: ${result.migrationId}`, result);
+      console.log(`✅ Ready to receive updates for migration: ${migrationId}`);
+      
+      // Listen for the confirmation event
+      if (this.connection) {
+        this.connection.on('JoinedMigrationGroup', (data) => {
+          console.log('🎉 Received group join confirmation:', data);
+        });
+      }
     } catch (error) {
-      console.error(`Failed to join migration group ${migrationId}:`, error);
-      throw error;
+      console.error(`❌ Failed to join migration group ${migrationId}:`, error);
+      // Don't throw - this is not critical enough to break the whole connection
     }
   }
 
@@ -222,16 +445,42 @@ export class SignalRService {
    * Leave a migration monitoring group
    */
   public async leaveMigrationGroup(migrationId: string): Promise<void> {
-    if (!this.connection || this.connectionState !== 'Connected') {
-      throw new Error('SignalR not connected');
+    if (!this.connection || this.connection.state !== signalR.HubConnectionState.Connected) {
+      console.log('🔗 Not connected - cannot leave migration group: ' + migrationId);
+      return;
+    }
+
+    if (!this.connection.connectionId) {
+      console.warn('⚠️ No connection ID available for group leave');
+      return;
     }
 
     try {
-      await this.connection.invoke('LeaveMigrationGroup', migrationId);
-      console.info(`Left migration group: ${migrationId}`);
+      console.log(`🔗 Leaving migration group: ${migrationId}`);
+      
+      // Call the backend HTTP endpoint to leave the group
+      const response = await fetch(`${config.api.baseUrl}/signalr/leave/${migrationId}?connectionId=${this.connection.connectionId}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-functions-key': config.auth.apiKey
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to leave migration group: ${response.status} ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      console.log(`✅ Successfully left migration group: ${result.groupName}`, result);
+      
+      // Clear current migration if it matches
+      if (this.currentMigrationId === migrationId) {
+        this.currentMigrationId = null;
+      }
     } catch (error) {
-      console.error(`Failed to leave migration group ${migrationId}:`, error);
-      throw error;
+      console.error(`❌ Failed to leave migration group ${migrationId}:`, error);
+      // Don't throw - this is not critical enough to break the whole connection
     }
   }
 
@@ -315,16 +564,30 @@ export class SignalRService {
 // Singleton instance
 let signalRServiceInstance: SignalRService | null = null;
 
+// Reset singleton for debugging (call this to force recreation)
+(window as any).resetSignalRService = () => {
+  console.log('🔄 Resetting SignalR service singleton');
+  signalRServiceInstance = null;
+};
+
 /**
  * Get SignalR service singleton instance
  */
 export const getSignalRService = (hubUrl?: string): SignalRService => {
   if (!signalRServiceInstance) {
-    if (!hubUrl) {
-      // Default to localhost for development
-      hubUrl = 'http://localhost:7071';
-    }
-    signalRServiceInstance = new SignalRService(hubUrl);
+    // Use config value if no hubUrl provided
+    const configuredUrl = `${config.api.baseUrl}${config.signalR.hubUrl}`;
+    const finalUrl = hubUrl || configuredUrl;
+    
+    console.log('🔧 SignalR Factory Debug:', {
+      passedHubUrl: hubUrl,
+      apiBaseUrl: config.api.baseUrl,
+      signalRHubUrl: config.signalR.hubUrl,
+      configuredUrl: configuredUrl,
+      finalUrl: finalUrl
+    });
+    
+    signalRServiceInstance = new SignalRService(finalUrl);
   }
   return signalRServiceInstance;
 };

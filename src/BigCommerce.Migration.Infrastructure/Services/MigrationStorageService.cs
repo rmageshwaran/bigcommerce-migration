@@ -1061,7 +1061,21 @@ public class MigrationStorageService : IMigrationStorageService
 
         if (!string.IsNullOrEmpty(request.Status))
         {
-            filter += $" and Status eq '{request.Status}'";
+            // Handle comma-separated status values
+            var statuses = request.Status.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(s => s.Trim())
+                .Where(s => !string.IsNullOrEmpty(s))
+                .ToList();
+
+            if (statuses.Count == 1)
+            {
+                filter += $" and Status eq '{statuses[0]}'";
+            }
+            else if (statuses.Count > 1)
+            {
+                var statusConditions = string.Join(" or ", statuses.Select(s => $"Status eq '{s}'"));
+                filter += $" and ({statusConditions})";
+            }
         }
 
         if (!string.IsNullOrEmpty(request.MigrationId))

@@ -9,7 +9,7 @@ import {
   Switch,
   FormControlLabel
 } from '@mui/material';
-import { RealTimeMigrationDashboard } from '../Dashboard/RealTimeMigrationDashboard';
+import { EnhancedMigrationDashboard } from '../Dashboard/EnhancedMigrationDashboard';
 import { IntegrationTest } from './IntegrationTest';
 
 interface MockData {
@@ -187,7 +187,7 @@ export const MockIntegrationTest: React.FC = () => {
               <Alert severity="info">
                 <Typography variant="body2">
                   🎯 <strong>Ready for Real Dashboard:</strong><br/>
-                  The RealTimeMigrationDashboard component would appear here
+                  The EnhancedMigrationDashboard component would appear here
                   and connect to your backend's SignalR hub for live updates.
                   
                   <br/><br/>

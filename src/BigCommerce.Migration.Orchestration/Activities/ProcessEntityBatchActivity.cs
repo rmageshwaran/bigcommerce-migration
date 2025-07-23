@@ -30,7 +30,8 @@ public class ProcessEntityBatchActivity
     private readonly IRateLimitService _rateLimitService;
     private readonly IOpenSearchService _openSearchService;
     private readonly IMigrationStorageService _migrationStorageService;
-    private readonly IMigrationSignalRService _signalRService;
+    // TODO: Replace with queue-based progress broadcasting
+    // Removed IMigrationSignalRService dependency
     private readonly IErrorMessageFormatter _errorMessageFormatter;
 
     public ProcessEntityBatchActivity(
@@ -43,7 +44,7 @@ public class ProcessEntityBatchActivity
         IRateLimitService rateLimitService,
         IOpenSearchService openSearchService,
         IMigrationStorageService migrationStorageService,
-        IMigrationSignalRService signalRService,
+
         IErrorMessageFormatter errorMessageFormatter)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -55,7 +56,7 @@ public class ProcessEntityBatchActivity
         _rateLimitService = rateLimitService ?? throw new ArgumentNullException(nameof(rateLimitService));
         _openSearchService = openSearchService ?? throw new ArgumentNullException(nameof(openSearchService));
         _migrationStorageService = migrationStorageService ?? throw new ArgumentNullException(nameof(migrationStorageService));
-        _signalRService = signalRService ?? throw new ArgumentNullException(nameof(signalRService));
+
         _errorMessageFormatter = errorMessageFormatter ?? throw new ArgumentNullException(nameof(errorMessageFormatter));
     }
 

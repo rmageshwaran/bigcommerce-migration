@@ -404,6 +404,18 @@ public class MigrationQueueFunctions
                         _logger.LogInformation("Terminated migration orchestrator for MigrationId: {MigrationId}, InstanceId: {InstanceId}", 
                             migrationId, instanceId);
                     }
+                    
+                    // CRITICAL FIX: Mark cancellation token as processed to prevent orchestrator restarts
+                    var cancellationTokenEntry = await _migrationStorageService.GetCancellationTokenAsync(migrationId);
+                    if (cancellationTokenEntry != null && !cancellationTokenEntry.IsProcessed)
+                    {
+                        cancellationTokenEntry.IsProcessed = true;
+                        cancellationTokenEntry.ProcessedAt = DateTime.UtcNow;
+                        cancellationTokenEntry.Status = "Processed";
+                        
+                        await _migrationStorageService.UpdateCancellationTokenAsync(cancellationTokenEntry);
+                        _logger.LogInformation("✅ CANCELLATION FIX: Marked cancellation token as processed for MigrationId: {MigrationId}", migrationId);
+                    }
                 }
                 catch (Exception ex)
                 {

@@ -80,14 +80,14 @@ export const MigrationOverview: React.FC = () => {
           >
             Migration Dashboard
           </Button>
-          <Button
+          {/*<Button
             variant="outlined"
             startIcon={<DebugIcon />}
             onClick={handleDebugSignalR}
             size="small"
           >
             Debug SignalR
-          </Button>
+          </Button>*/}
           <Button
             variant="outlined"
             startIcon={<RefreshIcon />}
@@ -109,12 +109,12 @@ export const MigrationOverview: React.FC = () => {
             <Stack direction="row" spacing={2}>
               <Chip
                 icon={signalRConnection.isConnected ? <SuccessIcon /> : <ErrorIcon />}
-                label={`SignalR: ${signalRConnection.isConnected ? 'Connected' : 'Disconnected'}`}
+                label={`Real-time Monitoring: ${signalRConnection.isConnected ? 'Connected' : 'Disconnected'}`}
                 color={signalRConnection.isConnected ? 'success' : 'error'}
               />
               <Chip
                 icon={apiConnected ? <SuccessIcon /> : <ErrorIcon />}
-                label={`API: ${apiConnected ? 'Connected' : 'Disconnected'}`}
+                label={`Backend Service: ${apiConnected ? 'Connected' : 'Disconnected'}`}
                 color={apiConnected ? 'success' : 'error'}
               />
             </Stack>

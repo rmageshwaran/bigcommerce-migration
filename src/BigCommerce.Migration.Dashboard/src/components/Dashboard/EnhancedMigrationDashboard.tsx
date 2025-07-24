@@ -17,13 +17,18 @@ import {
   Tooltip,
   useTheme,
   alpha,
-  Paper
+  Paper,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions
 } from '@mui/material';
 import {
   Refresh as RefreshIcon,
   Fullscreen as FullscreenIcon,
   FullscreenExit as FullscreenExitIcon,
   PlayArrow as PlayIcon,
+  Stop as StopIcon,
   Speed as PerformanceIcon,
   Timeline as TimelineIcon,
   Error as ErrorIcon,
@@ -39,6 +44,7 @@ import { format, formatDistanceToNow } from 'date-fns';
 // Import our enhanced hook
 import { useDetailedMigrationProgress } from '../../hooks/useDetailedMigrationProgress';
 import type { DetailedMigrationProgress, ProcessingContext, BatchProgressSummary, RemainingWorkload, RealTimeMetrics } from '../../hooks/useDetailedMigrationProgress';
+import { apiService } from '../../services/apiService';
 
 interface EnhancedMigrationDashboardProps {
   migrationId: string;
@@ -60,6 +66,8 @@ export const EnhancedMigrationDashboard: React.FC<EnhancedMigrationDashboardProp
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error' | 'warning' | 'info'>('info');
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
 
   // Use our enhanced detailed progress hook
   const {
@@ -119,6 +127,34 @@ export const EnhancedMigrationDashboard: React.FC<EnhancedMigrationDashboardProp
   // Toggle fullscreen mode
   const handleFullscreenToggle = () => {
     setIsFullscreen(!isFullscreen);
+  };
+
+  // Handle cancel migration
+  const handleCancelClick = () => {
+    setCancelDialogOpen(true);
+  };
+
+  const handleCancelConfirm = async () => {
+    setIsCancelling(true);
+    try {
+      await apiService.cancelMigration(migrationId);
+      setSnackbarMessage('🛑 Migration cancelled successfully!');
+      setSnackbarSeverity('warning');
+      setSnackbarOpen(true);
+      setCancelDialogOpen(false);
+    } catch (error) {
+      setSnackbarMessage(`❌ Failed to cancel migration: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      setSnackbarSeverity('error');
+      setSnackbarOpen(true);
+    } finally {
+      setIsCancelling(false);
+    }
+  };
+
+  const handleCancelDialogClose = () => {
+    if (!isCancelling) {
+      setCancelDialogOpen(false);
+    }
   };
 
   // Calculate display values
@@ -208,6 +244,22 @@ export const EnhancedMigrationDashboard: React.FC<EnhancedMigrationDashboardProp
                   <RefreshIcon />
                 </IconButton>
               </Tooltip>
+
+              {/* Cancel button - only show for running migrations */}
+              {progress?.status === 'in_progress' || progress?.status === 'inprogress' || progress?.status === 'running' ? (
+                <Tooltip title="Cancel migration">
+                  <Button
+                    variant="outlined"
+                    color="error"
+                    size="small"
+                    startIcon={<StopIcon />}
+                    onClick={handleCancelClick}
+                    disabled={isCancelling}
+                  >
+                    {isCancelling ? 'Cancelling...' : 'Cancel'}
+                  </Button>
+                </Tooltip>
+              ) : null}
               
               <Tooltip title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}>
                 <IconButton onClick={handleFullscreenToggle}>
@@ -586,6 +638,55 @@ export const EnhancedMigrationDashboard: React.FC<EnhancedMigrationDashboardProp
           </Stack>
         </Box>
       )}
+
+      {/* Cancel Confirmation Dialog */}
+      <Dialog
+        open={cancelDialogOpen}
+        onClose={handleCancelDialogClose}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box display="flex" alignItems="center" gap={1}>
+            <StopIcon color="error" />
+            Cancel Migration
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Typography gutterBottom>
+            Are you sure you want to cancel this migration?
+          </Typography>
+          <Typography variant="body2" color="textSecondary" gutterBottom>
+            <strong>Migration ID:</strong> {migrationId}
+          </Typography>
+          <Typography variant="body2" color="textSecondary" gutterBottom>
+            <strong>Current Progress:</strong> {displayValues?.overallProgress?.toFixed(1) || 0}% ({progress?.processedEntities || 0}/{progress?.totalEntities || 0} entities)
+          </Typography>
+          <Alert severity="warning" sx={{ mt: 2 }}>
+            <Typography variant="body2">
+              <strong>This action cannot be undone.</strong> The migration will stop gracefully after completing the current batch, 
+              but all progress will be lost and you'll need to restart the migration from the beginning.
+            </Typography>
+          </Alert>
+        </DialogContent>
+        <DialogActions>
+          <Button 
+            onClick={handleCancelDialogClose} 
+            disabled={isCancelling}
+          >
+            Keep Running
+          </Button>
+          <Button 
+            onClick={handleCancelConfirm} 
+            color="error" 
+            variant="contained"
+            disabled={isCancelling}
+            startIcon={isCancelling ? <CircularProgress size={16} /> : <StopIcon />}
+          >
+            {isCancelling ? 'Cancelling...' : 'Cancel Migration'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Snackbar for notifications */}
       <Snackbar 

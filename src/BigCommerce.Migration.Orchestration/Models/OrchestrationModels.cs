@@ -197,6 +197,23 @@ public class EntityMigrationRequest
     /// </summary>
     public MigrationSettings? Settings { get; set; }
     
+    /// <summary>
+    /// Indicates if the migration has been cancelled (for fast token-based checking)
+    /// This is set by the orchestrator based on external storage checks to avoid
+    /// repeated external storage calls in activities
+    /// </summary>
+    public bool IsCancelled { get; set; }
+    
+    /// <summary>
+    /// Cancellation reason (if cancelled)
+    /// </summary>
+    public string? CancellationReason { get; set; }
+    
+    /// <summary>
+    /// When the cancellation was detected
+    /// </summary>
+    public DateTime? CancelledAt { get; set; }
+    
     private static readonly string[] ValidEntityTypes = 
     {
         "categories", "products", "brands", "variants", "images", "modifiers"
@@ -301,10 +318,31 @@ public class BatchProcessingRequest
     public bool UseDirectPagination { get; set; }
     
     /// <summary>
+    /// Indicates if the migration has been cancelled (for fast token-based checking)
+    /// This is set by the orchestrator to avoid repeated external storage calls in activities
+    /// </summary>
+    public bool IsCancelled { get; set; }
+    
+    /// <summary>
+    /// Cancellation reason (if cancelled)
+    /// </summary>
+    public string? CancellationReason { get; set; }
+    
+    /// <summary>
+    /// When the cancellation was detected
+    /// </summary>
+    public DateTime? CancelledAt { get; set; }
+    
+    /// <summary>
     /// Additional data for passing context between activities
     /// Used for preserving error details without causing orchestration replay
     /// </summary>
     public Dictionary<string, object> AdditionalData { get; set; } = new();
+
+    /// <summary>
+    /// Timestamp when the batch processing request was created (from orchestrator for determinism)
+    /// </summary>
+    public DateTime Timestamp { get; set; } = DateTime.UtcNow;
     
     /// <summary>
     /// Validates the batch processing request
@@ -584,6 +622,7 @@ public class CheckRateLimitRequest
 
 /// <summary>
 /// Request model for updating entity progress
+/// Phase 4.1: Enhanced with soft cancellation token support for efficient cancellation propagation
 /// </summary>
 public class UpdateEntityProgressRequest
 {
@@ -631,10 +670,32 @@ public class UpdateEntityProgressRequest
     /// Total number of batches (optional)
     /// </summary>
     public int TotalBatches { get; set; }
+
+    /// <summary>
+    /// Phase 4.1: Soft cancellation token - indicates if the migration is cancelled
+    /// This is passed from orchestrator to avoid storage calls in activities
+    /// </summary>
+    public bool IsCancelled { get; set; }
+
+    /// <summary>
+    /// Phase 4.1: Cancellation reason (if cancelled)
+    /// </summary>
+    public string? CancellationReason { get; set; }
+
+    /// <summary>
+    /// Phase 4.1: When the cancellation was detected (if cancelled)
+    /// </summary>
+    public DateTime? CancelledAt { get; set; }
+
+    /// <summary>
+    /// Phase 4.1: Timestamp for this progress update (passed from orchestrator for determinism)
+    /// </summary>
+    public DateTime Timestamp { get; set; } = DateTime.UtcNow;
 }
 
 /// <summary>
 /// Request model for starting entity processing
+/// Phase 4.1: Enhanced with soft cancellation token support for efficient cancellation propagation
 /// </summary>
 public class StartEntityProcessingRequest
 {
@@ -652,4 +713,25 @@ public class StartEntityProcessingRequest
     /// Total number of entities to process
     /// </summary>
     public int TotalCount { get; set; }
+
+    /// <summary>
+    /// Phase 4.1: Soft cancellation token - indicates if the migration is cancelled
+    /// This is passed from orchestrator to avoid storage calls in activities
+    /// </summary>
+    public bool IsCancelled { get; set; }
+
+    /// <summary>
+    /// Phase 4.1: Cancellation reason (if cancelled)
+    /// </summary>
+    public string? CancellationReason { get; set; }
+
+    /// <summary>
+    /// Phase 4.1: When the cancellation was detected (if cancelled)
+    /// </summary>
+    public DateTime? CancelledAt { get; set; }
+
+    /// <summary>
+    /// Phase 4.1: Timestamp for this request (passed from orchestrator for determinism)
+    /// </summary>
+    public DateTime Timestamp { get; set; } = DateTime.UtcNow;
 } 

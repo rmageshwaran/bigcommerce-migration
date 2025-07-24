@@ -220,7 +220,7 @@ namespace BigCommerce.Migration.UnitTests.Functions
             Assert.NotNull(result);
             Assert.Equal("error", result.Target);
             Assert.Single(result.Arguments);
-            Assert.Equal("Invalid message", result.Arguments[0]);
+            Assert.Equal("Invalid JSON", result.Arguments[0]);
         }
 
         [Theory]
@@ -262,7 +262,7 @@ namespace BigCommerce.Migration.UnitTests.Functions
         }
 
         [Fact]
-        public void ProcessProgressEvents_WithNullDeserialization_ShouldLogWarning()
+        public void ProcessProgressEvents_WithNullDeserialization_ShouldLogError()
         {
             // Arrange
             var nullJson = "null";
@@ -273,9 +273,9 @@ namespace BigCommerce.Migration.UnitTests.Functions
             // Assert
             _mockLogger.Verify(
                 x => x.Log(
-                    LogLevel.Warning,
+                    LogLevel.Error,
                     It.IsAny<EventId>(),
-                    It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Failed to deserialize progress event")),
+                    It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Failed to parse progress event JSON")),
                     It.IsAny<Exception>(),
                     It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
                 Times.Once);
@@ -360,18 +360,18 @@ namespace BigCommerce.Migration.UnitTests.Functions
             // Assert - Should log processing and broadcasting messages
             _mockLogger.Verify(
                 x => x.Log(
-                    LogLevel.Debug,
+                    LogLevel.Information,
                     It.IsAny<EventId>(),
-                    It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Processing progress event from queue")),
+                    It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("About to broadcast via SignalR")),
                     It.IsAny<Exception>(),
                     It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
                 Times.Once);
 
             _mockLogger.Verify(
                 x => x.Log(
-                    LogLevel.Debug,
+                    LogLevel.Information,
                     It.IsAny<EventId>(),
-                    It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Broadcasting progress event via SignalR")),
+                    It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("About to broadcast via SignalR")),
                     It.IsAny<Exception>(),
                     It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
                 Times.Once);
@@ -390,7 +390,7 @@ namespace BigCommerce.Migration.UnitTests.Functions
 
             // Should have specific methods for queue processing, negotiation, and connection handling
             Assert.Contains(methods, m => m.Name == "ProcessProgressEvents");
-            Assert.Contains(methods, m => m.Name == "GetSignalRInfo");
+            Assert.Contains(methods, m => m.Name == "GetSignalRConnectionInfo");
             Assert.Contains(methods, m => m.Name == "OnConnected");
             Assert.Contains(methods, m => m.Name == "OnDisconnected");
         }

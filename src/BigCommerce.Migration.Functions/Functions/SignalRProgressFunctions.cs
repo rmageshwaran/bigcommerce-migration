@@ -28,6 +28,7 @@ namespace BigCommerce.Migration.Functions.Functions
         /// <summary>
         /// Processes progress events from the queue and broadcasts them via SignalR
         /// SOLID: Single Responsibility - handles progress event broadcasting only
+        /// Phase 4.2: Enhanced with soft cancellation filtering to prevent broadcasting for cancelled migrations
         /// </summary>
         [Function("ProcessProgressEvents")]
         [SignalROutput(HubName = "migrationhub", ConnectionStringSetting = "AzureSignalR")]
@@ -95,6 +96,25 @@ namespace BigCommerce.Migration.Functions.Functions
                 _logger.LogInformation("✅ [SIGNALR-FUNC] Successfully deserialized progress event!");
                 _logger.LogInformation("📊 [SIGNALR-FUNC] Event details - MigrationId: {MigrationId}, EventType: {EventType}, HubMethod: {HubMethod}", 
                     progressEvent.MigrationId, progressEvent.EventType, progressEvent.HubMethod);
+
+                // Phase 4.2: Filter out progress events for cancelled migrations
+                // Note: Error and status events are still broadcast (they include cancellation notifications)
+                if (IsProgressTypeEvent(progressEvent) && progressEvent.IsCancelled)
+                {
+                    _logger.LogInformation("🛑 [SOFT-CANCEL] Skipping SignalR broadcast for cancelled migration {MigrationId}, EventType: {EventType}. Reason: {Reason}", 
+                        progressEvent.MigrationId, progressEvent.EventType, progressEvent.CancellationReason ?? "Unknown");
+                    
+                    // Return a cancellation notification instead of progress
+                    return new SignalRMessageAction("migrationCancelled", new object[] { 
+                        new { 
+                            migrationId = progressEvent.MigrationId, 
+                            message = "Migration cancelled - progress updates stopped",
+                            reason = progressEvent.CancellationReason ?? "Unknown",
+                            cancelledAt = progressEvent.CancelledAt,
+                            timestamp = DateTime.UtcNow
+                        } 
+                    });
+                }
 
                 // Log the complete deserialized event for debugging
                 try
@@ -233,6 +253,22 @@ namespace BigCommerce.Migration.Functions.Functions
                     progressEvent.EventType);
                 return new SignalRMessageAction("error", new object[] { "Failed to create message" });
             }
+        }
+
+        /// <summary>
+        /// Phase 4.2: Checks if the progress event is a progress-type event that should be filtered for cancelled migrations
+        /// </summary>
+        private static bool IsProgressTypeEvent(ProgressEvent progressEvent)
+        {
+            return progressEvent.EventType switch
+            {
+                "progress" => true,  // Migration progress events
+                "batch" => true,     // Batch progress events  
+                "entity" => true,    // Entity progress events
+                "error" => false,    // Always broadcast errors for debugging
+                "status" => false,   // Always broadcast status changes (includes cancellation status)
+                _ => true           // Default to checking for unknown event types
+            };
         }
 
         /// <summary>

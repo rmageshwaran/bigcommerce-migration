@@ -8,7 +8,7 @@
     <IsTestProject>true</IsTestProject>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <WarningsAsErrors />
-    <NoWarn>$(NoWarn);xUnit1012</NoWarn>
+    <NoWarn>$(NoWarn);xUnit1012;CS1998</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

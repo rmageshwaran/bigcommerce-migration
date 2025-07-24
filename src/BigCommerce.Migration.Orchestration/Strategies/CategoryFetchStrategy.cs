@@ -85,7 +85,7 @@ public class CategoryFetchStrategy : IEntityFetchStrategy
         }
 
         // ✅ HIERARCHICAL SORTING: Sort categories so parents come before children
-        var sortedCategories = SortCategoriesHierarchically(allCategories);
+        var sortedCategories = SortCategoriesHierarchically(allCategories, cancellationToken);
         
         // Filter to only the requested categories while preserving hierarchical order
         var requestedEntityIdsSet = new HashSet<string>(entityIds);
@@ -125,7 +125,7 @@ public class CategoryFetchStrategy : IEntityFetchStrategy
     /// <summary>
     /// Sorts categories hierarchically ensuring parents come before children
     /// </summary>
-    private static List<Dictionary<string, object>> SortCategoriesHierarchically(List<Dictionary<string, object>> categories)
+    private static List<Dictionary<string, object>> SortCategoriesHierarchically(List<Dictionary<string, object>> categories, CancellationToken cancellationToken = default)
     {
         var sortedCategories = new List<Dictionary<string, object>>();
         var categoryMap = categories.ToDictionary(
@@ -139,6 +139,9 @@ public class CategoryFetchStrategy : IEntityFetchStrategy
 
         while (currentLevelParentIds.Any() && sortedCategories.Count < categories.Count)
         {
+            // Check for cancellation between processing levels (for large category trees)
+            cancellationToken.ThrowIfCancellationRequested();
+            
             var nextLevelParentIds = new HashSet<string>();
 
             foreach (var category in categories)

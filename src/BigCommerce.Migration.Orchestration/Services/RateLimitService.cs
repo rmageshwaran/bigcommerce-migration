@@ -154,8 +154,8 @@ public class RateLimitService : IRateLimitService
                 var requestsInWindow = storeLimit.RequestTimes.Count;
                 var canProceed = requestsInWindow < 12;
                 
-                // ✅ TESTING: Use reduced delay (5 seconds) for better real-time observation
-                var delayMs = canProceed ? 0 : 5000; // 5 seconds instead of original 60 seconds
+                // ✅ TESTING: Use reduced delay (2 seconds) for better real-time observation
+                var delayMs = canProceed ? 0 : 2000; // 2 seconds instead of original 60 seconds
                 
                 _logger.LogDebug("Rate limit check for store {StoreId}: {RequestsInWindow}/12 requests, CanProceed: {CanProceed}, DelayMs: {DelayMs}", 
                     storeId, requestsInWindow, canProceed, delayMs);

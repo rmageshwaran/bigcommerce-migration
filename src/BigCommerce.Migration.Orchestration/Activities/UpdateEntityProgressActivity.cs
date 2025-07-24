@@ -23,6 +23,7 @@ public class UpdateEntityProgressActivity
 
     /// <summary>
     /// Updates entity migration progress
+    /// Phase 4.1: Enhanced with soft cancellation check from request parameter (no storage calls)
     /// </summary>
     /// <param name="progressUpdate">Progress update data</param>
     /// <param name="cancellationToken">Cancellation token</param>
@@ -35,6 +36,14 @@ public class UpdateEntityProgressActivity
             
             var migrationId = progressUpdate.MigrationId;
             var entityType = progressUpdate.EntityType;
+
+            // Phase 4.1: Check soft cancellation token from request (no storage calls)
+            if (progressUpdate.IsCancelled)
+            {
+                _logger.LogInformation("🛑 [SOFT-CANCEL] Skipping progress update for cancelled migration {MigrationId}, EntityType: {EntityType}. Reason: {Reason}", 
+                    migrationId, entityType, progressUpdate.CancellationReason ?? "Unknown");
+                return;
+            }
             
             _logger.LogInformation("🔄 [UPDATE-PROGRESS] Starting progress update for {EntityType} in migration {MigrationId}: Phase={Phase}, Processed={ProcessedEntities}/{TotalEntities}, Success={SuccessfulEntities}, Failed={FailedEntities}", 
                 entityType, migrationId, progressUpdate.Phase, progressUpdate.ProcessedEntities, progressUpdate.TotalEntities, progressUpdate.SuccessfulEntities, progressUpdate.FailedEntities);
@@ -51,7 +60,11 @@ public class UpdateEntityProgressActivity
                 CurrentBatch = progressUpdate.CurrentBatch,
                 TotalBatches = progressUpdate.TotalBatches,
                 StatusMessage = $"Processing {entityType}: {progressUpdate.ProcessedEntities}/{progressUpdate.TotalEntities} entities",
-                Timestamp = DateTime.UtcNow
+                Timestamp = progressUpdate.Timestamp, // Phase 4.1: Use deterministic timestamp from orchestrator
+                // Phase 4.2: Pass soft cancellation state to ProgressTracker for SignalR filtering
+                IsCancelled = progressUpdate.IsCancelled,
+                CancellationReason = progressUpdate.CancellationReason,
+                CancelledAt = progressUpdate.CancelledAt
             };
 
             _logger.LogInformation("📈 [UPDATE-PROGRESS] Calling ProgressTracker.UpdateProgressAsync for migration {MigrationId}", migrationId);

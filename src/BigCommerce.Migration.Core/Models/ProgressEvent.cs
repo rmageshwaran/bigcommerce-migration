@@ -7,6 +7,7 @@ namespace BigCommerce.Migration.Core.Models
     /// Base class for all SignalR progress events sent through Azure Storage Queues
     /// SOLID: Single Responsibility - represents a progress event for SignalR broadcasting
     /// Queue-based approach: Decouples SignalR broadcasting from orchestrators
+    /// Phase 4.2: Enhanced with soft cancellation token support for efficient cancellation filtering
     /// </summary>
     [JsonPolymorphic(TypeDiscriminatorPropertyName = "eventType")]
     [JsonDerivedType(typeof(MigrationProgressEvent), "progress")]
@@ -45,6 +46,22 @@ namespace BigCommerce.Migration.Core.Models
         /// Optional group name to broadcast to specific group
         /// </summary>
         public string? GroupName { get; set; }
+
+        /// <summary>
+        /// Phase 4.2: Soft cancellation token - indicates if the migration is cancelled
+        /// This is passed from orchestrator to avoid storage calls in SignalR functions
+        /// </summary>
+        public bool IsCancelled { get; set; }
+
+        /// <summary>
+        /// Phase 4.2: Cancellation reason (if cancelled)
+        /// </summary>
+        public string? CancellationReason { get; set; }
+
+        /// <summary>
+        /// Phase 4.2: When the cancellation was detected (if cancelled)
+        /// </summary>
+        public DateTime? CancelledAt { get; set; }
     }
 
     /// <summary>
@@ -238,6 +255,15 @@ namespace BigCommerce.Migration.Core.Models
         /// Error message to display
         /// </summary>
         public string Message { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Error property for backward compatibility (aliases Message)
+        /// </summary>
+        public string Error 
+        { 
+            get => Message; 
+            set => Message = value; 
+        }
 
         /// <summary>
         /// Entity type where error occurred (optional)

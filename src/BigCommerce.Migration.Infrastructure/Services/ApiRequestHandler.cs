@@ -58,6 +58,9 @@ public class ApiRequestHandler : IApiRequestHandler
             // Execute the HTTP request
             using var response = await _httpClient.SendAsync(httpRequest, cancellationToken);
 
+            // Check for cancellation after HTTP request but before processing
+            cancellationToken.ThrowIfCancellationRequested();
+
             // Record the API call for rate limiting tracking
             await _rateLimitService.RecordApiCallAsync(
                 request.StoreConfiguration.StoreId ?? string.Empty,
@@ -67,7 +70,7 @@ public class ApiRequestHandler : IApiRequestHandler
                 cancellationToken);
 
             // Handle the response
-            return await ProcessResponseAsync<T>(response, request, stopwatch.Elapsed);
+            return await ProcessResponseAsync<T>(response, request, stopwatch.Elapsed, cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -78,8 +81,8 @@ public class ApiRequestHandler : IApiRequestHandler
         {
             _logger.LogError(ex, "Error executing request to {Url}", request.Url);
             
-            // Log error to OpenSearch
-            await LogErrorToOpenSearch(request, ex, stopwatch.Elapsed);
+            // Log error to OpenSearch (use separate cancellation token to avoid cancellation during error logging)
+            await LogErrorToOpenSearch(request, ex, stopwatch.Elapsed, CancellationToken.None);
             throw;
         }
     }
@@ -104,6 +107,9 @@ public class ApiRequestHandler : IApiRequestHandler
 
             // Execute the HTTP request
             using var response = await _httpClient.SendAsync(httpRequest, cancellationToken);
+
+            // Check for cancellation after HTTP request but before processing
+            cancellationToken.ThrowIfCancellationRequested();
 
             // Record the API call for rate limiting tracking
             await _rateLimitService.RecordApiCallAsync(
@@ -131,8 +137,8 @@ public class ApiRequestHandler : IApiRequestHandler
         {
             _logger.LogError(ex, "Error executing request to {Url}", request.Url);
             
-            // Log error to OpenSearch
-            await LogErrorToOpenSearch(request, ex, stopwatch.Elapsed);
+            // Log error to OpenSearch (use separate cancellation token to avoid cancellation during error logging)
+            await LogErrorToOpenSearch(request, ex, stopwatch.Elapsed, CancellationToken.None);
             throw;
         }
     }
@@ -188,14 +194,17 @@ public class ApiRequestHandler : IApiRequestHandler
     /// <summary>
     /// Processes the HTTP response and deserializes it to the expected type
     /// </summary>
-    private async Task<T> ProcessResponseAsync<T>(HttpResponseMessage response, ApiRequest request, TimeSpan elapsed)
+    private async Task<T> ProcessResponseAsync<T>(HttpResponseMessage response, ApiRequest request, TimeSpan elapsed, CancellationToken cancellationToken = default)
     {
         if (response.IsSuccessStatusCode)
         {
-            var content = await response.Content.ReadAsStringAsync();
+            var content = await response.Content.ReadAsStringAsync(cancellationToken);
+            
+            // Check for cancellation before expensive deserialization
+            cancellationToken.ThrowIfCancellationRequested();
             
             // Log performance metrics
-            await LogPerformanceMetrics(request, elapsed, true);
+            await LogPerformanceMetrics(request, elapsed, true, cancellationToken);
 
             // Handle different response types
             if (typeof(T) == typeof(string))
@@ -206,6 +215,9 @@ public class ApiRequestHandler : IApiRequestHandler
             // Try to deserialize JSON response
             try
             {
+                // Check for cancellation before JSON deserialization (can be expensive for large responses)
+                cancellationToken.ThrowIfCancellationRequested();
+                
                 var result = JsonSerializer.Deserialize<T>(content, new JsonSerializerOptions
                 {
                     PropertyNameCaseInsensitive = true
@@ -220,8 +232,8 @@ public class ApiRequestHandler : IApiRequestHandler
         }
 
         // Handle error responses
-        var errorContent = await response.Content.ReadAsStringAsync();
-        await LogPerformanceMetrics(request, elapsed, false);
+        var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
+        await LogPerformanceMetrics(request, elapsed, false, cancellationToken);
         
         throw CreateHttpException(response.StatusCode, errorContent, request.Url);
     }
@@ -245,7 +257,7 @@ public class ApiRequestHandler : IApiRequestHandler
     /// <summary>
     /// Logs performance metrics to OpenSearch
     /// </summary>
-    private async Task LogPerformanceMetrics(ApiRequest request, TimeSpan elapsed, bool isSuccessful)
+    private async Task LogPerformanceMetrics(ApiRequest request, TimeSpan elapsed, bool isSuccessful, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -259,7 +271,7 @@ public class ApiRequestHandler : IApiRequestHandler
                 timestamp = DateTime.UtcNow
             };
 
-            await _openSearchService.LogPerformanceMetricsAsync("api_request", elapsed, metrics);
+            await _openSearchService.LogPerformanceMetricsAsync("api_request", elapsed, metrics, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -270,7 +282,7 @@ public class ApiRequestHandler : IApiRequestHandler
     /// <summary>
     /// Logs errors to OpenSearch for monitoring
     /// </summary>
-    private async Task LogErrorToOpenSearch(ApiRequest request, Exception ex, TimeSpan elapsed)
+    private async Task LogErrorToOpenSearch(ApiRequest request, Exception ex, TimeSpan elapsed, CancellationToken cancellationToken = default)
     {
         try
         {

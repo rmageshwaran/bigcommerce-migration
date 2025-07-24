@@ -22,6 +22,12 @@ import {
   MenuItem,
   Pagination,
   Stack,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  DialogContentText,
+  Snackbar,
 } from '@mui/material';
 import {
   Search as SearchIcon,
@@ -30,6 +36,7 @@ import {
   Clear as ClearIcon,
   Visibility as ViewIcon,
   Download as DownloadIcon,
+  Stop as StopIcon,
 } from '@mui/icons-material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
@@ -106,6 +113,16 @@ export const HistoryView: React.FC = () => {
     totalCount: 0,
     pageSize: 50,
   });
+  
+  // Cancel migration state
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [selectedMigrationForCancel, setSelectedMigrationForCancel] = useState<MigrationHistoryItem | null>(null);
+  const [isCancelling, setIsCancelling] = useState(false);
+  
+  // Notification state
+  const [snackbarOpen, setSnackbarOpen] = useState(false);
+  const [snackbarMessage, setSnackbarMessage] = useState('');
+  const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error' | 'warning' | 'info'>('info');
 
   const buildQueryParams = useCallback(() => {
     const params: Record<string, string> = {
@@ -207,6 +224,46 @@ export const HistoryView: React.FC = () => {
       console.log('Exporting migration:', migrationId);
     } catch (err) {
       console.error('Failed to export migration:', err);
+    }
+  };
+
+  // Cancel migration handlers
+  const handleCancelClick = (migration: MigrationHistoryItem) => {
+    setSelectedMigrationForCancel(migration);
+    setCancelDialogOpen(true);
+  };
+
+  const handleCancelCancel = () => {
+    setCancelDialogOpen(false);
+    setSelectedMigrationForCancel(null);
+  };
+
+  const handleCancelConfirm = async () => {
+    if (!selectedMigrationForCancel) return;
+    
+    setIsCancelling(true);
+    try {
+      await apiService.cancelMigration(selectedMigrationForCancel.migrationId);
+      
+      // Refresh the migration list to reflect the cancelled status
+      await fetchMigrationHistory();
+      
+      // Show success notification
+      setSnackbarMessage('🛑 Migration cancelled successfully!');
+      setSnackbarSeverity('warning');
+      setSnackbarOpen(true);
+      setError(null);
+      console.log('Migration cancelled successfully');
+    } catch (err) {
+      console.error('Failed to cancel migration:', err);
+      setSnackbarMessage(`❌ Failed to cancel migration: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      setSnackbarSeverity('error');
+      setSnackbarOpen(true);
+      setError(err instanceof Error ? err.message : 'Failed to cancel migration');
+    } finally {
+      setIsCancelling(false);
+      setCancelDialogOpen(false);
+      setSelectedMigrationForCancel(null);
     }
   };
 
@@ -489,6 +546,7 @@ export const HistoryView: React.FC = () => {
                               <ViewIcon fontSize="small" />
                             </IconButton>
                           </Tooltip>
+                          
                           <Tooltip title="Export">
                             <IconButton
                               size="small"
@@ -497,6 +555,23 @@ export const HistoryView: React.FC = () => {
                               <DownloadIcon fontSize="small" />
                             </IconButton>
                           </Tooltip>
+                          
+                          {/* Cancel button - only show for running migrations - positioned last */}
+                          {(migration.status === 'running' || 
+                            migration.status.toLowerCase() === 'inprogress' || 
+                            migration.status.toLowerCase() === 'in-progress' ||
+                            migration.status.toLowerCase() === 'in_progress') && (
+                            <Tooltip title="Cancel Migration">
+                              <IconButton
+                                size="small"
+                                color="error"
+                                onClick={() => handleCancelClick(migration)}
+                                disabled={isCancelling}
+                              >
+                                <StopIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          )}
                         </Stack>
                       </TableCell>
                     </TableRow>
@@ -533,6 +608,76 @@ export const HistoryView: React.FC = () => {
           )}
         </CardContent>
       </Card>
+
+      {/* Cancel Confirmation Dialog */}
+      <Dialog
+        open={cancelDialogOpen}
+        onClose={handleCancelCancel}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Cancel Migration</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Are you sure you want to cancel the migration for:
+          </DialogContentText>
+          {selectedMigrationForCancel && (
+            <Box sx={{ mt: 2, p: 2, bgcolor: 'background.default', borderRadius: 1 }}>
+              <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
+                <strong>Migration ID:</strong> {selectedMigrationForCancel.migrationId}
+              </Typography>
+              <Typography variant="body2">
+                <strong>Source Store:</strong> {selectedMigrationForCancel.sourceStore}
+              </Typography>
+              <Typography variant="body2">
+                <strong>Destination Store:</strong> {selectedMigrationForCancel.destinationStore}
+              </Typography>
+              <Typography variant="body2">
+                <strong>Progress:</strong> {selectedMigrationForCancel.percentageCompleted.toFixed(1)}% 
+                ({selectedMigrationForCancel.processedEntities} / {selectedMigrationForCancel.totalEntities} entities)
+              </Typography>
+            </Box>
+          )}
+          <DialogContentText sx={{ mt: 2 }}>
+            <strong>Warning:</strong> This action cannot be undone. The migration will be stopped and any 
+            partial progress may be lost. You will need to restart the migration from the beginning.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button 
+            onClick={handleCancelCancel}
+            disabled={isCancelling}
+          >
+            Keep Running
+          </Button>
+          <Button 
+            onClick={handleCancelConfirm}
+            color="error"
+            variant="contained"
+            disabled={isCancelling}
+            startIcon={isCancelling ? <CircularProgress size={16} /> : <StopIcon />}
+          >
+            {isCancelling ? 'Cancelling...' : 'Cancel Migration'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Success/Error Notification */}
+      <Snackbar 
+        open={snackbarOpen} 
+        autoHideDuration={6000} 
+        onClose={() => setSnackbarOpen(false)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+      >
+        <Alert 
+          onClose={() => setSnackbarOpen(false)} 
+          severity={snackbarSeverity}
+          variant="filled"
+          sx={{ width: '100%' }}
+        >
+          {snackbarMessage}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 }; 

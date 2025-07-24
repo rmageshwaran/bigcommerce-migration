@@ -392,7 +392,8 @@ public class ProgressTracker : IProgressTracker
     }
     
     /// <summary>
-    /// Updates progress from a progress update
+    /// Updates the migration progress from an update object
+    /// Phase 4.2: Enhanced to propagate soft cancellation state for SignalR filtering
     /// </summary>
     /// <param name="progress">Migration progress to update</param>
     /// <param name="update">Progress update information</param>
@@ -401,6 +402,11 @@ public class ProgressTracker : IProgressTracker
         progress.CurrentPhase = update.Phase;
         progress.CurrentEntity = update.EntityType;
         progress.LastUpdated = update.Timestamp;
+        
+        // Phase 4.2: Propagate soft cancellation state from update to progress
+        progress.IsCancelled = update.IsCancelled;
+        progress.CancellationReason = update.CancellationReason;
+        progress.CancelledAt = update.CancelledAt;
         
         // Update entity-specific progress if exists
         if (progress.EntityProgress.ContainsKey(update.EntityType))
@@ -587,6 +593,7 @@ public class ProgressTracker : IProgressTracker
     /// <summary>
     /// Publishes a migration progress event to the queue for SignalR broadcasting
     /// SOLID: Single Responsibility - handles only migration progress event publishing
+    /// Phase 4.2: Enhanced to include soft cancellation state in progress events
     /// </summary>
     private async Task PublishMigrationProgressEventAsync(string migrationId, MigrationProgress progress, CancellationToken cancellationToken)
     {
@@ -604,7 +611,11 @@ public class ProgressTracker : IProgressTracker
                 ProcessedEntities = progress.ProcessedEntities,
                 FailedEntities = progress.FailedEntities,
                 CurrentEntityType = progress.CurrentEntity,
-                EstimatedTimeRemaining = progress.EstimatedTimeRemaining
+                EstimatedTimeRemaining = progress.EstimatedTimeRemaining,
+                // Phase 4.2: Include soft cancellation state in progress event
+                IsCancelled = progress.IsCancelled ?? false,
+                CancellationReason = progress.CancellationReason,
+                CancelledAt = progress.CancelledAt
             };
 
             _logger.LogInformation("📡 [PROGRESS-TRACKER] Calling ProgressEventPublisher for MigrationId: {MigrationId}", migrationId);
@@ -621,6 +632,7 @@ public class ProgressTracker : IProgressTracker
     /// <summary>
     /// Publishes an entity progress event to the queue for SignalR broadcasting
     /// SOLID: Single Responsibility - handles only entity progress event publishing
+    /// Phase 4.2: Enhanced to include soft cancellation state in entity progress events
     /// </summary>
     private async Task PublishEntityProgressEventAsync(string migrationId, string entityType, MigrationProgress progress, CancellationToken cancellationToken)
     {
@@ -637,7 +649,11 @@ public class ProgressTracker : IProgressTracker
                 SuccessCount = entityProgress?.SuccessCount ?? 0,
                 FailureCount = entityProgress?.FailureCount ?? 0,
                 Status = entityProgress?.Status ?? "starting",
-                ProcessingTime = entityProgress?.ProcessingTime
+                ProcessingTime = entityProgress?.ProcessingTime,
+                // Phase 4.2: Include soft cancellation state in entity progress event
+                IsCancelled = progress.IsCancelled ?? false,
+                CancellationReason = progress.CancellationReason,
+                CancelledAt = progress.CancelledAt
             };
 
             await _progressEventPublisher.PublishEntityProgressAsync(entityEvent, cancellationToken);
@@ -652,6 +668,7 @@ public class ProgressTracker : IProgressTracker
     /// <summary>
     /// Publishes a batch progress event to the queue for SignalR broadcasting
     /// SOLID: Single Responsibility - handles only batch progress event publishing
+    /// Phase 4.2: Enhanced to include soft cancellation state in batch progress events
     /// </summary>
     private async Task PublishBatchProgressEventAsync(string migrationId, string entityType, int batchNumber, int processedCount, int successCount, int failureCount, CancellationToken cancellationToken)
     {
@@ -670,7 +687,11 @@ public class ProgressTracker : IProgressTracker
                 ProcessedCount = processedCount,
                 FailedCount = failureCount,
                 Status = failureCount > 0 ? "completed_with_errors" : "completed",
-                ProcessingTime = TimeSpan.FromSeconds(1) // Approximate - could be tracked more precisely
+                ProcessingTime = TimeSpan.FromSeconds(1), // Approximate - could be tracked more precisely
+                // Phase 4.2: Include soft cancellation state in batch progress event
+                IsCancelled = progress.IsCancelled ?? false,
+                CancellationReason = progress.CancellationReason,
+                CancelledAt = progress.CancelledAt
             };
 
             await _progressEventPublisher.PublishBatchProgressAsync(batchEvent, cancellationToken);

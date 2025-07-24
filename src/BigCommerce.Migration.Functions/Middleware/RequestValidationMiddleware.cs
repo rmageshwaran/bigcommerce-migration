@@ -80,13 +80,14 @@ public class RequestValidationMiddleware : IFunctionsWorkerMiddleware
         // Validate HTTP method
         ValidateHttpMethod(request, result);
 
-        // Skip body validation for SignalR endpoints
+        // Skip body validation for SignalR endpoints and cancel endpoints
                     bool isNegotiateEndpoint = path.EndsWith("/negotiate", StringComparison.OrdinalIgnoreCase);
         bool isTestSignalREndpoint = path.EndsWith("/test-signalr", StringComparison.OrdinalIgnoreCase);
         bool isSignalRJoinEndpoint = path.Contains("/signalr/join/", StringComparison.OrdinalIgnoreCase);
         bool isSignalRLeaveEndpoint = path.Contains("/signalr/leave/", StringComparison.OrdinalIgnoreCase);
         bool isSignalRTestEndpoint = path.Contains("/signalr/test", StringComparison.OrdinalIgnoreCase);
-        bool skipBodyValidation = isNegotiateEndpoint || isTestSignalREndpoint || isSignalRJoinEndpoint || isSignalRLeaveEndpoint || isSignalRTestEndpoint;
+        bool isCancelEndpoint = path.Contains("/migrations/") && path.EndsWith("/cancel", StringComparison.OrdinalIgnoreCase);
+        bool skipBodyValidation = isNegotiateEndpoint || isTestSignalREndpoint || isSignalRJoinEndpoint || isSignalRLeaveEndpoint || isSignalRTestEndpoint || isCancelEndpoint;
         
         // Validate content type for POST/PUT requests (except SignalR endpoints)
         if (IsBodyRequired(request.Method) && !skipBodyValidation)

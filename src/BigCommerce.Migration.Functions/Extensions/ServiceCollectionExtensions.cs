@@ -446,6 +446,9 @@ public static class ServiceCollectionExtensions
 
         // Register progress event publisher for queue-based SignalR broadcasting
         services.TryAddSingleton<IProgressEventPublisher, ProgressEventPublisher>();
+        
+        // Register progress queue service for progress event publishing (separate from migration queues)
+        services.TryAddSingleton<IProgressQueueService, AzureProgressQueueService>();
 
         return services;
     }

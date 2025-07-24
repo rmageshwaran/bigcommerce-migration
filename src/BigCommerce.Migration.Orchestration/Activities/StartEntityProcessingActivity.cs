@@ -23,6 +23,7 @@ public class StartEntityProcessingActivity
 
     /// <summary>
     /// Starts entity processing and initializes progress tracking
+    /// Phase 4.1: Enhanced with soft cancellation check from request parameter (no storage calls)
     /// </summary>
     /// <param name="request">Start entity processing request</param>
     /// <param name="cancellationToken">Cancellation token</param>
@@ -36,6 +37,14 @@ public class StartEntityProcessingActivity
             var migrationId = request.MigrationId;
             var entityType = request.EntityType;
             var totalCount = request.TotalCount;
+
+            // Phase 4.1: Check soft cancellation token from request (no storage calls)
+            if (request.IsCancelled)
+            {
+                _logger.LogInformation("🛑 [SOFT-CANCEL] Skipping entity processing start for cancelled migration {MigrationId}, EntityType: {EntityType}. Reason: {Reason}", 
+                    migrationId, entityType, request.CancellationReason ?? "Unknown");
+                return;
+            }
             
             _logger.LogInformation("Starting {EntityType} processing for migration {MigrationId}: {TotalCount} entities", 
                 entityType, migrationId, totalCount);

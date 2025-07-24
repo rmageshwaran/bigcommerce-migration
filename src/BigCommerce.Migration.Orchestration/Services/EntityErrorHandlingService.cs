@@ -501,69 +501,6 @@ public class EntityErrorHandlingService : IEntityErrorHandlingService
             return null;
         }
     }
-    
-    /// <summary>
-    /// Extracts entity ID from entity data with fallback strategies
-    /// </summary>
-    /// <param name="entity">Entity data dictionary</param>
-    /// <param name="entityType">Type of entity</param>
-    /// <returns>Entity ID or null if not found</returns>
-    private string? ExtractEntityId(Dictionary<string, object> entity, string entityType)
-    {
-        if (entity == null || entity.Count == 0)
-            return null;
-
-        try
-        {
-            // ✅ Entity-specific ID field mapping (preferred order)
-            var idFields = entityType.ToLowerInvariant() switch
-            {
-                "categories" or "category" => new[] { "id", "category_id", "Id", "ID" },
-                "products" or "product" => new[] { "id", "product_id", "Id", "ID" },
-                "brands" or "brand" => new[] { "id", "brand_id", "Id", "ID" },
-                "variants" or "variant" => new[] { "id", "variant_id", "Id", "ID" },
-                "images" or "image" => new[] { "id", "image_id", "Id", "ID" },
-                "modifiers" or "modifier" => new[] { "id", "modifier_id", "Id", "ID" },
-                _ => new[] { "id", "Id", "ID", "entity_id", "entityId" }
-            };
-            
-            _logger.LogDebug("Checking ID fields for {EntityType}: {Fields}", entityType, string.Join(", ", idFields));
-            
-            // Try to find ID in preferred order
-            foreach (var field in idFields)
-            {
-                if (entity.TryGetValue(field, out var idValue) && idValue != null)
-                {
-                    var idString = idValue.ToString();
-                    if (!string.IsNullOrWhiteSpace(idString))
-                    {
-                        _logger.LogDebug("Found entity ID '{Id}' in field '{Field}' for {EntityType}", idString, field, entityType);
-                        return idString;
-                    }
-                }
-                else
-                {
-                    _logger.LogDebug("Field '{Field}' not found or null for {EntityType}", field, entityType);
-                }
-            }
-            
-            // ✅ Fallback: Use entity name with prefix if no ID found
-            var entityName = ExtractEntityName(entity, entityType);
-            if (!string.IsNullOrWhiteSpace(entityName))
-            {
-                _logger.LogDebug("Using entity name '{Name}' as fallback ID for {EntityType}", entityName, entityType);
-                return $"name:{entityName}";
-            }
-            
-            _logger.LogDebug("No ID or name found for {EntityType}", entityType);
-            return null;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to extract entity ID for entity type {EntityType}", entityType);
-            return null;
-        }
-    }
 
     private string SanitizeEntityIdForBlobName(string entityId)
     {

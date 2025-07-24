@@ -82,6 +82,8 @@ export interface MigrationEntityError {
   entityType: string;
   errorMessage: string;
   timestamp: string;
+  requestPayloadBlobUrl?: string;
+  responsePayloadBlobUrl?: string;
 }
 
 export interface MigrationEntityBreakdown {
@@ -385,6 +387,8 @@ export class ApiService {
         entityType: err.entityType || entityType,
         errorMessage: err.errorMessage || err.error || 'Unknown error',
         timestamp: err.timestamp || new Date().toISOString(),
+        requestPayloadBlobUrl: err.requestPayloadBlobUrl, // Include request payload blob URL
+        responsePayloadBlobUrl: err.responsePayloadBlobUrl, // Include response payload blob URL
       }));
     }
     

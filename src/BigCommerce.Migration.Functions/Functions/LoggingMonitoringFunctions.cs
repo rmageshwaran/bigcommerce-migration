@@ -486,7 +486,7 @@ public class LoggingMonitoringFunctions
                 
                 // Return the payload content
                 response.StatusCode = HttpStatusCode.OK;
-                response.Headers.Add("Content-Type", "application/json");
+                // ✅ Fix: Remove Content-Type header - let Azure Functions handle it automatically
                 response.Headers.Add("Content-Disposition", $"attachment; filename=\"{targetFile.Name}\"");
                 
                 await response.WriteStringAsync(payloadContent);
@@ -524,133 +524,6 @@ public class LoggingMonitoringFunctions
             }));
             return response;
         }
-    }
-
-    // Helper methods for data retrieval
-
-
-
-    /// <summary>
-    /// Retrieves error logs from blob storage when OpenSearch is not available
-    /// </summary>
-    private async Task<IEnumerable<object>> GetErrorLogsFromBlobStorageAsync(string? search, DateTime from, DateTime to)
-    {
-        try
-        {
-            var errorLogs = new List<object>();
-            
-            // If search contains a migration ID, look for error payloads for that migration
-            if (!string.IsNullOrEmpty(search) && Guid.TryParse(search, out var migrationId))
-            {
-                // List files in the error-logs container for this migration
-                var errorFiles = await _blobService.ListFilesAsync("error-logs", $"{migrationId}/");
-                
-                foreach (var fileMetadata in errorFiles)
-                {
-                    try
-                    {
-                        // Get the blob URL from metadata
-                        var blobUrl = fileMetadata.Url;
-                        if (!string.IsNullOrEmpty(blobUrl))
-                        {
-                            var blobContent = await _blobService.GetStoredPayloadAsync(blobUrl);
-                            if (!string.IsNullOrEmpty(blobContent))
-                            {
-                                var errorData = JsonSerializer.Deserialize<object>(blobContent);
-                                if (errorData != null)
-                                {
-                                    errorLogs.Add(new
-                                    {
-                                        timestamp = DateTime.UtcNow,
-                                        level = "Error",
-                                        message = $"Error payload from blob: {fileMetadata.Name}",
-                                        source = "BigCommerce.Migration.BlobStorage",
-                                        migrationId = migrationId.ToString(),
-                                        blobName = fileMetadata.Name,
-                                        errorData = errorData
-                                    });
-                                }
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to read error blob: {BlobName}", fileMetadata.Name);
-                    }
-                }
-            }
-            
-            return errorLogs;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to retrieve error logs from blob storage");
-            return Enumerable.Empty<object>();
-        }
-    }
-
-    /// <summary>
-    /// Builds OpenSearch query based on filters
-    /// </summary>
-    private string BuildLogSearchQuery(string? level, string? search)
-    {
-        var queryParts = new List<string>();
-        
-        // Add level filter - handle different field names and log types
-        if (!string.IsNullOrWhiteSpace(level))
-        {
-            if (level.Equals("Error", StringComparison.OrdinalIgnoreCase))
-            {
-                // For Error level, search for errors in OpenSearch service format
-                // Based on the actual document structure: category field with value "Error" (lowercase 'c')
-                queryParts.Add("category:\"Error\"");
-            }
-            else
-            {
-                // For other levels, search in standard log fields
-                queryParts.Add($"(Level:{level} OR level:{level})");
-            }
-        }
-        
-        // Add search filter for migration ID or other text
-        if (!string.IsNullOrWhiteSpace(search))
-        {
-            // Search in multiple fields where migration ID might be stored
-            // Now we have MigrationId field in error documents, so search there too
-            queryParts.Add($"(MigrationId:{search} OR migrationId:{search} OR Context:*{search}* OR context:*{search}*)");
-        }
-        
-        // Combine all parts with AND
-        return string.Join(" AND ", queryParts);
-    }
-
-    /// <summary>
-    /// Fallback method when OpenSearch is unavailable
-    /// </summary>
-    private Task<(List<object> Entries, int TotalCount)> GetFallbackLogEntriesAsync(
-        string? level, DateTime from, DateTime to, string? search, int page, int pageSize)
-    {
-        _logger.LogWarning("Using fallback log data - OpenSearch service unavailable");
-        
-        var entries = new List<object>
-        {
-            new
-            {
-                timestamp = DateTime.UtcNow.AddMinutes(-30),
-                level = "Warning",
-                message = "OpenSearch service is currently unavailable. Showing fallback data.",
-                source = "BigCommerce.Migration.Logs",
-                requestId = Guid.NewGuid().ToString(),
-                properties = new
-                {
-                    machineId = Environment.MachineName,
-                    processId = Environment.ProcessId,
-                    fallback = true
-                }
-            }
-        };
-
-        return Task.FromResult((entries, 1));
     }
 
     private Task<object> GetLogStatisticsAsync(int hours)

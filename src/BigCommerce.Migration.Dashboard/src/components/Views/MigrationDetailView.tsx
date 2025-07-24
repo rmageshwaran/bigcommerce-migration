@@ -59,8 +59,8 @@ interface MigrationError {
   entityId: string;
   entityName?: string;
   entityType: string;
-  error: string;
-  processedAt: string;
+  errorMessage: string;
+  timestamp: string;
   requestPayloadBlobUrl?: string;
   responsePayloadBlobUrl?: string;
 }
@@ -179,10 +179,10 @@ export const MigrationDetailView: React.FC = () => {
         entityId: err.entityId,
         entityName: err.entityName,
         entityType: err.entityType,
-        error: err.errorMessage || 'Unknown error',
-        processedAt: err.timestamp,
-        requestPayloadBlobUrl: (err as any).requestPayloadBlobUrl,
-        responsePayloadBlobUrl: (err as any).responsePayloadBlobUrl,
+        errorMessage: err.errorMessage || 'Unknown error',
+        timestamp: err.timestamp,
+        requestPayloadBlobUrl: err.requestPayloadBlobUrl,
+        responsePayloadBlobUrl: err.responsePayloadBlobUrl,
       }));
       
       setEntityErrors((prev) => ({ ...prev, [entityType]: mappedErrors }));
@@ -279,6 +279,79 @@ export const MigrationDetailView: React.FC = () => {
     } finally {
       setIsCancelling(false);
       setCancelDialogOpen(false);
+    }
+  };
+
+  // Handle payload download using the API endpoint with proper headers
+  const handlePayloadDownload = async (err: MigrationError, payloadType: 'request' | 'response') => {
+    if (!requestId) {
+      alert('Migration ID not available');
+      return;
+    }
+
+    const blobUrl = payloadType === 'request' ? err.requestPayloadBlobUrl : err.responsePayloadBlobUrl;
+    
+    if (!blobUrl) {
+      alert(`${payloadType.charAt(0).toUpperCase() + payloadType.slice(1)} payload not available for this error.`);
+      return;
+    }
+
+    try {
+      // Extract parameters from blob URL
+      // URL format: http://localhost:10000/devstoreaccount1/migration-payloads/{migrationId}/{payloadType}s/{filename}
+      const url = new URL(blobUrl);
+      const pathParts = url.pathname.split('/').filter(part => part.length > 0);
+      
+      // Extract migrationId and requestId from the URL path
+      const migrationId = pathParts[2]; // migration-payloads/{migrationId}
+      const filename = pathParts[pathParts.length - 1]; // Get the filename
+      const requestIdFromUrl = filename.split('_').slice(0, -2).join('_'); // Remove timestamp parts
+      
+      // Create API URL
+      const apiUrl = `/api/logs/payload/${migrationId}/${requestIdFromUrl}/${payloadType}/${err.entityType}`;
+      
+      // Fetch with proper headers instead of window.open()
+      const response = await fetch(apiUrl, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      // Get the JSON content
+      const jsonContent = await response.text();
+      
+      // Create a blob URL and open it in a new tab
+      const blob = new Blob([jsonContent], { type: 'application/json' });
+      const blobUrlToOpen = URL.createObjectURL(blob);
+      
+      // Open the blob URL in a new tab
+      const newWindow = window.open(blobUrlToOpen, '_blank');
+      
+      // Clean up the blob URL after a short delay
+      setTimeout(() => {
+        URL.revokeObjectURL(blobUrlToOpen);
+      }, 1000);
+      
+      // If window was blocked, provide download fallback
+      if (!newWindow) {
+        // Create a download link as fallback
+        const downloadLink = document.createElement('a');
+        downloadLink.href = blobUrlToOpen;
+        downloadLink.download = `${err.entityType}_${payloadType}_payload_${requestIdFromUrl}.json`;
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        document.body.removeChild(downloadLink);
+      }
+      
+    } catch (error) {
+      console.error('Error downloading payload:', error);
+      alert(`Failed to download ${payloadType} payload. Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
@@ -474,21 +547,15 @@ export const MigrationDetailView: React.FC = () => {
                                       .map((err, idx) => (
                                         <TableRow key={`${entity.entityType}-error-${err.entityId || err.entityName || idx}`}>
                                           <TableCell>{err.entityName ? `${err.entityName} (${err.entityId})` : err.entityId}</TableCell>
-                                          <TableCell>{err.error}</TableCell>
-                                          <TableCell>{formatDateTime(err.processedAt)}</TableCell>
+                                          <TableCell>{err.errorMessage}</TableCell>
+                                          <TableCell>{formatDateTime(err.timestamp)}</TableCell>
                                           <TableCell>
                                             <Tooltip title="Download/View Request Payload">
                                               <span>
                                                 <IconButton
                                                   size="small"
                                                   aria-label="Download or view request payload"
-                                                  onClick={() => {
-                                                    if (err.requestPayloadBlobUrl) {
-                                                      window.open(err.requestPayloadBlobUrl, '_blank');
-                                                    } else {
-                                                      alert('Request payload not available for this error.');
-                                                    }
-                                                  }}
+                                                  onClick={() => handlePayloadDownload(err, 'request')}
                                                   disabled={!err.requestPayloadBlobUrl}
                                                   sx={{ color: err.requestPayloadBlobUrl ? 'primary.main' : 'text.disabled' }}
                                                   tabIndex={0}
@@ -504,13 +571,7 @@ export const MigrationDetailView: React.FC = () => {
                                                 <IconButton
                                                   size="small"
                                                   aria-label="Download or view response payload"
-                                                  onClick={() => {
-                                                    if (err.responsePayloadBlobUrl) {
-                                                      window.open(err.responsePayloadBlobUrl, '_blank');
-                                                    } else {
-                                                      alert('Response payload not available for this error.');
-                                                    }
-                                                  }}
+                                                  onClick={() => handlePayloadDownload(err, 'response')}
                                                   disabled={!err.responsePayloadBlobUrl}
                                                   sx={{ color: err.responsePayloadBlobUrl ? 'primary.main' : 'text.disabled' }}
                                                   tabIndex={0}

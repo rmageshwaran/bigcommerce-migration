@@ -66,6 +66,9 @@ services:
       - OpenSearch__MaxRetries=3
       - OpenSearch__EnableDebugMode=true
       
+      # Blob Storage Configuration
+      - ExternalBlobUrl=http://localhost:10000/devstoreaccount1
+      
       # Processing Configuration
       - AppSettings__BatchSize=10
       - AppSettings__MaxConcurrency=3

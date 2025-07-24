@@ -172,8 +172,9 @@ public class BlobService : IBlobService
             _logger.LogInformation("Getting report download URL: {BlobUrl}", blobUrl);
 
             var uri = new Uri(blobUrl);
-            var containerName = uri.Segments[1].TrimEnd('/');
-            var blobName = string.Join("", uri.Segments.Skip(2));
+            // ✅ Fix: Account for storage account name in path
+            var containerName = uri.Segments[2].TrimEnd('/');  // Skip account name, get container
+            var blobName = string.Join("", uri.Segments.Skip(3));  // Skip account + container, get blob path
             
             var containerClient = await GetContainerClientAsync(containerName);
             var blobClient = containerClient.GetBlobClient(blobName);
@@ -251,8 +252,9 @@ public class BlobService : IBlobService
             _logger.LogInformation("Deleting report: {BlobUrl}", blobUrl);
 
             var uri = new Uri(blobUrl);
-            var containerName = uri.Segments[1].TrimEnd('/');
-            var blobName = string.Join("", uri.Segments.Skip(2));
+            // ✅ Fix: Account for storage account name in path
+            var containerName = uri.Segments[2].TrimEnd('/');  // Skip account name, get container
+            var blobName = string.Join("", uri.Segments.Skip(3));  // Skip account + container, get blob path
             
             var containerClient = await GetContainerClientAsync(containerName);
             var blobClient = containerClient.GetBlobClient(blobName);
@@ -363,8 +365,17 @@ public class BlobService : IBlobService
             _logger.LogInformation("Retrieving stored payload: {BlobUrl}", blobUrl);
 
             var uri = new Uri(blobUrl);
-            var containerName = uri.Segments[1].TrimEnd('/');
-            var blobName = string.Join("", uri.Segments.Skip(2));
+            // ✅ Debug: Log all URL segments to understand the structure
+            _logger.LogInformation("URL segments count: {Count}, segments: {Segments}", 
+                uri.Segments.Length, string.Join(" | ", uri.Segments));
+            
+            // ✅ Fix: Account for storage account name in path
+            // URL format: http://azurite:10000/devstoreaccount1/migration-payloads/...
+            // Segments: ["/", "devstoreaccount1/", "migration-payloads/", ...]
+            var containerName = uri.Segments[2].TrimEnd('/');  // Skip account name, get container
+            var blobName = string.Join("", uri.Segments.Skip(3));  // Skip account + container, get blob path
+            
+            _logger.LogInformation("Parsed URL - Container: {Container}, Blob: {Blob}", containerName, blobName);
             
             var containerClient = await GetContainerClientAsync(containerName);
             var blobClient = containerClient.GetBlobClient(blobName);
@@ -433,8 +444,9 @@ public class BlobService : IBlobService
             _logger.LogInformation("Retrieving compressed payload: {BlobUrl}", blobUrl);
 
             var uri = new Uri(blobUrl);
-            var containerName = uri.Segments[1].TrimEnd('/');
-            var blobName = string.Join("", uri.Segments.Skip(2));
+            // ✅ Fix: Account for storage account name in path
+            var containerName = uri.Segments[2].TrimEnd('/');  // Skip account name, get container
+            var blobName = string.Join("", uri.Segments.Skip(3));  // Skip account + container, get blob path
             
             var containerClient = await GetContainerClientAsync(containerName);
             var blobClient = containerClient.GetBlobClient(blobName);
@@ -505,8 +517,9 @@ public class BlobService : IBlobService
             _logger.LogInformation("Downloading file: {BlobUrl}", blobUrl);
 
             var uri = new Uri(blobUrl);
-            var containerName = uri.Segments[1].TrimEnd('/');
-            var blobName = string.Join("", uri.Segments.Skip(2));
+            // ✅ Fix: Account for storage account name in path
+            var containerName = uri.Segments[2].TrimEnd('/');  // Skip account name, get container
+            var blobName = string.Join("", uri.Segments.Skip(3));  // Skip account + container, get blob path
             
             var containerClient = await GetContainerClientAsync(containerName);
             var blobClient = containerClient.GetBlobClient(blobName);
@@ -538,8 +551,9 @@ public class BlobService : IBlobService
             _logger.LogInformation("Getting file metadata: {BlobUrl}", blobUrl);
 
             var uri = new Uri(blobUrl);
-            var containerName = uri.Segments[1].TrimEnd('/');
-            var blobName = string.Join("", uri.Segments.Skip(2));
+            // ✅ Fix: Account for storage account name in path
+            var containerName = uri.Segments[2].TrimEnd('/');  // Skip account name, get container
+            var blobName = string.Join("", uri.Segments.Skip(3));  // Skip account + container, get blob path
             
             var containerClient = await GetContainerClientAsync(containerName);
             var blobClient = containerClient.GetBlobClient(blobName);
@@ -583,8 +597,9 @@ public class BlobService : IBlobService
             _logger.LogInformation("Checking if file exists: {BlobUrl}", blobUrl);
 
             var uri = new Uri(blobUrl);
-            var containerName = uri.Segments[1].TrimEnd('/');
-            var blobName = string.Join("", uri.Segments.Skip(2));
+            // ✅ Fix: Account for storage account name in path
+            var containerName = uri.Segments[2].TrimEnd('/');  // Skip account name, get container
+            var blobName = string.Join("", uri.Segments.Skip(3));  // Skip account + container, get blob path
             
             var containerClient = await GetContainerClientAsync(containerName);
             var blobClient = containerClient.GetBlobClient(blobName);
@@ -611,8 +626,9 @@ public class BlobService : IBlobService
             _logger.LogInformation("Deleting file: {BlobUrl}", blobUrl);
 
             var uri = new Uri(blobUrl);
-            var containerName = uri.Segments[1].TrimEnd('/');
-            var blobName = string.Join("", uri.Segments.Skip(2));
+            // ✅ Fix: Account for storage account name in path
+            var containerName = uri.Segments[2].TrimEnd('/');  // Skip account name, get container
+            var blobName = string.Join("", uri.Segments.Skip(3));  // Skip account + container, get blob path
             
             var containerClient = await GetContainerClientAsync(containerName);
             var blobClient = containerClient.GetBlobClient(blobName);
@@ -644,10 +660,22 @@ public class BlobService : IBlobService
 
             await foreach (var blobItem in containerClient.GetBlobsAsync(prefix: prefix))
             {
+                // ✅ Fix: Generate external URL using same logic as store methods
+                var blobClient = containerClient.GetBlobClient(blobItem.Name);
+                var blobUrl = blobClient.Uri.ToString();
+                
+                // Apply ExternalBlobUrl transformation if configured
+                if (!string.IsNullOrEmpty(ExternalBlobUrl))
+                {
+                    var localUri = blobClient.Uri;
+                    var externalUri = new Uri(ExternalBlobUrl);
+                    blobUrl = $"{externalUri.Scheme}://{externalUri.Host}:{externalUri.Port}{localUri.AbsolutePath}";
+                }
+                
                 var metadata = new BlobMetadata
                 {
                     Name = blobItem.Name,
-                    Url = containerClient.GetBlobClient(blobItem.Name).Uri.ToString(),
+                    Url = blobUrl,
                     ContainerName = containerName,
                     SizeBytes = blobItem.Properties.ContentLength ?? 0,
                     ContentType = blobItem.Properties.ContentType ?? "",

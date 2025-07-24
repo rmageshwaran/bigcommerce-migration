@@ -50,8 +50,8 @@ interface MigrationFormData {
 // Hardcoded store configurations for development
 const storeConfigurations = {
   production: {
-    storeId: "tmdsef6c6o",
-    accessToken: "ar247sdrwg6b5oo4c8h2n2nu2yat0w7",
+    storeId: "v6q95r5n91",
+    accessToken: "2jxzl0n457l7dbz9jgeo8tzbj6xw6ba",
     channelId: "1"
   },
   staging: {

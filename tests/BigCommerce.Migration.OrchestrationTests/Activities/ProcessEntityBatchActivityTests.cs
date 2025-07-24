@@ -27,7 +27,7 @@ public class ProcessEntityBatchActivityTests
     private readonly Mock<IRateLimitService> _rateLimitServiceMock;
     private readonly Mock<IOpenSearchService> _openSearchServiceMock;
     private readonly Mock<IMigrationStorageService> _migrationStorageServiceMock;
-    private readonly Mock<IMigrationSignalRService> _signalRServiceMock;
+    // SignalR service dependency removed - now using queue-based progress events
     private readonly Mock<IErrorMessageFormatter> _errorMessageFormatterMock;
     private readonly ProcessEntityBatchActivity _activity;
 
@@ -42,7 +42,6 @@ public class ProcessEntityBatchActivityTests
         _rateLimitServiceMock = new Mock<IRateLimitService>();
         _openSearchServiceMock = new Mock<IOpenSearchService>();
         _migrationStorageServiceMock = new Mock<IMigrationStorageService>();
-        _signalRServiceMock = new Mock<IMigrationSignalRService>();
         _errorMessageFormatterMock = new Mock<IErrorMessageFormatter>();
         
         // Setup default error message formatter behavior
@@ -59,7 +58,6 @@ public class ProcessEntityBatchActivityTests
             _rateLimitServiceMock.Object,
             _openSearchServiceMock.Object,
             _migrationStorageServiceMock.Object,
-            _signalRServiceMock.Object,
             _errorMessageFormatterMock.Object
         );
     }
@@ -69,67 +67,61 @@ public class ProcessEntityBatchActivityTests
     public void Constructor_NullLogger_Throws()
     {
         Assert.Throws<ArgumentNullException>(() => new ProcessEntityBatchActivity(
-            null!, _entityFetchServiceMock.Object, _entityTransformServiceMock.Object, _entityCreateServiceMock.Object, _entityMappingServiceMock.Object, _errorHandlingServiceMock.Object, _rateLimitServiceMock.Object, _openSearchServiceMock.Object, _migrationStorageServiceMock.Object, _signalRServiceMock.Object, _errorMessageFormatterMock.Object));
+            null!, _entityFetchServiceMock.Object, _entityTransformServiceMock.Object, _entityCreateServiceMock.Object, _entityMappingServiceMock.Object, _errorHandlingServiceMock.Object, _rateLimitServiceMock.Object, _openSearchServiceMock.Object, _migrationStorageServiceMock.Object, _errorMessageFormatterMock.Object));
     }
     [Fact]
     public void Constructor_NullEntityFetchService_Throws()
     {
         Assert.Throws<ArgumentNullException>(() => new ProcessEntityBatchActivity(
-            _loggerMock.Object, null!, _entityTransformServiceMock.Object, _entityCreateServiceMock.Object, _entityMappingServiceMock.Object, _errorHandlingServiceMock.Object, _rateLimitServiceMock.Object, _openSearchServiceMock.Object, _migrationStorageServiceMock.Object, _signalRServiceMock.Object, _errorMessageFormatterMock.Object));
+            _loggerMock.Object, null!, _entityTransformServiceMock.Object, _entityCreateServiceMock.Object, _entityMappingServiceMock.Object, _errorHandlingServiceMock.Object, _rateLimitServiceMock.Object, _openSearchServiceMock.Object, _migrationStorageServiceMock.Object, _errorMessageFormatterMock.Object));
     }
     [Fact]
     public void Constructor_NullEntityTransformService_Throws()
     {
         Assert.Throws<ArgumentNullException>(() => new ProcessEntityBatchActivity(
-            _loggerMock.Object, _entityFetchServiceMock.Object, null!, _entityCreateServiceMock.Object, _entityMappingServiceMock.Object, _errorHandlingServiceMock.Object, _rateLimitServiceMock.Object, _openSearchServiceMock.Object, _migrationStorageServiceMock.Object, _signalRServiceMock.Object, _errorMessageFormatterMock.Object));
+            _loggerMock.Object, _entityFetchServiceMock.Object, null!, _entityCreateServiceMock.Object, _entityMappingServiceMock.Object, _errorHandlingServiceMock.Object, _rateLimitServiceMock.Object, _openSearchServiceMock.Object, _migrationStorageServiceMock.Object, _errorMessageFormatterMock.Object));
     }
     [Fact]
     public void Constructor_NullEntityCreateService_Throws()
     {
         Assert.Throws<ArgumentNullException>(() => new ProcessEntityBatchActivity(
-            _loggerMock.Object, _entityFetchServiceMock.Object, _entityTransformServiceMock.Object, null!, _entityMappingServiceMock.Object, _errorHandlingServiceMock.Object, _rateLimitServiceMock.Object, _openSearchServiceMock.Object, _migrationStorageServiceMock.Object, _signalRServiceMock.Object, _errorMessageFormatterMock.Object));
+            _loggerMock.Object, _entityFetchServiceMock.Object, _entityTransformServiceMock.Object, null!, _entityMappingServiceMock.Object, _errorHandlingServiceMock.Object, _rateLimitServiceMock.Object, _openSearchServiceMock.Object, _migrationStorageServiceMock.Object, _errorMessageFormatterMock.Object));
     }
     [Fact]
     public void Constructor_NullEntityMappingService_Throws()
     {
         Assert.Throws<ArgumentNullException>(() => new ProcessEntityBatchActivity(
-            _loggerMock.Object, _entityFetchServiceMock.Object, _entityTransformServiceMock.Object, _entityCreateServiceMock.Object, null!, _errorHandlingServiceMock.Object, _rateLimitServiceMock.Object, _openSearchServiceMock.Object, _migrationStorageServiceMock.Object, _signalRServiceMock.Object, _errorMessageFormatterMock.Object));
+            _loggerMock.Object, _entityFetchServiceMock.Object, _entityTransformServiceMock.Object, _entityCreateServiceMock.Object, null!, _errorHandlingServiceMock.Object, _rateLimitServiceMock.Object, _openSearchServiceMock.Object, _migrationStorageServiceMock.Object, _errorMessageFormatterMock.Object));
     }
     [Fact]
     public void Constructor_NullErrorHandlingService_Throws()
     {
         Assert.Throws<ArgumentNullException>(() => new ProcessEntityBatchActivity(
-            _loggerMock.Object, _entityFetchServiceMock.Object, _entityTransformServiceMock.Object, _entityCreateServiceMock.Object, _entityMappingServiceMock.Object, null!, _rateLimitServiceMock.Object, _openSearchServiceMock.Object, _migrationStorageServiceMock.Object, _signalRServiceMock.Object, _errorMessageFormatterMock.Object));
+            _loggerMock.Object, _entityFetchServiceMock.Object, _entityTransformServiceMock.Object, _entityCreateServiceMock.Object, _entityMappingServiceMock.Object, null!, _rateLimitServiceMock.Object, _openSearchServiceMock.Object, _migrationStorageServiceMock.Object, _errorMessageFormatterMock.Object));
     }
     [Fact]
     public void Constructor_NullRateLimitService_Throws()
     {
         Assert.Throws<ArgumentNullException>(() => new ProcessEntityBatchActivity(
-            _loggerMock.Object, _entityFetchServiceMock.Object, _entityTransformServiceMock.Object, _entityCreateServiceMock.Object, _entityMappingServiceMock.Object, _errorHandlingServiceMock.Object, null!, _openSearchServiceMock.Object, _migrationStorageServiceMock.Object, _signalRServiceMock.Object, _errorMessageFormatterMock.Object));
+            _loggerMock.Object, _entityFetchServiceMock.Object, _entityTransformServiceMock.Object, _entityCreateServiceMock.Object, _entityMappingServiceMock.Object, _errorHandlingServiceMock.Object, null!, _openSearchServiceMock.Object, _migrationStorageServiceMock.Object, _errorMessageFormatterMock.Object));
     }
     [Fact]
     public void Constructor_NullOpenSearchService_Throws()
     {
         Assert.Throws<ArgumentNullException>(() => new ProcessEntityBatchActivity(
-            _loggerMock.Object, _entityFetchServiceMock.Object, _entityTransformServiceMock.Object, _entityCreateServiceMock.Object, _entityMappingServiceMock.Object, _errorHandlingServiceMock.Object, _rateLimitServiceMock.Object, null!, _migrationStorageServiceMock.Object, _signalRServiceMock.Object, _errorMessageFormatterMock.Object));
+            _loggerMock.Object, _entityFetchServiceMock.Object, _entityTransformServiceMock.Object, _entityCreateServiceMock.Object, _entityMappingServiceMock.Object, _errorHandlingServiceMock.Object, _rateLimitServiceMock.Object, null!, _migrationStorageServiceMock.Object, _errorMessageFormatterMock.Object));
     }
     [Fact]
     public void Constructor_NullMigrationStorageService_Throws()
     {
         Assert.Throws<ArgumentNullException>(() => new ProcessEntityBatchActivity(
-            _loggerMock.Object, _entityFetchServiceMock.Object, _entityTransformServiceMock.Object, _entityCreateServiceMock.Object, _entityMappingServiceMock.Object, _errorHandlingServiceMock.Object, _rateLimitServiceMock.Object, _openSearchServiceMock.Object, null!, _signalRServiceMock.Object, _errorMessageFormatterMock.Object));
-    }
-    [Fact]
-    public void Constructor_NullSignalRService_Throws()
-    {
-        Assert.Throws<ArgumentNullException>(() => new ProcessEntityBatchActivity(
-            _loggerMock.Object, _entityFetchServiceMock.Object, _entityTransformServiceMock.Object, _entityCreateServiceMock.Object, _entityMappingServiceMock.Object, _errorHandlingServiceMock.Object, _rateLimitServiceMock.Object, _openSearchServiceMock.Object, _migrationStorageServiceMock.Object, null!, _errorMessageFormatterMock.Object));
+            _loggerMock.Object, _entityFetchServiceMock.Object, _entityTransformServiceMock.Object, _entityCreateServiceMock.Object, _entityMappingServiceMock.Object, _errorHandlingServiceMock.Object, _rateLimitServiceMock.Object, _openSearchServiceMock.Object, null!, _errorMessageFormatterMock.Object));
     }
     [Fact]
     public void Constructor_NullErrorMessageFormatter_Throws()
     {
         Assert.Throws<ArgumentNullException>(() => new ProcessEntityBatchActivity(
-            _loggerMock.Object, _entityFetchServiceMock.Object, _entityTransformServiceMock.Object, _entityCreateServiceMock.Object, _entityMappingServiceMock.Object, _errorHandlingServiceMock.Object, _rateLimitServiceMock.Object, _openSearchServiceMock.Object, _migrationStorageServiceMock.Object, _signalRServiceMock.Object, null!));
+            _loggerMock.Object, _entityFetchServiceMock.Object, _entityTransformServiceMock.Object, _entityCreateServiceMock.Object, _entityMappingServiceMock.Object, _errorHandlingServiceMock.Object, _rateLimitServiceMock.Object, _openSearchServiceMock.Object, _migrationStorageServiceMock.Object, null!));
     }
     #endregion
 

@@ -28,13 +28,16 @@ public class BrandFetchStrategy : IEntityFetchStrategy
         CategoryTreeContext? categoryTreeContext = null,
         CancellationToken cancellationToken = default)
     {
-        // LSP COMPLIANCE: Consistent parameter validation across all strategies
-        if (entityIds == null) throw new ArgumentNullException(nameof(entityIds));
-        if (string.IsNullOrWhiteSpace(migrationId)) throw new ArgumentNullException(nameof(migrationId));
-        if (sourceStore == null) throw new ArgumentNullException(nameof(sourceStore));
-        
-        // Handle cancellation first
         cancellationToken.ThrowIfCancellationRequested();
+        if (entityIds == null || string.IsNullOrWhiteSpace(migrationId) || sourceStore == null)
+        {
+            _logger.LogWarning("Invalid fetch strategy input: entityIds, migrationId, or sourceStore is null/empty. Returning empty list.");
+            return new List<Dictionary<string, object>>();
+        }
+        if (!entityIds.Any())
+        {
+            return new List<Dictionary<string, object>>();
+        }
 
         _logger.LogInformation("Fetching {Count} specific brands for migration {MigrationId}", 
             entityIds.Count, migrationId);
@@ -45,12 +48,6 @@ public class BrandFetchStrategy : IEntityFetchStrategy
         {
             // LSP COMPLIANCE: Check for cancellation consistently across all strategies
             cancellationToken.ThrowIfCancellationRequested();
-
-            if (!entityIds.Any())
-            {
-                _logger.LogInformation("No specific brand IDs provided for migration {MigrationId}", migrationId);
-                return fetchedBrands;
-            }
 
             // Use pagination API approach (brands follow same pattern as products)
             var paginationRequest = new BigCommercePaginationRequest

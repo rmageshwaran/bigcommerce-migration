@@ -45,7 +45,6 @@ public class EntityCreateService : IEntityCreateService
         try
         {
             // 🎯 STRATEGY PATTERN: Use factory to get appropriate strategy (replaces switch statement)
-            _logger.LogDebug("🔄 [EXEC-{ExecutionId}] Selecting creation strategy for {EntityType}", executionId, request.EntityType);
             var strategy = _strategyFactory.GetStrategy(request.EntityType);
             
             _logger.LogInformation("🔄 [EXEC-{ExecutionId}] Using {StrategyType} for {EntityType} in migration {MigrationId}", 

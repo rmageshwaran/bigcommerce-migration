@@ -17,25 +17,25 @@ namespace BigCommerce.Migration.UnitTests.Orchestration.Services;
 /// These tests focus specifically on the entity progress persistence feature I added
 /// Following TDD principles: Red-Green-Refactor
 /// </summary>
-public class ProgressTrackerPersistenceTests
-{
-    private readonly Mock<ILogger<ProgressTracker>> _mockLogger;
-    private readonly Mock<IMigrationSignalRService> _mockSignalRService;
-    private readonly Mock<IMigrationStorageService> _mockStorageService;
-    private readonly ProgressTracker _progressTracker;
-    private readonly string _testMigrationId = "test-migration-123";
-
-    public ProgressTrackerPersistenceTests()
+    public class ProgressTrackerPersistenceTests
     {
-        _mockLogger = new Mock<ILogger<ProgressTracker>>();
-        _mockSignalRService = new Mock<IMigrationSignalRService>();
-        _mockStorageService = new Mock<IMigrationStorageService>();
-        
-        _progressTracker = new ProgressTracker(
-            _mockLogger.Object, 
-            _mockSignalRService.Object, 
-            _mockStorageService.Object);
-    }
+        private readonly Mock<ILogger<ProgressTracker>> _mockLogger;
+        private readonly Mock<IProgressEventPublisher> _mockProgressEventPublisher;
+        private readonly Mock<IMigrationStorageService> _mockStorageService;
+        private readonly ProgressTracker _progressTracker;
+        private readonly string _testMigrationId = "test-migration-123";
+
+        public ProgressTrackerPersistenceTests()
+        {
+            _mockLogger = new Mock<ILogger<ProgressTracker>>();
+            _mockProgressEventPublisher = new Mock<IProgressEventPublisher>();
+            _mockStorageService = new Mock<IMigrationStorageService>();
+            
+            _progressTracker = new ProgressTracker(
+                _mockLogger.Object, 
+                _mockProgressEventPublisher.Object,
+                _mockStorageService.Object);
+        }
 
     #region TDD Test 1: Entity Progress Should Persist When Updated
 

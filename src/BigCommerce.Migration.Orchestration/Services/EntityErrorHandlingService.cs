@@ -106,9 +106,6 @@ public class EntityErrorHandlingService : IEntityErrorHandlingService
                 _logger.LogDebug("Successfully logged structured migration error to OpenSearch for {EntityType} in migration {MigrationId}", 
                     request.EntityType, request.MigrationId);
             }
-
-            _logger.LogInformation("Successfully logged structured migration error for {EntityType} in migration {MigrationId} with payloads stored to blob storage", 
-                request.EntityType, request.MigrationId);
         }
         catch (Exception ex)
         {
@@ -232,9 +229,6 @@ public class EntityErrorHandlingService : IEntityErrorHandlingService
                 _logger.LogDebug("Successfully logged entity error to OpenSearch for {EntityType} {EntityId} in migration {MigrationId}", 
                     request.EntityType, entityId, request.MigrationId);
             }
-
-            _logger.LogInformation("Successfully logged entity error for {EntityType} {EntityId} in migration {MigrationId} with payloads stored to blob storage", 
-                request.EntityType, entityId, request.MigrationId);
         }
         catch (Exception ex)
         {

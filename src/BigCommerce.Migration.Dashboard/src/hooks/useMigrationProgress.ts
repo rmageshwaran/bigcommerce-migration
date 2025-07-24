@@ -97,8 +97,8 @@ export const useMigrationProgress = (
   // Set up SignalR listeners and connection
   useEffect(() => {
     // Subscribe to SignalR events
-    const progressUnsubscribe = signalRService.on('migrationProgress', handleProgressUpdate);
-    const statusUnsubscribe = signalRService.on('migrationStatus', handleStatusUpdate);
+    const progressUnsubscribe = signalRService.on('MigrationProgressUpdated', handleProgressUpdate);
+    const statusUnsubscribe = signalRService.on('MigrationStatusChanged', handleStatusUpdate);
     const connectionUnsubscribe = signalRService.on('connectionStateChanged', handleConnectionStateChange);
 
     // Initial connection state

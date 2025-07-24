@@ -12,7 +12,12 @@ services:
     command: "azurite --silent --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0 --location /data --debug /data/debug.log"
     environment:
       - AZURITE_ACCOUNTS=devstoreaccount1
-
+# healthcheck:
+      #   test: ["CMD-SHELL", "curl -f http://localhost:10001/ || exit 1"]
+      #   interval: 10s
+      #   timeout: 5s
+      #   retries: 3
+      #   start_period: 10s
     restart: unless-stopped
     networks:
       - bigcommerce-network
@@ -40,6 +45,7 @@ services:
       - BatchCompletionQueueName=batch-completion
       - CancellationQueueName=cancellation
       - ProgressUpdateQueueName=progress-update
+      - SignalRProgressQueueName=signalr-progress-events
       - DeadLetterQueueName=dead-letter
       - RetryQueueName=retry
       
@@ -112,7 +118,7 @@ services:
       - "3000:3000"
     environment:
       - VITE_API_BASE_URL=http://bigcommerce-functions/api
-      - VITE_SIGNALR_HUB_URL=http://bigcommerce-functions
+      - VITE_SIGNALR_HUB_URL=http://localhost:7071/api
       - VITE_ENVIRONMENT=development
       - VITE_ENABLE_DEBUG_LOGGING=true
       - VITE_ENABLE_REALTIME=true

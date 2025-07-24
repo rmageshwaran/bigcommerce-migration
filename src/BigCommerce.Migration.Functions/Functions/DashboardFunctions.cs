@@ -203,21 +203,100 @@ namespace BigCommerce.Migration.Functions.Functions
 
             try
             {
-                // TODO: Implement storage-based migration listing when storage service is enhanced
+                // Query for active migrations (Queued, InProgress)
+                var queryRequest = new Core.Models.MigrationQueryRequest
+                {
+                    Status = "Queued,InProgress", // Get active statuses using correct enum values
+                    PageSize = 50,
+                    Page = 1,
+                    SortBy = "CreatedAt",
+                    SortDirection = "desc"
+                };
+
+                _logger.LogInformation("DEBUG: Querying migrations with status filter: {StatusFilter}", queryRequest.Status);
+
+                // Retrieve active migrations from storage
+                var migrationListResult = await _migrationStorageService.GetMigrationsAsync(queryRequest);
+                
+                _logger.LogInformation("DEBUG: Found {Count} migrations in storage", migrationListResult.Migrations.Count());
+                
+                // Get detailed progress for each active migration
+                var activeMigrations = new List<object>();
+                foreach (var migration in migrationListResult.Migrations)
+                {
+                    _logger.LogInformation("DEBUG: Processing migration {MigrationId} with status {Status}", migration.Id, migration.Status);
+                    
+                    try
+                    {
+                        // Get detailed progress information
+                        var detailedProgress = await _progressTracker.GetProgressAsync(migration.Id, cancellationToken);
+                        
+                        _logger.LogInformation("DEBUG: Got progress for migration {MigrationId}: Total={Total}, Processed={Processed}", 
+                            migration.Id, detailedProgress?.TotalEntities ?? 0, detailedProgress?.ProcessedEntities ?? 0);
+                        
+                        activeMigrations.Add(new
+                        {
+                            migrationId = migration.Id,
+                            status = migration.Status.ToString().ToLower(),
+                            sourceStore = migration.SourceStoreId,
+                            destinationStore = migration.DestinationStoreId,
+                            entities = migration.Entities,
+                            createdAt = migration.CreatedAt,
+                            updatedAt = migration.UpdatedAt,
+                            progress = new
+                            {
+                                totalEntities = detailedProgress?.TotalEntities ?? 0,
+                                processedEntities = detailedProgress?.ProcessedEntities ?? 0,
+                                successfulEntities = detailedProgress?.SuccessfulEntities ?? 0,
+                                failedEntities = detailedProgress?.FailedEntities ?? 0,
+                                overallProgressPercentage = detailedProgress?.OverallProgressPercentage ?? 0,
+                                startTime = detailedProgress?.StartTime
+                            }
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to get progress for migration {MigrationId}, including basic info", migration.Id);
+                        
+                        // Include basic migration info even if progress fails
+                        activeMigrations.Add(new
+                        {
+                            migrationId = migration.Id,
+                            status = migration.Status.ToString().ToLower(),
+                            sourceStore = migration.SourceStoreId,
+                            destinationStore = migration.DestinationStoreId,
+                            entities = migration.Entities,
+                            createdAt = migration.CreatedAt,
+                            updatedAt = migration.UpdatedAt,
+                            progress = new
+                            {
+                                totalEntities = 0,
+                                processedEntities = 0,
+                                successfulEntities = 0,
+                                failedEntities = 0,
+                                overallProgressPercentage = 0,
+                                startTime = migration.CreatedAt
+                            }
+                        });
+                    }
+                }
+
+                _logger.LogInformation("DEBUG: Returning {Count} active migrations", activeMigrations.Count);
+
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 response.Headers.Add("Content-Type", "application/json");
                 
                 // Return structure that matches PaginatedResponse<T> interface expected by frontend
-                var activeMigrations = new
+                var result = new
                 {
-                    data = new List<object>(), // Empty list for now - matches frontend expectation
-                    totalCount = 0,
+                    data = activeMigrations,
+                    totalCount = activeMigrations.Count,
                     page = 1,
-                    pageSize = 10,
-                    totalPages = 0
+                    pageSize = 50,
+                    totalPages = 1
                 };
 
-                await response.WriteStringAsync(JsonSerializer.Serialize(activeMigrations), cancellationToken);
+                await response.WriteStringAsync(JsonSerializer.Serialize(result), cancellationToken);
                 return response;
             }
             catch (Exception ex)
@@ -451,8 +530,17 @@ namespace BigCommerce.Migration.Functions.Functions
         {
             try
             {
-                // TODO: Implement actual SignalR health check
-                return Task.FromResult<object>(new { Status = "healthy", ActiveConnections = 0 });
+                // Azure SignalR Service health is managed by Azure platform
+                // Check if connection string is configured
+                var connectionString = Environment.GetEnvironmentVariable("ConnectionStrings:AzureSignalR") ?? 
+                                     Environment.GetEnvironmentVariable("ConnectionStrings__AzureSignalR");
+                
+                var isConfigured = !string.IsNullOrEmpty(connectionString);
+                return Task.FromResult<object>(new { 
+                    Status = isConfigured ? "healthy" : "unhealthy", 
+                    Service = "Azure SignalR Service",
+                    Message = isConfigured ? "Connection string configured" : "Connection string not configured"
+                });
             }
             catch (Exception ex)
             {

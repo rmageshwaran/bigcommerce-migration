@@ -158,7 +158,7 @@ echo "   Log file: dashboard.log"
 
 # Wait for Dashboard to be ready  
 cd ../../
-if wait_for_service "http://localhost:5173" "Dashboard"; then
+if wait_for_service "http://localhost:3000" "Dashboard"; then
     echo -e "${GREEN}✅ Dashboard is ready${NC}"
 else
     echo -e "${RED}❌ Dashboard failed to start properly${NC}"
@@ -171,12 +171,12 @@ echo -e "${GREEN}🎉 REAL-TIME TESTING ENVIRONMENT READY!${NC}"
 echo "============================================================="
 echo -e "${BLUE}📍 Service Endpoints:${NC}"
 echo "   🔧 Azure Functions:     http://localhost:7071"
-echo "   📊 Dashboard:           http://localhost:5173"
+echo "   📊 Dashboard:           http://localhost:3000"
 echo "   🔌 SignalR Hub:         http://localhost:7071/api/negotiate"
 echo "   📋 SignalR Info:        http://localhost:7071/api/signalr/info"
 echo ""
 echo -e "${BLUE}📋 Testing Instructions:${NC}"
-echo "   1. Open http://localhost:5173 in your browser"
+echo "   1. Open http://localhost:3000 in your browser"
 echo "   2. Check SignalR connection status in dashboard"
 echo "   3. Start a migration to see real-time progress"
 echo "   4. Watch for real-time updates in the progress bar"

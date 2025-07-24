@@ -56,9 +56,6 @@ public class PaginationApiService : IPaginationApiClient
             throw new ArgumentNullException(nameof(paginationRequest));
         }
 
-        _logger.LogDebug("Getting paginated {EntityType} for store {StoreId}, page {Page}, limit {Limit}", 
-            entityType, storeConfig.StoreId, paginationRequest.Page, paginationRequest.Limit);
-
         try
         {
             // TODO: Implement actual BigCommerce API call
@@ -127,9 +124,6 @@ public class PaginationApiService : IPaginationApiClient
         {
             throw new ArgumentNullException(nameof(paginationRequest));
         }
-
-        _logger.LogDebug("Getting all {EntityType} paginated for store {StoreId}", 
-            entityType, storeConfig.StoreId);
 
         try
         {

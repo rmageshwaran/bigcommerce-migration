@@ -28,16 +28,16 @@ public class ModifierFetchStrategy : IEntityFetchStrategy
         CategoryTreeContext? categoryTreeContext = null,
         CancellationToken cancellationToken = default)
     {
-        // LSP COMPLIANCE: Consistent parameter validation across all strategies
-        if (entityIds == null) throw new ArgumentNullException(nameof(entityIds));
-        if (string.IsNullOrWhiteSpace(migrationId)) throw new ArgumentNullException(nameof(migrationId));
-        if (sourceStore == null) throw new ArgumentNullException(nameof(sourceStore));
-        
-        // Handle cancellation first
         cancellationToken.ThrowIfCancellationRequested();
-
-        _logger.LogInformation("Fetching {Count} specific modifiers for migration {MigrationId}", 
-            entityIds.Count, migrationId);
+        if (entityIds == null || string.IsNullOrWhiteSpace(migrationId) || sourceStore == null)
+        {
+            _logger.LogWarning("Invalid fetch strategy input: entityIds, migrationId, or sourceStore is null/empty. Returning empty list.");
+            return new List<Dictionary<string, object>>();
+        }
+        if (!entityIds.Any())
+        {
+            return new List<Dictionary<string, object>>();
+        }
 
         var fetchedModifiers = new List<Dictionary<string, object>>();
 
@@ -45,12 +45,6 @@ public class ModifierFetchStrategy : IEntityFetchStrategy
         {
             // LSP COMPLIANCE: Check for cancellation consistently across all strategies
             cancellationToken.ThrowIfCancellationRequested();
-
-            if (!entityIds.Any())
-            {
-                _logger.LogInformation("No specific modifier IDs provided for migration {MigrationId}", migrationId);
-                return fetchedModifiers;
-            }
 
             // Modifiers require product context - use pagination to find modifiers
             var paginationRequest = new BigCommercePaginationRequest
@@ -92,9 +86,6 @@ public class ModifierFetchStrategy : IEntityFetchStrategy
 
                     fetchedModifiers.AddRange(filteredModifiers);
                 }
-
-                _logger.LogDebug("Fetched {Count} modifiers from page {Page} (filtered: {FilteredCount})", 
-                    response.Data.Count, paginationRequest.Page, filteredModifiers.Count);
 
                 // If we found all requested modifiers, stop fetching
                 if (fetchedModifiers.Count >= entityIds.Count)

@@ -62,6 +62,7 @@ public interface IProgressTracker
 
 /// <summary>
 /// Progress update information
+/// Phase 4.2: Enhanced with soft cancellation token support for SignalR filtering
 /// </summary>
 public class ProgressUpdate
 {
@@ -114,6 +115,22 @@ public class ProgressUpdate
     /// Timestamp of the update
     /// </summary>
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+
+    /// <summary>
+    /// Phase 4.2: Soft cancellation token - indicates if the migration is cancelled
+    /// This is passed from activity to avoid storage calls in ProgressTracker
+    /// </summary>
+    public bool IsCancelled { get; set; }
+
+    /// <summary>
+    /// Phase 4.2: Cancellation reason (if cancelled)
+    /// </summary>
+    public string? CancellationReason { get; set; }
+
+    /// <summary>
+    /// Phase 4.2: When the cancellation was detected (if cancelled)
+    /// </summary>
+    public DateTime? CancelledAt { get; set; }
 }
 
 /// <summary>
@@ -200,6 +217,22 @@ public class MigrationProgress
     /// Error rate (0.0 to 1.0)
     /// </summary>
     public double ErrorRate { get; set; }
+
+    /// <summary>
+    /// Phase 4.2: Soft cancellation token - indicates if the migration is cancelled
+    /// This is propagated from activities to enable SignalR filtering
+    /// </summary>
+    public bool? IsCancelled { get; set; }
+
+    /// <summary>
+    /// Phase 4.2: Cancellation reason (if cancelled)
+    /// </summary>
+    public string? CancellationReason { get; set; }
+
+    /// <summary>
+    /// Phase 4.2: When the cancellation was detected (if cancelled)
+    /// </summary>
+    public DateTime? CancelledAt { get; set; }
 }
 
 /// <summary>

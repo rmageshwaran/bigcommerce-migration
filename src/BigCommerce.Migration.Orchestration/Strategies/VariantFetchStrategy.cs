@@ -28,16 +28,25 @@ public class VariantFetchStrategy : IEntityFetchStrategy
         CategoryTreeContext? categoryTreeContext = null,
         CancellationToken cancellationToken = default)
     {
-        // LSP COMPLIANCE: Consistent parameter validation across all strategies
-        if (entityIds == null) throw new ArgumentNullException(nameof(entityIds));
-        if (string.IsNullOrWhiteSpace(migrationId)) throw new ArgumentNullException(nameof(migrationId));
-        if (sourceStore == null) throw new ArgumentNullException(nameof(sourceStore));
-        
-        // Handle cancellation first
         cancellationToken.ThrowIfCancellationRequested();
+        if (entityIds == null || string.IsNullOrWhiteSpace(migrationId) || sourceStore == null)
+        {
+            _logger.LogWarning("Invalid fetch strategy input: entityIds, migrationId, or sourceStore is null/empty. Returning empty list.");
+            return new List<Dictionary<string, object>>();
+        }
+        if (!entityIds.Any())
+        {
+            return new List<Dictionary<string, object>>();
+        }
 
-        _logger.LogInformation("Fetching {Count} specific variants for migration {MigrationId}", 
-            entityIds.Count, migrationId);
+        // Variants require product context - use pagination to find variants
+        var paginationRequest = new BigCommercePaginationRequest
+        {
+            Page = 1,
+            Limit = 50,
+            SortBy = "id",
+            SortDirection = "asc"
+        };
 
         var fetchedVariants = new List<Dictionary<string, object>>();
 
@@ -45,21 +54,6 @@ public class VariantFetchStrategy : IEntityFetchStrategy
         {
             // LSP COMPLIANCE: Check for cancellation consistently across all strategies
             cancellationToken.ThrowIfCancellationRequested();
-
-            if (!entityIds.Any())
-            {
-                _logger.LogInformation("No specific variant IDs provided for migration {MigrationId}", migrationId);
-                return fetchedVariants;
-            }
-
-            // Variants require product context - use pagination to find variants
-            var paginationRequest = new BigCommercePaginationRequest
-            {
-                Page = 1,
-                Limit = 50,
-                SortBy = "id",
-                SortDirection = "asc"
-            };
 
             while (!cancellationToken.IsCancellationRequested)
             {
@@ -92,9 +86,6 @@ public class VariantFetchStrategy : IEntityFetchStrategy
 
                     fetchedVariants.AddRange(filteredVariants);
                 }
-
-                _logger.LogDebug("Fetched {Count} variants from page {Page} (filtered: {FilteredCount})", 
-                    response.Data.Count, paginationRequest.Page, filteredVariants.Count);
 
                 // If we found all requested variants, stop fetching
                 if (fetchedVariants.Count >= entityIds.Count)

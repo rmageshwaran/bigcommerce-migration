@@ -16,6 +16,7 @@ public class EntityMigrationOrchestratorTests
 {
     private readonly Mock<IDurableOrchestrationContext> _contextMock;
     private readonly Mock<ILogger<EntityMigrationOrchestrator>> _loggerMock;
+    private readonly Mock<IProgressEventPublisher> _mockProgressEventPublisher;
     private readonly EntityMigrationOrchestrator _orchestrator;
     private readonly EntityMigrationRequest _testRequest;
 
@@ -23,7 +24,8 @@ public class EntityMigrationOrchestratorTests
     {
         _contextMock = new Mock<IDurableOrchestrationContext>();
         _loggerMock = new Mock<ILogger<EntityMigrationOrchestrator>>();
-        _orchestrator = new EntityMigrationOrchestrator(_loggerMock.Object);
+        _mockProgressEventPublisher = new Mock<IProgressEventPublisher>();
+        _orchestrator = new EntityMigrationOrchestrator(_loggerMock.Object, _mockProgressEventPublisher.Object);
         
         _testRequest = new EntityMigrationRequest
         {
@@ -390,19 +392,12 @@ public class EntityMigrationOrchestratorTests
 
         SetupMultipleBatchesWithRateLimit();
 
-        var progressUpdates = new List<object>();
-        _contextMock.Setup(x => x.CallActivityAsync("UpdateEntityProgress", It.IsAny<object>()))
-                   .Returns<string, object>((activityName, progress) =>
-                   {
-                       progressUpdates.Add(progress);
-                       return Task.CompletedTask;
-                   });
-
         // Act
         await _orchestrator.RunEntityMigrationOrchestrator(_contextMock.Object);
 
-        // Assert
-        Assert.True(progressUpdates.Count > 0, "Should update progress during batch processing");
+        // Assert - Verify progress events were published to queue (replaced activity calls)
+        _mockProgressEventPublisher.Verify(x => x.PublishEntityProgressAsync(It.IsAny<Core.Models.EntityProgressEvent>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce, "Should update progress during batch processing");
+        _mockProgressEventPublisher.Verify(x => x.PublishBatchProgressAsync(It.IsAny<Core.Models.BatchProgressEvent>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce, "Should publish batch progress events");
     }
 
     #endregion

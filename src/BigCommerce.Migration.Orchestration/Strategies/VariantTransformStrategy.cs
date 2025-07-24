@@ -27,7 +27,6 @@ public class VariantTransformStrategy : IEntityTransformStrategy
         CategoryTreeContext? categoryTreeContext = null,
         CancellationToken cancellationToken = default)
     {
-        _logger.LogDebug("Transforming variant for migration {MigrationId}", migrationId);
         
         var transformed = new Dictionary<string, object>(entity);
 

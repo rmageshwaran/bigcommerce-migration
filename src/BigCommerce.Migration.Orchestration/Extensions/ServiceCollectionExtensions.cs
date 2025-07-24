@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Configuration;
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Infrastructure.Services;
 using BigCommerce.Migration.Orchestration.Services;
@@ -94,6 +95,13 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IQueueService, QueueService>();
         services.TryAddScoped<IMigrationStorageService, MigrationStorageService>();
         
+        // Phase 3.1: Register distributed lock service for orchestrator collision detection
+        services.TryAddSingleton<IDistributedLockService, AzureTableDistributedLockService>();
+        // Phase 3.2: Register distributed lock heartbeat service for phantom orchestrator prevention
+        services.TryAddSingleton<IDistributedLockHeartbeatService, AzureTableDistributedLockHeartbeatService>();
+        
+        // NOTE: QueueServiceClient registration removed - ProgressEventPublisher now creates client directly like QueueService
+        
         return services;
     }
     
@@ -105,6 +113,9 @@ public static class ServiceCollectionExtensions
         // Register orchestration services as singleton
         services.TryAddSingleton<IRateLimitService, RateLimitService>();
         services.TryAddSingleton<IBatchSizeCalculator, BatchSizeCalculator>();
+        
+        // Register progress event publisher for queue-based SignalR integration
+        services.TryAddSingleton<IProgressEventPublisher, ProgressEventPublisher>();
         services.TryAddSingleton<IProgressTracker, ProgressTracker>();
         
         // Register entity processing services (newly created during refactoring)
@@ -113,6 +124,14 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IEntityCreateService, EntityCreateService>();
         services.TryAddSingleton<IEntityMappingService, EntityMappingService>();
         services.TryAddSingleton<IEntityErrorHandlingService, EntityErrorHandlingService>();
+        
+        // Phase 3.1: Register orchestrator collision detection service (Phase 3.2: Enhanced with heartbeat)
+        services.TryAddSingleton<OrchestratorCollisionDetectionService>();
+        // Phase 3.3: Register orchestrator cleanup service for administrative operations
+        services.TryAddSingleton<IOrchestratorCleanupService, OrchestratorCleanupService>();
+        
+        // Phase 4.3: Register progress state validation service for cancellation consistency checks
+        services.TryAddScoped<IProgressStateValidator, ProgressStateValidator>();
         
         // ✅ Register error message formatter (SOLID: Single Responsibility)
         services.TryAddSingleton<IErrorMessageFormatter, ErrorMessageFormatter>();

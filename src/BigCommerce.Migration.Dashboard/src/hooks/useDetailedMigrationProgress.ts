@@ -222,35 +222,26 @@ export const useDetailedMigrationProgress = (
     }));
   }, [generateEventId]);
 
-  // Handle detailed progress updates
-  const handleDetailedProgress = useCallback((event: any) => {
-    if (event.MigrationId !== migrationId && event.migrationId !== migrationId) return;
+  // Handle detailed progress updates (now receives already-transformed data)
+  const handleDetailedProgress = useCallback((progress: any) => {
+    console.log('🎯 useDetailedMigrationProgress received transformed progress:', progress);
+    if (progress.migrationId !== migrationId) return;
 
-    const progress = event.Progress || event.progress;
-    if (!progress) return;
+    if (!progress) {
+      console.log('⚠️ useDetailedMigrationProgress: No progress data received');
+      return;
+    }
 
+    // Data is already transformed by SignalR service, just use it directly
     setState(prev => ({
       ...prev,
       progress: {
-        migrationId: progress.migrationId || progress.MigrationId,
-        status: progress.status || progress.Status,
-        totalEntities: progress.totalEntities || progress.TotalEntities || 0,
-        processedEntities: progress.processedEntities || progress.ProcessedEntities || 0,
-        successfulEntities: progress.successfulEntities || progress.SuccessfulEntities || 0,
-        failedEntities: progress.failedEntities || progress.FailedEntities || 0,
-        overallProgressPercentage: progress.overallProgressPercentage || progress.OverallProgressPercentage || 0,
-        startTime: new Date(progress.startTime || progress.StartTime),
-        lastUpdated: new Date(progress.lastUpdated || progress.LastUpdated || Date.now()),
-        elapsedTime: progress.elapsedTime || progress.ElapsedTime || 0,
-        estimatedTimeRemaining: progress.estimatedTimeRemaining || progress.EstimatedTimeRemaining || 0,
-        entitiesPerSecond: progress.entitiesPerSecond || progress.EntitiesPerSecond || 0,
-        errorRate: progress.errorRate || progress.ErrorRate || 0,
-        currentPhase: progress.currentPhase || progress.CurrentPhase || '',
-        currentEntity: progress.currentEntity || progress.CurrentEntity || '',
-        currentProcessing: progress.currentProcessing || progress.CurrentProcessing || {},
-        batchProgress: progress.batchProgress || progress.BatchProgress || {},
-        remainingWork: progress.remainingWork || progress.RemainingWork || {},
-        performance: progress.performance || progress.Performance || {}
+        ...progress,
+        // Ensure we have all required fields for the detailed dashboard
+        currentProcessing: progress.currentProcessing || {},
+        batchProgress: progress.batchProgress || {},
+        remainingWork: progress.remainingWork || {},
+        performance: progress.performance || {}
       },
       isLoading: false,
       lastUpdated: new Date(),
@@ -402,6 +393,59 @@ export const useDetailedMigrationProgress = (
     }
   }, [migrationId, addEvent, enableNotifications]);
 
+  // Handle status updates (maps to existing handleDetailedProgress)
+  const handleStatusUpdate = useCallback((event: any) => {
+    if (event.MigrationId !== migrationId && event.migrationId !== migrationId) return;
+
+    // Map status event to progress update format
+    const progressData = {
+      migrationId: event.MigrationId || event.migrationId,
+      status: event.Status || event.status,
+      message: event.Message || event.message,
+      timestamp: event.Timestamp || event.timestamp || new Date()
+    };
+
+    setState(prev => ({
+      ...prev,
+      progress: prev.progress ? { ...prev.progress, status: progressData.status } : prev.progress,
+      lastUpdated: new Date(),
+      lastHeartbeat: new Date()
+    }));
+
+    addEvent('MigrationStatus' as any, event, `Status: ${progressData.status} - ${progressData.message || ''}`);
+  }, [migrationId, addEvent]);
+
+  // Handle entity updates (maps to batch events)
+  const handleEntityUpdate = useCallback((event: any) => {
+    if (event.MigrationId !== migrationId && event.migrationId !== migrationId) return;
+
+    const entityType = event.EntityType || event.entityType;
+    const status = event.Status || event.status;
+
+    setState(prev => ({
+      ...prev,
+      lastUpdated: new Date(),
+      lastHeartbeat: new Date()
+    }));
+
+    const message = `${entityType}: ${event.ProcessedCount || 0}/${event.TotalCount || 0} processed (${status})`;
+    addEvent('EntityProgress' as any, event, message);
+  }, [migrationId, addEvent]);
+
+  // Handle error events
+  const handleErrorEvent = useCallback((event: any) => {
+    if (event.MigrationId !== migrationId && event.migrationId !== migrationId) return;
+
+    const errorMessage = event.Message || event.message || 'Unknown error';
+    const entityType = event.EntityType || event.entityType || '';
+    
+    addError(`Error in ${entityType || 'migration'}: ${errorMessage}`, event);
+    
+    if (enableNotifications) {
+      notificationService.error('Migration Error', errorMessage);
+    }
+  }, [migrationId, addError, enableNotifications]);
+
   // Handle connection state changes
   const handleConnectionStateChange = useCallback((connectionData: { state: string; error?: any; connectionId?: string }) => {
     setState(prev => ({
@@ -419,33 +463,42 @@ export const useDetailedMigrationProgress = (
   // Connection management
   const connect = useCallback(async () => {
     try {
+      console.log('🔄 useDetailedMigrationProgress: Starting connection for migrationId:', migrationId);
       setState(prev => ({ ...prev, connectionState: 'connecting' }));
       
+      console.log('🔄 useDetailedMigrationProgress: Calling signalRService.connect()');
       await signalRService.current.connect();
+      
+      console.log('🔄 useDetailedMigrationProgress: Joining migration group:', migrationId);
       await signalRService.current.joinMigrationGroup(migrationId);
       
-      // Set up event listeners for all detailed events
-      const unsubscribeDetailedProgress = signalRService.current.on('DetailedProgress', handleDetailedProgress);
-      const unsubscribeProcessingContext = signalRService.current.on('ProcessingContext', handleProcessingContext);
-      const unsubscribeBatchStarted = signalRService.current.on('BatchStarted', (event: any) => handleBatchEvent('BatchStarted', event));
-      const unsubscribeBatchProgress = signalRService.current.on('BatchProgress', (event: any) => handleBatchEvent('BatchProgress', event));
-      const unsubscribeBatchCompleted = signalRService.current.on('BatchCompleted', (event: any) => handleBatchEvent('BatchCompleted', event));
-      const unsubscribeRemainingWorkload = signalRService.current.on('RemainingWorkload', handleRemainingWorkload);
-      const unsubscribePerformanceMetrics = signalRService.current.on('PerformanceMetrics', handlePerformanceMetrics);
-      const unsubscribeMilestone = signalRService.current.on('MigrationMilestone', handleMilestone);
+      // Set up event listeners for all detailed events (using transformed events)
+      console.log('🔄 useDetailedMigrationProgress: Setting up event listeners for transformed events');
+      const unsubscribeProgress = signalRService.current.on('migrationProgress', handleDetailedProgress);
+      const unsubscribeStatus = signalRService.current.on('MigrationStatus', handleStatusUpdate);
+      console.log('✅ useDetailedMigrationProgress: Event listeners set up successfully');
+      const unsubscribeBatchProgress = signalRService.current.on('BatchProgressUpdated', (event: any) => handleBatchEvent('BatchProgress', event));
+      const unsubscribeEntityProgress = signalRService.current.on('EntityProgressUpdated', handleEntityUpdate);
+      const unsubscribeErrors = signalRService.current.on('ErrorOccurred', handleErrorEvent);
       const unsubscribeConnectionState = signalRService.current.on('connectionStateChanged', handleConnectionStateChange);
       
       unsubscribeCallbacks.current = [
-        unsubscribeDetailedProgress,
-        unsubscribeProcessingContext,
-        unsubscribeBatchStarted,
+        unsubscribeProgress,
+        unsubscribeStatus,
         unsubscribeBatchProgress,
-        unsubscribeBatchCompleted,
-        unsubscribeRemainingWorkload,
-        unsubscribePerformanceMetrics,
-        unsubscribeMilestone,
+        unsubscribeEntityProgress,
+        unsubscribeErrors,
         unsubscribeConnectionState
       ];
+      
+      // Update connection state to connected
+      console.log('✅ useDetailedMigrationProgress: Connection and setup complete');
+      setState(prev => ({ 
+        ...prev, 
+        connectionState: 'connected', 
+        isConnected: true,
+        lastHeartbeat: new Date()
+      }));
       
     } catch (error) {
       addError('Failed to connect to real-time updates', error);
@@ -467,10 +520,11 @@ export const useDetailedMigrationProgress = (
       });
       unsubscribeCallbacks.current = [];
 
-      // Leave migration group and disconnect
+      // Leave migration group but DON'T disconnect the shared SignalR connection
+      // The connection is shared across all dashboard components
       signalRService.current.leaveMigrationGroup(migrationId);
-      signalRService.current.disconnect();
-
+      
+      // Only update local state - don't disconnect the shared connection
       setState(prev => ({ 
         ...prev, 
         isConnected: false, 
@@ -494,7 +548,7 @@ export const useDetailedMigrationProgress = (
     setState(prev => ({ ...prev, isLoading: true }));
     
     try {
-      const response = await fetch(`/api/dashboard/migrations/${migrationId}/detailed-status`);
+      const response = await fetch(`/api/dashboard/migrations/${migrationId}/status`);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
@@ -570,28 +624,49 @@ export const useDetailedMigrationProgress = (
     return unsubscribe;
   }, [migrationId]);
 
-  // Auto-connect and polling setup
+  // Auto-connect setup (runs once on mount)
   useEffect(() => {
+    console.log('🔄 Connection setup - autoConnect:', autoConnect, 'migrationId:', migrationId);
     if (autoConnect) {
       connect();
-      
-      // Set up fallback polling
-      if (pollInterval > 0) {
-        pollTimer.current = setInterval(() => {
-          if (!state.isConnected) {
-            refresh();
+    }
+    
+    return () => {
+      console.log('🧹 Cleanup: Disconnecting on unmount');
+      disconnect();
+    };
+  }, [autoConnect, migrationId]); // Stable dependencies
+
+  // Polling setup (separate from connection) - using refs to avoid stale closures
+  useEffect(() => {
+    console.log('🔄 Polling setup - pollInterval:', pollInterval);
+    
+    if (pollInterval > 0) {
+      pollTimer.current = setInterval(() => {
+        // Use a callback to get current state to avoid stale closure
+        setState(currentState => {
+          console.log('🔄 Polling timer fired - isConnected:', currentState.isConnected);
+          if (!currentState.isConnected) {
+            console.log('🔄 Not connected, triggering refresh');
+            // Call refresh in next tick to avoid state update during render
+            setTimeout(() => refresh(), 0);
+          } else {
+            console.log('🔄 Connected, skipping refresh');
           }
-        }, pollInterval);
-      }
+          return currentState; // No state change
+        });
+      }, pollInterval);
+      console.log('✅ Polling timer set up with interval:', pollInterval, 'ms');
     }
 
     return () => {
+      console.log('🧹 Cleanup: Clearing polling timer');
       if (pollTimer.current) {
         clearInterval(pollTimer.current);
+        pollTimer.current = null;
       }
-      disconnect();
     };
-  }, [autoConnect, connect, disconnect, refresh, pollInterval]);
+  }, [pollInterval]); // Only re-setup when pollInterval changes
 
   // Cleanup on unmount
   useEffect(() => {

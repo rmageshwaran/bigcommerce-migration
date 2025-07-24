@@ -22,10 +22,10 @@ import {
 } from '@mui/icons-material';
 
 // Import our real-time components
-import { RealTimeMigrationDashboard } from '../Dashboard/RealTimeMigrationDashboard';
+import { EnhancedMigrationDashboard } from '../Dashboard/EnhancedMigrationDashboard';
 import { RealTimeProgressBar } from '../Progress/RealTimeProgressBar';
 import { RealTimeEntityGrid } from '../Progress/RealTimeEntityGrid';
-import { useRealTimeMigrationProgress } from '../../hooks/useRealTimeMigrationProgress';
+import { useDetailedMigrationProgress } from '../../hooks/useDetailedMigrationProgress';
 
 // Mock data for demonstration
 const mockMigrationProgress = {
@@ -106,10 +106,10 @@ const mockMigrationProgress = {
 
 const codeExamples = {
   basicUsage: `
-import { RealTimeMigrationDashboard } from './components/Dashboard/RealTimeMigrationDashboard';
+import { EnhancedMigrationDashboard } from './components/Dashboard/EnhancedMigrationDashboard';
 
 // Basic usage - shows full dashboard with all features
-<RealTimeMigrationDashboard
+<EnhancedMigrationDashboard
   migrationId="your-migration-id"
   autoConnect={true}
   enableNotifications={true}
@@ -146,7 +146,7 @@ import { RealTimeEntityGrid } from './components/Progress/RealTimeEntityGrid';
 />`,
 
   customHook: `
-import { useRealTimeMigrationProgress } from './hooks/useRealTimeMigrationProgress';
+import { useDetailedMigrationProgress } from './hooks/useDetailedMigrationProgress';
 
 // Custom hook for real-time data
 function MyComponent({ migrationId }) {
@@ -159,7 +159,7 @@ function MyComponent({ migrationId }) {
     errors,
     refresh,
     reconnect
-  } = useRealTimeMigrationProgress({
+  } = useDetailedMigrationProgress({
     migrationId,
     autoConnect: true,
     enableNotifications: true,
@@ -201,7 +201,7 @@ export const RealTimeProgressExample: React.FC = () => {
             </Button>
           </Box>
           
-          <RealTimeMigrationDashboard
+          <EnhancedMigrationDashboard
             migrationId={migrationId}
             autoConnect={false} // Demo mode
             enableNotifications={true}
@@ -465,8 +465,8 @@ export const RealTimeProgressExample: React.FC = () => {
             <strong>Step 1:</strong> Import the components you need:
           </Typography>
           <Box component="pre" sx={{ backgroundColor: '#f5f5f5', p: 1, borderRadius: 1, fontSize: '0.875rem' }}>
-{`import { RealTimeMigrationDashboard } from './components/Dashboard/RealTimeMigrationDashboard';
-import { useRealTimeMigrationProgress } from './hooks/useRealTimeMigrationProgress';`}
+{`import { EnhancedMigrationDashboard } from './components/Dashboard/EnhancedMigrationDashboard';
+import { useDetailedMigrationProgress } from './hooks/useDetailedMigrationProgress';`}
           </Box>
           
           <Typography variant="body1" paragraph sx={{ mt: 2 }}>
@@ -474,7 +474,7 @@ import { useRealTimeMigrationProgress } from './hooks/useRealTimeMigrationProgre
           </Typography>
           <Box component="pre" sx={{ backgroundColor: '#f5f5f5', p: 1, borderRadius: 1, fontSize: '0.875rem' }}>
 {`// In your App.tsx or routing component
-<RealTimeMigrationDashboard 
+<EnhancedMigrationDashboard 
   migrationId={currentMigrationId}
   autoConnect={true}
   enableNotifications={true}

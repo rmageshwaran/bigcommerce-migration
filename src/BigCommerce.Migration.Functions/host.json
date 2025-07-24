@@ -76,7 +76,8 @@
       "http://localhost:3000",
       "http://localhost:5173",
       "https://localhost:3000",
-      "https://localhost:5173"
+      "https://localhost:5173",
+      "*"
     ],
     "headers": [
       "Authorization",
@@ -84,7 +85,17 @@
       "x-requested-with",
       "x-signalr-user-agent",
       "x-ms-signalr-connectionid",
-      "x-functions-key"
+      "x-ms-signalr-userid",
+      "x-ms-client-principal-name",
+      "x-ms-client-principal-id",
+      "x-functions-key",
+      "Access-Control-Allow-Origin",
+      "Access-Control-Allow-Headers", 
+      "Access-Control-Allow-Methods",
+      "Access-Control-Allow-Credentials",
+      "Cache-Control",
+      "Connection",
+      "Upgrade"
     ]
   }
 } 

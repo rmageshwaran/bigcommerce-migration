@@ -40,10 +40,9 @@ export const config = {
 
   // SignalR Configuration
   signalR: {
-    // Use Azure SignalR Service for both development and production
-    // The Azure Functions backend handles the SignalR service connection
-    hubUrl: getEnvVar('VITE_SIGNALR_HUB_URL', 'https://vortexiq-migration-signalr-dev.service.signalr.net'),
-    hubName: 'migration', // SignalR hub name
+    // Force correct SignalR negotiate endpoint path (bypasses any env var overrides)
+    hubUrl: '/SignalRNegotiation', // Will be combined with api.baseUrl to form /api/SignalRNegotiation
+    hubName: 'migrationhub', // Must match backend hub name
     reconnectAttempts: getEnvNumber('VITE_RECONNECT_ATTEMPTS', 5),
     connectionTimeout: getEnvNumber('VITE_CONNECTION_TIMEOUT', 30000),
   },

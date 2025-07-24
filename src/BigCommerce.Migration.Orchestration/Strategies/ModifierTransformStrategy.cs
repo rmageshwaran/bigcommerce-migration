@@ -27,8 +27,6 @@ public class ModifierTransformStrategy : IEntityTransformStrategy
         CategoryTreeContext? categoryTreeContext = null,
         CancellationToken cancellationToken = default)
     {
-        _logger.LogDebug("Transforming modifier for migration {MigrationId}", migrationId);
-        
         var transformed = new Dictionary<string, object>(entity);
 
         // Handle product mapping if available

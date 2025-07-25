@@ -35,6 +35,7 @@ import {
 } from '@mui/icons-material';
 import { format } from 'date-fns';
 import { apiService } from '../../services/apiService';
+import { useDashboard } from '../../context/DashboardContext';
 import type { MigrationStatus } from '../../types';
 import Collapse from '@mui/material/Collapse';
 import Pagination from '@mui/material/Pagination';
@@ -85,6 +86,7 @@ const statusOptions: { value: MigrationStatus; label: string; color: 'default' |
 export const MigrationDetailView: React.FC = () => {
   const { requestId } = useParams<{ requestId: string }>();
   const navigate = useNavigate();
+  const { leaveMigrationGroup } = useDashboard();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [entitySummary, setEntitySummary] = useState<EntitySummary[]>([]);
@@ -126,7 +128,17 @@ export const MigrationDetailView: React.FC = () => {
     }
   }, [requestId]);
 
-
+  // Cleanup: Leave migration group when component unmounts
+  useEffect(() => {
+    return () => {
+      if (requestId) {
+        console.log(`🧹 Cleaning up MigrationDetailView - leaving group for migration: ${requestId}`);
+        leaveMigrationGroup(requestId).catch(error => {
+          console.warn(`⚠️ Failed to leave migration group ${requestId} during cleanup:`, error);
+        });
+      }
+    };
+  }, [requestId, leaveMigrationGroup]);
 
   const fetchEntitySummary = async () => {
     if (entitySummaryFetchedRef.current || entitySummaryLoading) {

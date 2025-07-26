@@ -538,6 +538,59 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
       }
     });
 
+    // Entity progress updates (when individual entities complete)
+    const entityProgressUnsubscribe = signalRService.on('EntityProgressUpdated', (entityData: any) => {
+      console.log('🔄 DashboardContext received EntityProgressUpdated:', entityData);
+      
+      const migrationId = entityData.migrationId || entityData.MigrationId;
+      if (!migrationId) return;
+      
+      // If entity status is completed, update the overall migration status
+      if (entityData.Status === 'completed' || entityData.status === 'completed') {
+        console.log('✅ DashboardContext: Entity completed, updating migration status to completed');
+        
+        // Update the migration to completed status
+        const completedProgress: MigrationProgress = {
+          migrationId: migrationId,
+          status: 'completed',
+          totalEntities: entityData.TotalCount || entityData.totalCount || 0,
+          processedEntities: entityData.ProcessedCount || entityData.processedCount || 0,
+          successfulEntities: entityData.SuccessCount || entityData.successCount || 0,
+          failedEntities: entityData.FailureCount || entityData.failureCount || 0,
+          startTime: new Date(),
+          lastUpdated: new Date(),
+          entitiesPerSecond: 0,
+          estimatedTimeRemaining: 0,
+          elapsedTime: 0,
+          currentEntity: entityData.EntityType || entityData.entityType || '',
+          currentPhase: 'completed',
+          overallProgressPercentage: 100,
+          entityProgress: {},
+          errorRate: 0
+        };
+        dispatch({ type: 'UPDATE_MIGRATION_PROGRESS', payload: completedProgress });
+        
+        // Show completion notification
+        const migrationName = `Migration ${migrationId}`;
+        notificationService.migrationCompleted(
+          migrationId,
+          migrationName,
+          entityData.ProcessingTime || 'just completed'
+        );
+      } else if (migrationId) {
+        // Update entity counts for other statuses
+        dispatch({ 
+          type: 'UPDATE_MIGRATION_PROGRESS', 
+          payload: {
+            migrationId: migrationId,
+            processedEntities: entityData.ProcessedCount || entityData.processedCount,
+            totalEntities: entityData.TotalCount || entityData.totalCount,
+            lastUpdated: new Date()
+          } as MigrationProgress
+        });
+      }
+    });
+
     // System health updates
     const healthUnsubscribe = signalRService.on('systemHealth', (health: SystemHealthData) => {
       dispatch({ type: 'UPDATE_SYSTEM_HEALTH', payload: health });
@@ -564,6 +617,7 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
       connectionUnsubscribe();
       progressUnsubscribe();
       statusUnsubscribe();
+      entityProgressUnsubscribe();
       healthUnsubscribe();
       errorUnsubscribe();
       

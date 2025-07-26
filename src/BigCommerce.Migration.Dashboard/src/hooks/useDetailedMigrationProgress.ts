@@ -161,21 +161,24 @@ export const useDetailedMigrationProgress = (
     pollInterval = 30000
   } = options;
 
+  // Check if SignalR is already connected to determine initial loading state
+  const signalRService = useRef(getSignalRService());
+  const isInitiallyConnected = signalRService.current.isConnected();
+  
   // State management
   const [state, setState] = useState<UseDetailedMigrationProgressState>({
     progress: null,
-    isConnected: false,
-    connectionState: 'disconnected',
-    lastHeartbeat: null,
+    isConnected: isInitiallyConnected,
+    connectionState: isInitiallyConnected ? 'connected' : 'disconnected',
+    lastHeartbeat: isInitiallyConnected ? new Date() : null,
     recentEvents: [],
     milestones: [],
     errors: [],
-    isLoading: true,
+    isLoading: !isInitiallyConnected, // Only show loading if not already connected
     lastUpdated: null
   });
 
   // Refs for cleanup and tracking
-  const signalRService = useRef(getSignalRService());
   const unsubscribeCallbacks = useRef<Array<() => void>>([]);
   const eventIdCounter = useRef(0);
   const pollTimer = useRef<NodeJS.Timeout | null>(null);
@@ -225,30 +228,41 @@ export const useDetailedMigrationProgress = (
   // Handle detailed progress updates (now receives already-transformed data)
   const handleDetailedProgress = useCallback((progress: any) => {
     console.log('🎯 useDetailedMigrationProgress received transformed progress:', progress);
-    if (progress.migrationId !== migrationId) return;
+    console.log('🎯 Current migrationId:', migrationId, 'Progress migrationId:', progress?.migrationId);
+    
+    if (progress?.migrationId && progress.migrationId !== migrationId) {
+      console.log('🎯 Skipping progress - wrong migrationId');
+      return;
+    }
 
     if (!progress) {
       console.log('⚠️ useDetailedMigrationProgress: No progress data received');
       return;
     }
 
+    console.log('🎯 Setting progress state:', progress);
+    
     // Data is already transformed by SignalR service, just use it directly
-    setState(prev => ({
-      ...prev,
-      progress: {
-        ...progress,
-        // Ensure we have all required fields for the detailed dashboard
-        currentProcessing: progress.currentProcessing || {},
-        batchProgress: progress.batchProgress || {},
-        remainingWork: progress.remainingWork || {},
-        performance: progress.performance || {}
-      },
-      isLoading: false,
-      lastUpdated: new Date(),
-      lastHeartbeat: new Date()
-    }));
+    setState(prev => {
+      const newState = {
+        ...prev,
+        progress: {
+          ...progress,
+          // Ensure we have all required fields for the detailed dashboard
+          currentProcessing: progress.currentProcessing || {},
+          batchProgress: progress.batchProgress || {},
+          remainingWork: progress.remainingWork || {},
+          performance: progress.performance || {}
+        },
+        isLoading: false,
+        lastUpdated: new Date(),
+        lastHeartbeat: new Date()
+      };
+      console.log('🎯 New state will be:', newState);
+      return newState;
+    });
 
-    addEvent('DetailedProgress', event, `Detailed progress: ${(progress.overallProgressPercentage || 0).toFixed(1)}%`);
+    addEvent('DetailedProgress', progress, `Detailed progress: ${(progress.overallProgressPercentage || 0).toFixed(1)}%`);
 
     if (enableNotifications && progress.status === 'completed') {
       notificationService.success('Migration Complete', `Migration ${migrationId} completed successfully!`);
@@ -464,6 +478,127 @@ export const useDetailedMigrationProgress = (
   const connect = useCallback(async () => {
     try {
       console.log('🔄 useDetailedMigrationProgress: Starting connection for migrationId:', migrationId);
+      
+      // Check if already connected and set up listeners immediately
+      if (signalRService.current.isConnected()) {
+        console.log('✅ useDetailedMigrationProgress: SignalR already connected, setting up listeners immediately');
+        
+        // Join migration group (safe to call even if already joined)
+        await signalRService.current.joinMigrationGroup(migrationId);
+        
+        // Set up event listeners immediately
+        const unsubscribeProgress = signalRService.current.on('migrationProgress', handleDetailedProgress);
+        const unsubscribeStatus = signalRService.current.on('MigrationStatus', handleStatusUpdate);
+        const unsubscribeBatchProgress = signalRService.current.on('BatchProgressUpdated', (event: any) => handleBatchEvent('BatchProgress', event));
+        const unsubscribeEntityProgress = signalRService.current.on('EntityProgressUpdated', handleEntityUpdate);
+        const unsubscribeErrors = signalRService.current.on('ErrorOccurred', handleErrorEvent);
+        const unsubscribeConnectionState = signalRService.current.on('connectionStateChanged', handleConnectionStateChange);
+        
+        unsubscribeCallbacks.current = [
+          unsubscribeProgress,
+          unsubscribeStatus,
+          unsubscribeBatchProgress,
+          unsubscribeEntityProgress,
+          unsubscribeErrors,
+          unsubscribeConnectionState
+        ];
+        
+        // Update state to connected and not loading
+        setState(prev => ({ 
+          ...prev, 
+          connectionState: 'connected', 
+          isConnected: true,
+          isLoading: false,
+          lastHeartbeat: new Date()
+        }));
+        
+        console.log('✅ useDetailedMigrationProgress: Listeners set up for existing connection');
+        
+        // Fetch initial migration data and transform to match SignalR format
+        console.log('🔄 useDetailedMigrationProgress: Fetching initial migration data...');
+        try {
+          const { config } = await import('../config/environment');
+          const response = await fetch(`${config.api.baseUrl}/dashboard/migrations/${migrationId}/status`);
+          if (response.ok) {
+            const data = await response.json();
+            console.log('✅ useDetailedMigrationProgress: Initial data fetched:', data);
+            
+            // Helper function to parse time strings like "00:00:20.4497323" to seconds
+            const parseTimeStringToSeconds = (timeStr: string): number => {
+              if (!timeStr || typeof timeStr !== 'string') return 0;
+              try {
+                const parts = timeStr.split(':');
+                if (parts.length >= 3) {
+                  const hours = parseInt(parts[0]) || 0;
+                  const minutes = parseInt(parts[1]) || 0;
+                  const seconds = parseFloat(parts[2]) || 0;
+                  return hours * 3600 + minutes * 60 + seconds;
+                }
+                return 0;
+              } catch {
+                return 0;
+              }
+            };
+
+            // Transform PascalCase API data to camelCase format with nested structures
+            const transformedData = {
+              migrationId: data.MigrationId || migrationId,
+              status: (data.Status || 'unknown').toLowerCase(),
+              totalEntities: data.TotalEntities || 0,
+              processedEntities: data.ProcessedEntities || 0,
+              successfulEntities: data.SuccessfulEntities || 0,
+              failedEntities: data.FailedEntities || 0,
+              overallProgressPercentage: data.OverallProgress || 0,
+              currentEntity: data.CurrentEntity || 'Unknown',
+              currentPhase: data.CurrentPhase || 'Processing',
+              entitiesPerSecond: data.EntitiesPerSecond || 0,
+              errorRate: data.ErrorRate || 0,
+              elapsedTime: parseTimeStringToSeconds(data.ElapsedTime),
+              estimatedTimeRemaining: parseTimeStringToSeconds(data.EstimatedTimeRemaining),
+              startTime: data.StartTime ? new Date(data.StartTime) : new Date(),
+              lastUpdated: new Date(),
+              
+              // Add required nested structures for Enhanced Dashboard
+              currentProcessing: {
+                currentEntity: data.CurrentEntity || 'Unknown',
+                currentActivity: data.CurrentPhase || 'Processing...',
+                currentBatchNumber: Math.ceil((data.ProcessedEntities || 0) / 50) || 1,
+                currentBatch: {
+                  batchProgressPercentage: ((data.OverallProgress || 0) % 10) * 10,
+                  batchSize: 50,
+                  processedInBatch: (data.ProcessedEntities || 0) % 50,
+                  batchProcessingSpeed: data.EntitiesPerSecond || 0
+                }
+              },
+              batchProgress: {
+                totalBatches: Math.ceil((data.TotalEntities || 0) / 50) || 1,
+                completedBatches: Math.floor((data.ProcessedEntities || 0) / 50) || 0,
+                remainingBatches: Math.ceil(((data.TotalEntities || 0) - (data.ProcessedEntities || 0)) / 50) || 0
+              },
+              remainingWork: {
+                remainingEntities: (data.TotalEntities || 0) - (data.ProcessedEntities || 0),
+                estimatedTimeRemaining: parseTimeStringToSeconds(data.EstimatedTimeRemaining)
+              },
+              performance: {
+                currentProcessingSpeed: data.EntitiesPerSecond || 0,
+                averageProcessingSpeed: data.EntitiesPerSecond || 0,
+                performanceTrend: (data.EntitiesPerSecond || 0) > 5 ? 'improving' : (data.EntitiesPerSecond || 0) > 2 ? 'stable' : 'declining'
+              }
+            };
+            
+            console.log('🔄 useDetailedMigrationProgress: Transformed API data:', transformedData);
+            handleDetailedProgress(transformedData);
+          } else {
+            console.warn('⚠️ useDetailedMigrationProgress: Failed to fetch initial data:', response.status);
+          }
+        } catch (error) {
+          console.warn('⚠️ useDetailedMigrationProgress: Error fetching initial data:', error);
+        }
+        
+        return;
+      }
+      
+      // Not connected yet, establish connection
       setState(prev => ({ ...prev, connectionState: 'connecting' }));
       
       console.log('🔄 useDetailedMigrationProgress: Calling signalRService.connect()');
@@ -497,12 +632,94 @@ export const useDetailedMigrationProgress = (
         ...prev, 
         connectionState: 'connected', 
         isConnected: true,
+        isLoading: false,
         lastHeartbeat: new Date()
       }));
       
+      // Fetch initial migration data and transform
+      console.log('🔄 useDetailedMigrationProgress: Fetching initial migration data after new connection...');
+      try {
+        const { config } = await import('../config/environment');
+        const response = await fetch(`${config.api.baseUrl}/dashboard/migrations/${migrationId}/status`);
+        if (response.ok) {
+          const data = await response.json();
+          console.log('✅ useDetailedMigrationProgress: Initial data fetched:', data);
+          
+          // Helper function to parse time strings like "00:00:20.4497323" to seconds
+          const parseTimeStringToSeconds = (timeStr: string): number => {
+            if (!timeStr || typeof timeStr !== 'string') return 0;
+            try {
+              const parts = timeStr.split(':');
+              if (parts.length >= 3) {
+                const hours = parseInt(parts[0]) || 0;
+                const minutes = parseInt(parts[1]) || 0;
+                const seconds = parseFloat(parts[2]) || 0;
+                return hours * 3600 + minutes * 60 + seconds;
+              }
+              return 0;
+            } catch {
+              return 0;
+            }
+          };
+
+          // Transform PascalCase API data to camelCase format with nested structures
+          const transformedData = {
+            migrationId: data.MigrationId || migrationId,
+            status: (data.Status || 'unknown').toLowerCase(),
+            totalEntities: data.TotalEntities || 0,
+            processedEntities: data.ProcessedEntities || 0,
+            successfulEntities: data.SuccessfulEntities || 0,
+            failedEntities: data.FailedEntities || 0,
+            overallProgressPercentage: data.OverallProgress || 0,
+            currentEntity: data.CurrentEntity || 'Unknown',
+            currentPhase: data.CurrentPhase || 'Processing',
+            entitiesPerSecond: data.EntitiesPerSecond || 0,
+            errorRate: data.ErrorRate || 0,
+            elapsedTime: parseTimeStringToSeconds(data.ElapsedTime),
+            estimatedTimeRemaining: parseTimeStringToSeconds(data.EstimatedTimeRemaining),
+            startTime: data.StartTime ? new Date(data.StartTime) : new Date(),
+            lastUpdated: new Date(),
+            
+            // Add required nested structures for Enhanced Dashboard
+            currentProcessing: {
+              currentEntity: data.CurrentEntity || 'Unknown',
+              currentActivity: data.CurrentPhase || 'Processing...',
+              currentBatchNumber: Math.ceil((data.ProcessedEntities || 0) / 50) || 1,
+              currentBatch: {
+                batchProgressPercentage: ((data.OverallProgress || 0) % 10) * 10,
+                batchSize: 50,
+                processedInBatch: (data.ProcessedEntities || 0) % 50,
+                batchProcessingSpeed: data.EntitiesPerSecond || 0
+              }
+            },
+            batchProgress: {
+              totalBatches: Math.ceil((data.TotalEntities || 0) / 50) || 1,
+              completedBatches: Math.floor((data.ProcessedEntities || 0) / 50) || 0,
+              remainingBatches: Math.ceil(((data.TotalEntities || 0) - (data.ProcessedEntities || 0)) / 50) || 0
+            },
+            remainingWork: {
+              remainingEntities: (data.TotalEntities || 0) - (data.ProcessedEntities || 0),
+              estimatedTimeRemaining: parseTimeStringToSeconds(data.EstimatedTimeRemaining)
+            },
+            performance: {
+              currentProcessingSpeed: data.EntitiesPerSecond || 0,
+              averageProcessingSpeed: data.EntitiesPerSecond || 0,
+              performanceTrend: (data.EntitiesPerSecond || 0) > 5 ? 'improving' : (data.EntitiesPerSecond || 0) > 2 ? 'stable' : 'declining'
+            }
+          };
+          
+          console.log('🔄 useDetailedMigrationProgress: Transformed API data:', transformedData);
+          handleDetailedProgress(transformedData);
+        } else {
+          console.warn('⚠️ useDetailedMigrationProgress: Failed to fetch initial data:', response.status);
+        }
+      } catch (error) {
+        console.warn('⚠️ useDetailedMigrationProgress: Error fetching initial data:', error);
+      }
+      
     } catch (error) {
       addError('Failed to connect to real-time updates', error);
-      setState(prev => ({ ...prev, connectionState: 'disconnected' }));
+      setState(prev => ({ ...prev, connectionState: 'disconnected', isLoading: false }));
     }
   }, [migrationId, handleDetailedProgress, handleProcessingContext, handleBatchEvent, 
       handleRemainingWorkload, handlePerformanceMetrics, handleMilestone, handleConnectionStateChange, addError]);
@@ -548,13 +765,79 @@ export const useDetailedMigrationProgress = (
     setState(prev => ({ ...prev, isLoading: true }));
     
     try {
-      const response = await fetch(`/api/dashboard/migrations/${migrationId}/status`);
+      const { config } = await import('../config/environment');
+      const response = await fetch(`${config.api.baseUrl}/dashboard/migrations/${migrationId}/status`);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
       
       const data = await response.json();
-      handleDetailedProgress({ Progress: data });
+      console.log('🔄 refresh: Fetched data:', data);
+      
+      // Helper function to parse time strings like "00:00:20.4497323" to seconds
+      const parseTimeStringToSeconds = (timeStr: string): number => {
+        if (!timeStr || typeof timeStr !== 'string') return 0;
+        try {
+          const parts = timeStr.split(':');
+          if (parts.length >= 3) {
+            const hours = parseInt(parts[0]) || 0;
+            const minutes = parseInt(parts[1]) || 0;
+            const seconds = parseFloat(parts[2]) || 0;
+            return hours * 3600 + minutes * 60 + seconds;
+          }
+          return 0;
+        } catch {
+          return 0;
+        }
+      };
+
+      // Transform PascalCase API data to camelCase format with nested structures
+      const transformedData = {
+        migrationId: data.MigrationId || migrationId,
+        status: (data.Status || 'unknown').toLowerCase(),
+        totalEntities: data.TotalEntities || 0,
+        processedEntities: data.ProcessedEntities || 0,
+        successfulEntities: data.SuccessfulEntities || 0,
+        failedEntities: data.FailedEntities || 0,
+        overallProgressPercentage: data.OverallProgress || 0,
+        currentEntity: data.CurrentEntity || 'Unknown',
+        currentPhase: data.CurrentPhase || 'Processing',
+        entitiesPerSecond: data.EntitiesPerSecond || 0,
+        errorRate: data.ErrorRate || 0,
+        elapsedTime: parseTimeStringToSeconds(data.ElapsedTime),
+        estimatedTimeRemaining: parseTimeStringToSeconds(data.EstimatedTimeRemaining),
+        startTime: data.StartTime ? new Date(data.StartTime) : new Date(),
+        lastUpdated: new Date(),
+        
+        // Add required nested structures for Enhanced Dashboard
+        currentProcessing: {
+          currentEntity: data.CurrentEntity || 'Unknown',
+          currentActivity: data.CurrentPhase || 'Processing...',
+          currentBatchNumber: Math.ceil((data.ProcessedEntities || 0) / 50) || 1,
+          currentBatch: {
+            batchProgressPercentage: ((data.OverallProgress || 0) % 10) * 10,
+            batchSize: 50,
+            processedInBatch: (data.ProcessedEntities || 0) % 50,
+            batchProcessingSpeed: data.EntitiesPerSecond || 0
+          }
+        },
+        batchProgress: {
+          totalBatches: Math.ceil((data.TotalEntities || 0) / 50) || 1,
+          completedBatches: Math.floor((data.ProcessedEntities || 0) / 50) || 0,
+          remainingBatches: Math.ceil(((data.TotalEntities || 0) - (data.ProcessedEntities || 0)) / 50) || 0
+        },
+        remainingWork: {
+          remainingEntities: (data.TotalEntities || 0) - (data.ProcessedEntities || 0),
+          estimatedTimeRemaining: parseTimeStringToSeconds(data.EstimatedTimeRemaining)
+        },
+        performance: {
+          currentProcessingSpeed: data.EntitiesPerSecond || 0,
+          averageProcessingSpeed: data.EntitiesPerSecond || 0,
+          performanceTrend: (data.EntitiesPerSecond || 0) > 5 ? 'improving' : (data.EntitiesPerSecond || 0) > 2 ? 'stable' : 'declining'
+        }
+      };
+      
+      handleDetailedProgress(transformedData);
     } catch (error) {
       addError('Failed to fetch detailed migration progress', error);
     } finally {

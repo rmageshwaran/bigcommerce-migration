@@ -37,9 +37,11 @@ import {
   ViewModule as BatchIcon,
   TrendingUp as TrendingUpIcon,
   TrendingDown as TrendingDownIcon,
-  TrendingFlat as TrendingFlatIcon
+  TrendingFlat as TrendingFlatIcon,
+  ArrowBack as ArrowBackIcon
 } from '@mui/icons-material';
 import { format, formatDistanceToNow } from 'date-fns';
+import { useNavigate } from 'react-router-dom';
 
 // Import our enhanced hook
 import { useDetailedMigrationProgress } from '../../hooks/useDetailedMigrationProgress';
@@ -62,6 +64,7 @@ export const EnhancedMigrationDashboard: React.FC<EnhancedMigrationDashboardProp
   onMigrationError
 }) => {
   const theme = useTheme();
+  const navigate = useNavigate();
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
@@ -137,11 +140,22 @@ export const EnhancedMigrationDashboard: React.FC<EnhancedMigrationDashboardProp
   const handleCancelConfirm = async () => {
     setIsCancelling(true);
     try {
+      // Cancel the migration via API
       await apiService.cancelMigration(migrationId);
+      
+      // Leave SignalR group to stop receiving real-time updates
+      console.log('🚪 Leaving SignalR group for cancelled migration:', migrationId);
+      disconnect();
+      
       setSnackbarMessage('🛑 Migration cancelled successfully!');
       setSnackbarSeverity('warning');
       setSnackbarOpen(true);
       setCancelDialogOpen(false);
+      
+      // Navigate to history page to see the cancelled migration
+      console.log('📄 Navigating to history page...');
+      navigate('/history');
+      
     } catch (error) {
       setSnackbarMessage(`❌ Failed to cancel migration: ${error instanceof Error ? error.message : 'Unknown error'}`);
       setSnackbarSeverity('error');
@@ -209,14 +223,40 @@ export const EnhancedMigrationDashboard: React.FC<EnhancedMigrationDashboardProp
         p: isFullscreen ? 2 : 0
       }}
     >
+      {/* Top-level page header */}
+      <Box display="flex" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+        <Box>
+          <Typography variant="h4" fontWeight="600">
+            Enhanced Migration Dashboard
+          </Typography>
+          <Typography variant="body1" color="textSecondary">
+            Advanced real-time monitoring with batch-level tracking and performance analytics.
+          </Typography>
+        </Box>
+        <Tooltip title="Back to Migration Overview">
+          <Button
+            variant="outlined"
+            size="medium"
+            startIcon={<ArrowBackIcon />}
+            onClick={() => navigate('/')}
+            sx={{ 
+              borderColor: 'primary.main',
+              color: 'primary.main',
+              '&:hover': {
+                backgroundColor: theme => alpha(theme.palette.primary.main, 0.04)
+              }
+            }}
+          >
+            Back To Overview
+          </Button>
+        </Tooltip>
+      </Box>
+
       {/* Header with Enhanced Controls */}
       <Card sx={{ mb: 2 }}>
         <CardContent>
           <Box display="flex" justifyContent="space-between" alignItems="center">
             <Box>
-              <Typography variant="h5" fontWeight="600">
-                Enhanced Migration Dashboard
-              </Typography>
               <Typography variant="subtitle1" color="textSecondary" sx={{ fontFamily: 'monospace', fontSize: '0.9rem' }}>
                 Migration {migrationId}
               </Typography>
@@ -238,6 +278,8 @@ export const EnhancedMigrationDashboard: React.FC<EnhancedMigrationDashboardProp
               </Box>
             </Box>
 
+
+
             <Stack direction="row" spacing={1}>
               <Tooltip title="Refresh data">
                 <IconButton onClick={refresh} disabled={isLoading}>
@@ -245,8 +287,25 @@ export const EnhancedMigrationDashboard: React.FC<EnhancedMigrationDashboardProp
                 </IconButton>
               </Tooltip>
 
-              {/* Cancel button - only show for running migrations */}
-              {progress?.status === 'in_progress' || progress?.status === 'inprogress' || progress?.status === 'running' ? (
+              {/* Cancel button - show for active migrations (immediate) and running migrations (after data loads) */}
+              {(() => {
+                console.log('🔍 Enhanced Dashboard - Progress status:', progress?.status, 'MigrationId:', migrationId, 'IsLoading:', isLoading);
+                
+                // Don't show cancel button for completed, failed, or cancelled migrations
+                const isCompleted = progress?.status === 'completed' || progress?.status === 'failed' || progress?.status === 'cancelled';
+                if (isCompleted) {
+                  console.log('🚫 Enhanced Dashboard - Migration is completed/failed/cancelled - hiding cancel button');
+                  return false;
+                }
+                
+                // Show cancel button if:
+                // 1. We have a migrationId (indicating this is an active migration) OR
+                // 2. Progress data shows running/progress status
+                const hasActiveMigration = !!migrationId;
+                const hasRunningStatus = progress?.status === 'running' || progress?.status === 'in_progress' || progress?.status === 'inprogress' || progress?.status?.toLowerCase().includes('progress');
+                
+                return hasActiveMigration || hasRunningStatus;
+              })() ? (
                 <Tooltip title="Cancel migration">
                   <Button
                     variant="outlined"

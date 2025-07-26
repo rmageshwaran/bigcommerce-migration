@@ -44,6 +44,31 @@ export const useMigrationProgress = (
     }
   }, [migrationId]);
 
+  // Handle entity progress updates from SignalR (when entities complete)
+  const handleEntityProgressUpdate = useCallback((entityData: any) => {
+    if (entityData.migrationId === migrationId || entityData.MigrationId === migrationId) {
+      console.log('🔄 useMigrationProgress: Received EntityProgressUpdated:', entityData);
+      
+      // If entity status is completed, update the overall migration status
+      if (entityData.Status === 'completed' || entityData.status === 'completed') {
+        console.log('✅ useMigrationProgress: Entity completed, updating migration status to completed');
+        setProgress(prev => prev ? { 
+          ...prev, 
+          status: 'completed',
+          processedEntities: entityData.ProcessedCount || entityData.processedCount || prev.processedEntities,
+          totalEntities: entityData.TotalCount || entityData.totalCount || prev.totalEntities
+        } : null);
+      } else {
+        // Update entity counts for other statuses
+        setProgress(prev => prev ? { 
+          ...prev,
+          processedEntities: entityData.ProcessedCount || entityData.processedCount || prev.processedEntities,
+          totalEntities: entityData.TotalCount || entityData.totalCount || prev.totalEntities
+        } : null);
+      }
+    }
+  }, [migrationId]);
+
   // Handle connection state changes
   const handleConnectionStateChange = useCallback((connectionData: any) => {
     setIsConnected(connectionData.state === 'Connected');
@@ -99,6 +124,7 @@ export const useMigrationProgress = (
     // Subscribe to SignalR events
     const progressUnsubscribe = signalRService.on('MigrationProgressUpdated', handleProgressUpdate);
     const statusUnsubscribe = signalRService.on('MigrationStatusChanged', handleStatusUpdate);
+    const entityProgressUnsubscribe = signalRService.on('EntityProgressUpdated', handleEntityProgressUpdate);
     const connectionUnsubscribe = signalRService.on('connectionStateChanged', handleConnectionStateChange);
 
     // Initial connection state
@@ -129,6 +155,7 @@ export const useMigrationProgress = (
     return () => {
       progressUnsubscribe();
       statusUnsubscribe();
+      entityProgressUnsubscribe();
       connectionUnsubscribe();
       
       // Leave migration group on cleanup
@@ -141,6 +168,7 @@ export const useMigrationProgress = (
     autoConnect,
     handleProgressUpdate,
     handleStatusUpdate,
+    handleEntityProgressUpdate,
     handleConnectionStateChange,
     joinMigrationGroup,
     leaveMigrationGroup,

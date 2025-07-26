@@ -7,19 +7,29 @@ import {
   Chip,
   Alert,
   Button,
-  Stack
+  Stack,
+  Collapse,
+  IconButton,
+  Tooltip,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  DialogContentText
 } from '@mui/material';
 import {
   Refresh as RefreshIcon,
   Error as ErrorIcon,
   CheckCircle as SuccessIcon,
   PlayArrow as StartIcon,
-  BugReport as DebugIcon
+  Stop as StopIcon
 } from '@mui/icons-material';
 import { CircularProgress } from '@mui/material';
 import { useDashboard } from '../../context/DashboardContext';
 import { formatDate, formatRelativeTime } from '../../utils/dateUtils';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { apiService } from '../../services/apiService';
+import { getSignalRService } from '../../services/signalRService';
 
 /**
  * MigrationOverview Component
@@ -30,30 +40,69 @@ import { useNavigate } from 'react-router-dom';
  * Key Features:
  * - Real-time connection status for each migration
  * - Loading states and success indicators for group joining
- * - Polling status display when SignalR is unavailable
  * - Enhanced navigation with guaranteed group joining
  * - Comprehensive error handling and user feedback
- * 
- * Implementation Tasks:
- * - Task 4: Show connection status in Active Migrations section
- * - Task 5: Ensure group joined before navigating to detail view
- * - Task 6: Cleanup SignalR groups/listeners on unmount
+ * - Debug information controlled from top navigation
  */
 export const MigrationOverview: React.FC = () => {
   const navigate = useNavigate();
-  const { state, refreshData, addError, joinMigrationGroup } = useDashboard();
+  const location = useLocation();
+  const { state, refreshData, addError, clearErrors, joinMigrationGroup } = useDashboard();
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [joiningGroups, setJoiningGroups] = useState<Set<string>>(new Set());
   const [joinedGroups, setJoinedGroups] = useState<Set<string>>(new Set());
+  const [showDebugInfo, setShowDebugInfo] = useState(false);
+  
+  // Cancel migration state
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [selectedMigrationForCancel, setSelectedMigrationForCancel] = useState<string | null>(null);
+  const [isCancelling, setIsCancelling] = useState(false);
 
-  // Cleanup local state when component unmounts
+  // Listen for debug toggle event from top navigation
   useEffect(() => {
+    const handleToggleDebug = () => {
+      setShowDebugInfo(prev => !prev);
+    };
+
+    window.addEventListener('toggleDebugInfo', handleToggleDebug);
+    
     return () => {
       console.log('🧹 Cleaning up MigrationOverview component...');
       setJoiningGroups(new Set());
       setJoinedGroups(new Set());
+      window.removeEventListener('toggleDebugInfo', handleToggleDebug);
     };
   }, []);
+
+  // Auto-refresh data when navigating to Home page or when window gains focus
+  useEffect(() => {
+    console.log('🏠 MigrationOverview: Page visited/focused, refreshing data...');
+    
+    const handleRefreshData = async () => {
+      try {
+        await refreshData();
+        console.log('✅ MigrationOverview: Auto-refresh completed');
+      } catch (error) {
+        console.error('❌ MigrationOverview: Auto-refresh failed:', error);
+      }
+    };
+
+    // Refresh immediately when component mounts or location changes
+    handleRefreshData();
+
+    // Also refresh when window gains focus (user comes back to tab)
+    const handleWindowFocus = () => {
+      console.log('👁️ MigrationOverview: Window focused, refreshing data...');
+      handleRefreshData();
+    };
+
+    window.addEventListener('focus', handleWindowFocus);
+
+    return () => {
+      window.removeEventListener('focus', handleWindowFocus);
+    };
+  }, [location.pathname]); // Only depend on pathname, not refreshData to avoid infinite loop
+  // eslint-disable-next-line react-hooks/exhaustive-deps
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -75,37 +124,8 @@ export const MigrationOverview: React.FC = () => {
     navigate('/start');
   };
 
-  const handleDebugSignalR = () => {
-    navigate('/test/signalr');
-  };
-
-  const handleViewDashboard = () => {
-    navigate('/enhanced');
-  };
-
   /**
    * Enhanced navigation handler that ensures SignalR group is joined
-   * 
-   * This function implements Task 5: Ensure group joined before navigating to detail view.
-   * It provides a seamless user experience by guaranteeing that real-time updates
-   * are available immediately when the user navigates to the migration detail view.
-   * 
-   * Navigation Flow:
-   * 1. Check if SignalR is connected
-   * 2. If already joined, navigate immediately
-   * 3. If not joined, join the group with loading state
-   * 4. Show success state and navigate
-   * 5. Handle errors gracefully with fallback navigation
-   * 
-   * State Management:
-   * - Uses joiningGroups to track loading state per migration
-   * - Uses joinedGroups to track successful joins
-   * - Provides visual feedback during the join process
-   * 
-   * Error Handling:
-   * - Individual group join failures don't prevent navigation
-   * - Users are notified of connection issues
-   * - Fallback to polling-based updates if needed
    */
   const handleNavigateToMigrationDetail = async (migrationId: string) => {
     try {
@@ -160,6 +180,72 @@ export const MigrationOverview: React.FC = () => {
     }
   };
 
+  // Cancel migration handlers
+  const handleCancelClick = (migrationId: string) => {
+    setSelectedMigrationForCancel(migrationId);
+    setCancelDialogOpen(true);
+  };
+
+  const handleCancelCancel = () => {
+    setCancelDialogOpen(false);
+    setSelectedMigrationForCancel(null);
+  };
+
+  const handleCancelConfirm = async () => {
+    if (!selectedMigrationForCancel) return;
+
+    setIsCancelling(true);
+    try {
+      // Cancel the migration via API
+      await apiService.cancelMigration(selectedMigrationForCancel);
+
+      // Leave SignalR group to stop receiving real-time updates for this migration
+      console.log('🚪 Leaving SignalR group for cancelled migration:', selectedMigrationForCancel);
+      const signalRService = getSignalRService();
+      if (signalRService.isConnected()) {
+        await signalRService.leaveMigrationGroup(selectedMigrationForCancel);
+      }
+
+      // Clear any previous error messages and show processing message
+      clearErrors();
+      addError({
+        code: 'MIGRATION_CANCELLING',
+        message: 'Processing cancellation...',
+        details: 'Please wait while we update the active migrations list...',
+        timestamp: new Date()
+      });
+      
+      // Add delay to let backend process the cancellation
+      await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second delay
+      
+      // Refresh the active migrations to reflect the cancelled status
+      await handleRefresh();
+      
+      // Clear processing message and show success
+      clearErrors();
+      addError({
+        code: 'MIGRATION_CANCELLED_SUCCESS',
+        message: `Migration ${selectedMigrationForCancel.slice(-8)} cancelled successfully!`,
+        details: 'The migration has been removed from active migrations and will appear in the history.',
+        timestamp: new Date()
+      });
+
+      console.log('Migration cancelled successfully and removed from active list');
+    } catch (err) {
+      console.error('Failed to cancel migration:', err);
+      addError({
+        code: 'CANCEL_MIGRATION_FAILED',
+        message: `Failed to cancel migration ${selectedMigrationForCancel.slice(-8)}`,
+        details: err instanceof Error ? err.message : 'Unknown error',
+        timestamp: new Date()
+      });
+    } finally {
+      setIsCancelling(false);
+      setCancelDialogOpen(false);
+      setSelectedMigrationForCancel(null);
+    }
+  };
+
   const {
     activeMigrations,
     systemHealth,
@@ -180,110 +266,112 @@ export const MigrationOverview: React.FC = () => {
         <Typography variant="h4" component="h1" gutterBottom>
           Migration Overview
         </Typography>
-        <Stack direction="row" spacing={2}>
-          <Button
-            variant="contained"
-            color="primary"
-            onClick={handleViewDashboard}
-            size="small"
-          >
-            Migration Dashboard
-          </Button>
-          {/*<Button
-            variant="outlined"
-            startIcon={<DebugIcon />}
-            onClick={handleDebugSignalR}
-            size="small"
-          >
-            Debug SignalR
-          </Button>*/}
-          <Button
-            variant="outlined"
-            startIcon={<RefreshIcon />}
-            onClick={handleRefresh}
-            disabled={isRefreshing}
-          >
-            {isRefreshing ? 'Refreshing...' : 'Refresh'}
-          </Button>
-        </Stack>
+        <Button
+          variant="outlined"
+          startIcon={<RefreshIcon />}
+          onClick={handleRefresh}
+          disabled={isRefreshing}
+        >
+          {isRefreshing ? 'Refreshing...' : 'Refresh'}
+        </Button>
       </Box>
 
-      {/* Connection Status */}
-      <Box sx={{ mb: 3 }}>
-        <Card>
-          <CardContent>
-            <Typography variant="h6" gutterBottom>
-              Connection Status
-            </Typography>
-            <Stack direction="row" spacing={2} sx={{ mb: 2 }}>
-              <Chip
-                icon={signalRConnection.isConnected ? <SuccessIcon /> : <ErrorIcon />}
-                label={`Real-time Monitoring: ${signalRConnection.isConnected ? 'Connected' : 'Disconnected'}`}
-                color={signalRConnection.isConnected ? 'success' : 'error'}
-              />
-              <Chip
-                icon={apiConnected ? <SuccessIcon /> : <ErrorIcon />}
-                label={`Backend Service: ${apiConnected ? 'Connected' : 'Disconnected'}`}
-                color={apiConnected ? 'success' : 'error'}
-              />
-              {isPollingEnabled && (
-                <Chip
-                  icon={<CircularProgress size={16} />}
-                  label="Polling Fallback Active"
-                  color="info"
-                  variant="outlined"
-                />
-              )}
-            </Stack>
-            
-            {/* Connection Details */}
-            <Box sx={{ mt: 2 }}>
-              <Typography variant="body2" color="text.secondary" gutterBottom>
-                <strong>Real-time Updates Status:</strong>
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                {signalRConnection.isConnected 
-                  ? `✅ Connected to real-time updates. Active migrations will show live progress.`
-                  : isPollingEnabled
-                  ? `🔄 Real-time connection unavailable. Using polling fallback for updates.`
-                  : `⚠️ Real-time connection not available. Migration progress will be updated via polling.`
-                }
-              </Typography>
-              {signalRConnection.connectionState && (
-                <Typography variant="caption" color="text.secondary">
-                  Connection State: {signalRConnection.connectionState}
-                  {signalRConnection.connectionId && ` (ID: ${signalRConnection.connectionId.slice(-8)})`}
-                </Typography>
-              )}
-              {isPollingEnabled && lastPollingUpdate && (
-                <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
-                  Last Polling Update: {formatRelativeTime(lastPollingUpdate)}
-                </Typography>
-              )}
-            </Box>
-          </CardContent>
-        </Card>
-      </Box>
-
-      {/* System Health */}
-      {systemHealth && (
+      {/* Debug Information (Collapsible) - Controlled from top navigation */}
+      <Collapse in={showDebugInfo}>
         <Box sx={{ mb: 3 }}>
           <Card>
             <CardContent>
               <Typography variant="h6" gutterBottom>
-                System Health
+                🔍 SignalR Connection Debug Info
               </Typography>
-              <Typography variant="body1">
-                Status: {systemHealth.status}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Last Updated: {formatDate(systemHealth.timestamp)}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                ({formatRelativeTime(systemHealth.timestamp)})
+              <Stack direction="row" spacing={2} sx={{ mb: 2 }}>
+                <Chip
+                  icon={signalRConnection.isConnected ? <SuccessIcon /> : <ErrorIcon />}
+                  label={`SignalR: ${signalRConnection.isConnected ? 'Connected' : 'Disconnected'}`}
+                  color={signalRConnection.isConnected ? 'success' : 'error'}
+                  variant="outlined"
+                />
+                <Chip
+                  icon={apiConnected ? <SuccessIcon /> : <ErrorIcon />}
+                  label={`API: ${apiConnected ? 'Connected' : 'Disconnected'}`}
+                  color={apiConnected ? 'success' : 'error'}
+                  variant="outlined"
+                />
+                {isPollingEnabled && (
+                  <Chip
+                    icon={<CircularProgress size={16} />}
+                    label="Polling Active"
+                    color="info"
+                    variant="outlined"
+                  />
+                )}
+              </Stack>
+              
+              <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 2, mt: 2 }}>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">
+                    Connection State:
+                  </Typography>
+                  <Typography variant="body2">
+                    {signalRConnection.connectionState || 'Unknown'}
+                  </Typography>
+                </Box>
+                {signalRConnection.connectionId && (
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">
+                      Connection ID:
+                    </Typography>
+                    <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
+                      {signalRConnection.connectionId.slice(-8)}...
+                    </Typography>
+                  </Box>
+                )}
+                {lastPollingUpdate && (
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">
+                      Last Polling Update:
+                    </Typography>
+                    <Typography variant="body2">
+                      {formatRelativeTime(lastPollingUpdate)}
+                    </Typography>
+                  </Box>
+                )}
+                <Box>
+                  <Typography variant="caption" color="text.secondary">
+                    Active Migrations:
+                  </Typography>
+                  <Typography variant="body2">
+                    {activeMigrationsArray.length}
+                  </Typography>
+                </Box>
+              </Box>
+              
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 2, display: 'block' }}>
+                💡 Check browser console (F12) for detailed SignalR logs
               </Typography>
             </CardContent>
           </Card>
+        </Box>
+      </Collapse>
+
+      {/* Messages/Errors */}
+      {errors.length > 0 && (
+        <Box sx={{ mb: 3 }}>
+          <Typography variant="h6" gutterBottom>
+            Recent Messages
+          </Typography>
+          {errors.map((error, index) => (
+            <Alert 
+              key={index} 
+              severity={error.code.includes('SUCCESS') ? 'success' : 'error'} 
+              sx={{ mb: 1 }}
+            >
+              <Typography variant="subtitle2">{error.message}</Typography>
+              {error.details && (
+                <Typography variant="body2">{error.details}</Typography>
+              )}
+            </Alert>
+          ))}
         </Box>
       )}
 
@@ -325,66 +413,124 @@ export const MigrationOverview: React.FC = () => {
                     <CardContent>
                       <Box display="flex" justifyContent="space-between" alignItems="center">
                         <Box>
-                          <Typography variant="subtitle1" gutterBottom>
-                            Migration: {migration.migrationId}
-                          </Typography>
+                          <Box display="flex" alignItems="center" gap={1} sx={{ mb: 1 }}>
+                            <Typography variant="subtitle1">
+                              Migration: {migration.migrationId}
+                            </Typography>
+                            {/* Live Updates Status Indicator */}
+                            {joiningGroups.has(migration.migrationId) ? (
+                              <Chip
+                                size="small"
+                                icon={<CircularProgress size={16} />}
+                                label="Joining..."
+                                color="info"
+                                variant="outlined"
+                                sx={{ 
+                                  fontSize: '0.75rem',
+                                  height: '24px',
+                                  '& .MuiChip-icon': { fontSize: '16px' }
+                                }}
+                              />
+                            ) : joinedGroups.has(migration.migrationId) ? (
+                              <Chip
+                                size="small"
+                                icon={<SuccessIcon />}
+                                label="Connected"
+                                color="success"
+                                variant="outlined"
+                                sx={{ 
+                                  fontSize: '0.75rem',
+                                  height: '24px',
+                                  '& .MuiChip-icon': { fontSize: '16px' }
+                                }}
+                              />
+                            ) : (
+                              <Chip
+                                size="small"
+                                icon={signalRConnection.isConnected ? <SuccessIcon /> : <ErrorIcon />}
+                                label={signalRConnection.isConnected ? 'Live Updates' : 'No Live Updates'}
+                                color={signalRConnection.isConnected ? 'success' : 'warning'}
+                                variant="outlined"
+                                sx={{ 
+                                  fontSize: '0.75rem',
+                                  height: '24px',
+                                  '& .MuiChip-icon': { fontSize: '16px' }
+                                }}
+                              />
+                            )}
+                          </Box>
                           <Typography variant="body2" color="text.secondary" gutterBottom>
                             Status: {migration.status}
                           </Typography>
                           <Typography variant="caption">
-                            {migration.processedEntities} / {migration.totalEntities} entities
+                            {(migration.processedEntities ?? 0)} / {(migration.totalEntities ?? 0)} entities
                           </Typography>
                         </Box>
                         <Stack direction="row" spacing={1} alignItems="center">
-                          {/* Connection Status Indicator */}
-                          {joiningGroups.has(migration.migrationId) ? (
+                          {/* Only show View Dashboard button for active migrations */}
+                          {!['completed', 'failed', 'cancelled'].includes(migration.status) && (
+                            <Button
+                              variant="contained"
+                              size="small"
+                              onClick={() => handleNavigateToMigrationDetail(migration.migrationId)}
+                              disabled={joiningGroups.has(migration.migrationId)}
+                            >
+                              {joiningGroups.has(migration.migrationId) ? 'Joining...' : 'View Dashboard'}
+                            </Button>
+                          )}
+                          
+                          {/* Show status for completed migrations */}
+                          {['completed', 'failed', 'cancelled'].includes(migration.status) && (
                             <Chip
                               size="small"
-                              icon={<CircularProgress size={16} />}
-                              label="Joining..."
-                              color="info"
+                              label={`Migration ${migration.status}`}
+                              color={migration.status === 'completed' ? 'success' : 'error'}
                               variant="outlined"
                               sx={{ 
                                 fontSize: '0.75rem',
                                 height: '24px',
-                                '& .MuiChip-icon': { fontSize: '16px' }
-                              }}
-                            />
-                          ) : joinedGroups.has(migration.migrationId) ? (
-                            <Chip
-                              size="small"
-                              icon={<SuccessIcon />}
-                              label="Connected"
-                              color="success"
-                              variant="outlined"
-                              sx={{ 
-                                fontSize: '0.75rem',
-                                height: '24px',
-                                '& .MuiChip-icon': { fontSize: '16px' }
-                              }}
-                            />
-                          ) : (
-                            <Chip
-                              size="small"
-                              icon={signalRConnection.isConnected ? <SuccessIcon /> : <ErrorIcon />}
-                              label={signalRConnection.isConnected ? 'Live Updates' : 'No Live Updates'}
-                              color={signalRConnection.isConnected ? 'success' : 'warning'}
-                              variant="outlined"
-                              sx={{ 
-                                fontSize: '0.75rem',
-                                height: '24px',
-                                '& .MuiChip-icon': { fontSize: '16px' }
+                                textTransform: 'capitalize'
                               }}
                             />
                           )}
-                          <Button
-                            variant="contained"
-                            size="small"
-                            onClick={() => handleNavigateToMigrationDetail(migration.migrationId)}
-                            disabled={joiningGroups.has(migration.migrationId)}
-                          >
-                            {joiningGroups.has(migration.migrationId) ? 'Joining...' : 'View Dashboard'}
-                          </Button>
+                          {/* Cancel button - show for active migrations (immediate) and running migrations */}
+                          {(() => {
+                            console.log('🔍 Migration Overview - Migration:', migration.migrationId, 'Status:', migration.status);
+                            
+                            // Don't show cancel button for completed, failed, or cancelled migrations
+                            const isCompleted = migration.status === 'completed' || migration.status === 'failed' || migration.status === 'cancelled';
+                            if (isCompleted) {
+                              console.log('🚫 Migration is completed/failed/cancelled - hiding cancel button');
+                              return false;
+                            }
+                            
+                            // Show cancel button if:
+                            // 1. Migration exists in active list (immediate) OR
+                            // 2. Status indicates running/progress (after data loads)
+                            const isInActiveList = activeMigrations.has(migration.migrationId);
+                            const hasRunningStatus = migration.status === 'running' || migration.status === 'in_progress' || migration.status === 'inprogress' || migration.status?.toLowerCase().includes('progress');
+                            
+                            return isInActiveList || hasRunningStatus;
+                          })() && (
+                            <Tooltip title="Cancel Migration">
+                              <IconButton
+                                size="small"
+                                color="error"
+                                onClick={() => handleCancelClick(migration.migrationId)}
+                                disabled={isCancelling || joiningGroups.has(migration.migrationId)}
+                                sx={{ 
+                                  border: '1px solid',
+                                  borderColor: 'error.main',
+                                  '&:hover': {
+                                    backgroundColor: 'error.light',
+                                    color: 'white'
+                                  }
+                                }}
+                              >
+                                <StopIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          )}
                         </Stack>
                       </Box>
                     </CardContent>
@@ -396,26 +542,41 @@ export const MigrationOverview: React.FC = () => {
         </Card>
       </Box>
 
-      {/* Messages/Errors */}
-      {errors.length > 0 && (
-        <Box sx={{ mb: 3 }}>
-          <Typography variant="h6" gutterBottom>
-            Recent Messages
-          </Typography>
-          {errors.map((error, index) => (
-            <Alert 
-              key={index} 
-              severity={error.code.includes('SUCCESS') ? 'success' : 'error'} 
-              sx={{ mb: 1 }}
-            >
-              <Typography variant="subtitle2">{error.message}</Typography>
-              {error.details && (
-                <Typography variant="body2">{error.details}</Typography>
-              )}
-            </Alert>
-          ))}
-        </Box>
-      )}
+      {/* Cancel Confirmation Dialog */}
+      <Dialog
+        open={cancelDialogOpen}
+        onClose={handleCancelCancel}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Cancel Migration</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Are you sure you want to cancel this migration?
+            <br /><br />
+            <strong>Migration ID:</strong> {selectedMigrationForCancel}
+            <br /><br />
+            This action cannot be undone. The migration will be stopped and marked as cancelled.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={handleCancelCancel}
+            disabled={isCancelling}
+          >
+            Keep Running
+          </Button>
+          <Button
+            onClick={handleCancelConfirm}
+            color="error"
+            variant="contained"
+            disabled={isCancelling}
+            startIcon={isCancelling ? <CircularProgress size={16} /> : <StopIcon />}
+          >
+            {isCancelling ? 'Cancelling...' : 'Cancel Migration'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }; 

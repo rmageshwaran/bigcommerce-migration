@@ -307,7 +307,71 @@ export class ApiService {
    * Maps to: GET /api/dashboard/migrations (DashboardFunctions)
    */
   public async getActiveMigrations(): Promise<PaginatedResponse<MigrationProgress>> {
-    return this.get<PaginatedResponse<MigrationProgress>>('/dashboard/migrations');
+    const response = await this.get<PaginatedResponse<MigrationProgress>>('/dashboard/migrations');
+    
+    // Debug: Log the actual API response structure
+    console.log('🔍 getActiveMigrations API Response Structure:', {
+      totalItems: response.data?.length || 0,
+      sampleItem: response.data?.[0] ? {
+        migrationId: response.data[0].migrationId,
+        status: response.data[0].status,
+        totalEntities: response.data[0].totalEntities,
+        processedEntities: response.data[0].processedEntities,
+        // Check for PascalCase versions too
+        TotalEntities: (response.data[0] as any).TotalEntities,
+        ProcessedEntities: (response.data[0] as any).ProcessedEntities,
+        // Check entities and progress properties
+        entities: (response.data[0] as any).entities,
+        progress: (response.data[0] as any).progress,
+        allKeys: Object.keys(response.data[0])
+      } : 'No items'
+    });
+    
+    // Transform the response to add missing entity count properties
+    if (response.data && Array.isArray(response.data)) {
+      response.data = response.data.map(migration => {
+        const enhanced = { ...migration };
+        
+        // Try to extract entity counts from entities or progress properties
+        const anyMigration = migration as any;
+        
+        // Check if entities property contains count information
+        if (anyMigration.entities) {
+          if (typeof anyMigration.entities === 'number') {
+            enhanced.totalEntities = anyMigration.entities;
+          } else if (anyMigration.entities.total) {
+            enhanced.totalEntities = anyMigration.entities.total;
+          } else if (anyMigration.entities.totalCount) {
+            enhanced.totalEntities = anyMigration.entities.totalCount;
+          }
+        }
+        
+        // Check if progress property contains count information
+        if (anyMigration.progress && typeof anyMigration.progress === 'object') {
+          // Extract totalEntities from progress object
+          if (anyMigration.progress.totalEntities !== undefined) {
+            enhanced.totalEntities = anyMigration.progress.totalEntities;
+          }
+          
+          // Extract processedEntities from progress object  
+          if (anyMigration.progress.processedEntities !== undefined) {
+            enhanced.processedEntities = anyMigration.progress.processedEntities;
+          }
+        }
+        
+        console.log('🔧 Enhanced migration object:', {
+          migrationId: enhanced.migrationId,
+          originalTotalEntities: enhanced.totalEntities,
+          originalProcessedEntities: enhanced.processedEntities,
+          extractedTotalEntities: enhanced.totalEntities,
+          extractedProcessedEntities: enhanced.processedEntities
+        });
+        
+        return enhanced;
+      });
+    }
+    
+    return response;
   }
 
   /**

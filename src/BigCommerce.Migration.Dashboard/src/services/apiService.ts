@@ -8,7 +8,8 @@ import type {
   MigrationStatistics,
   ApiResponse,
   PaginatedResponse,
-  MigrationHistoryResponse
+  MigrationHistoryResponse,
+  MigrationCancellationResponse
 } from '../types';
 
 // ===== API ENDPOINT MAPPING =====
@@ -298,8 +299,22 @@ export class ApiService {
    * Cancel a migration
    * Maps to: POST /api/migrations/{id}/cancel (MigrationHttpFunctions)
    */
-  public async cancelMigration(migrationId: string): Promise<ApiResponse<void>> {
-    return this.post<ApiResponse<void>>(`/migrations/${migrationId}/cancel`);
+  public async cancelMigration(migrationId: string): Promise<MigrationCancellationResponse> {
+    const response = await this.post<ApiResponse<MigrationCancellationResponse>>(`/migrations/${migrationId}/cancel`);
+    
+    // Handle case where backend returns HTTP 200 with empty body (successful cancellation)
+    // If we reach this point without exception, the HTTP request was successful
+    if (!response || !response.data) {
+      console.log('✅ Backend returned successful HTTP status with empty body - treating as successful cancellation');
+      return {
+        migrationId: migrationId,
+        status: 'cancelled',
+        message: 'Migration cancelled successfully',
+        cancelledAt: new Date().toISOString()
+      };
+    }
+    
+    return response.data as MigrationCancellationResponse;
   }
 
   /**

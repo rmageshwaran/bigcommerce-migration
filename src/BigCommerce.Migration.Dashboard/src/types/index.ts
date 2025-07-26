@@ -1,6 +1,6 @@
 // System Status Types
 export type SystemStatus = 'healthy' | 'warning' | 'error';
-export type MigrationStatus = 'pending' | 'running' | 'in_progress' | 'inprogress' | 'completed' | 'failed' | 'cancelled';
+export type MigrationStatus = 'pending' | 'queued' | 'running' | 'in_progress' | 'inprogress' | 'completed' | 'failed' | 'cancelled';
 
 // Migration Data Types
 export interface MigrationProgress {
@@ -33,6 +33,13 @@ export interface EntityProgress {
   startTime: Date;
   endTime?: Date;
   processingTime: number; // in seconds
+}
+
+export interface MigrationCancellationResponse {
+  migrationId: string;
+  status: string;
+  message: string;
+  cancelledAt: string;
 }
 
 export interface MigrationRequest {

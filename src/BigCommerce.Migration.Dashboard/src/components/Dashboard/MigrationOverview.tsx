@@ -30,6 +30,7 @@ import { formatDate, formatRelativeTime } from '../../utils/dateUtils';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { apiService } from '../../services/apiService';
 import { getSignalRService } from '../../services/signalRService';
+import { notificationService } from '../../services/notificationService';
 
 /**
  * MigrationOverview Component
@@ -47,7 +48,7 @@ import { getSignalRService } from '../../services/signalRService';
 export const MigrationOverview: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { state, refreshData, addError, clearErrors, joinMigrationGroup } = useDashboard();
+  const { state, refreshData, addError, clearErrors, joinMigrationGroup, removeMigration, addCancelledMigration, removeCancelledMigration } = useDashboard();
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [joiningGroups, setJoiningGroups] = useState<Set<string>>(new Set());
   const [joinedGroups, setJoinedGroups] = useState<Set<string>>(new Set());
@@ -196,39 +197,47 @@ export const MigrationOverview: React.FC = () => {
 
     setIsCancelling(true);
     try {
-      // Cancel the migration via API
-      await apiService.cancelMigration(selectedMigrationForCancel);
+      // Clear any previous error messages
+      clearErrors();
 
-      // Leave SignalR group to stop receiving real-time updates for this migration
-      console.log('🚪 Leaving SignalR group for cancelled migration:', selectedMigrationForCancel);
-      const signalRService = getSignalRService();
-      if (signalRService.isConnected()) {
-        await signalRService.leaveMigrationGroup(selectedMigrationForCancel);
+      // Cancel the migration via API with detailed logging
+      console.log('🚫 Cancelling migration via API:', selectedMigrationForCancel);
+      const cancelResponse = await apiService.cancelMigration(selectedMigrationForCancel);
+      console.log('✅ API cancellation response:', cancelResponse);
+
+      // Check if the API response indicates successful cancellation
+      if (cancelResponse?.status === 'cancelled' || cancelResponse?.message?.includes('cancelled successfully')) {
+        console.log('✅ Backend confirmed cancellation was successful');
+        
+        // Leave SignalR group to stop receiving real-time updates for this migration
+        console.log('🚪 Leaving SignalR group for cancelled migration:', selectedMigrationForCancel);
+        const signalRService = getSignalRService();
+        if (signalRService.isConnected()) {
+          await signalRService.leaveMigrationGroup(selectedMigrationForCancel);
+        }
+
+        // Directly remove the migration from local active state (don't refresh as backend queue may not have processed yet)
+        removeMigration(selectedMigrationForCancel);
+        
+        // Clear from cancelled list after 10 minutes (give backend queue time to process)
+        setTimeout(() => {
+          removeCancelledMigration(selectedMigrationForCancel);
+          console.log('🧹 Removed migration from cancelled list after timeout:', selectedMigrationForCancel);
+        }, 10 * 60 * 1000); // 10 minutes
+        
+        // Show success notification
+        notificationService.success('Migration Cancelled', `Migration ${selectedMigrationForCancel.slice(-8)} cancelled successfully!`);
+      } else {
+        // API response doesn't confirm successful cancellation
+        console.error('❌ Backend API did not confirm successful cancellation:', cancelResponse);
+        notificationService.error('Cancellation Failed', 'The backend did not confirm successful cancellation. Please try again.');
+        
+        setIsCancelling(false);
+        setCancelDialogOpen(false);
+        setSelectedMigrationForCancel(null);
+        return;
       }
-
-      // Clear any previous error messages and show processing message
-      clearErrors();
-      addError({
-        code: 'MIGRATION_CANCELLING',
-        message: 'Processing cancellation...',
-        details: 'Please wait while we update the active migrations list...',
-        timestamp: new Date()
-      });
       
-      // Add delay to let backend process the cancellation
-      await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second delay
-      
-      // Refresh the active migrations to reflect the cancelled status
-      await handleRefresh();
-      
-      // Clear processing message and show success
-      clearErrors();
-      addError({
-        code: 'MIGRATION_CANCELLED_SUCCESS',
-        message: `Migration ${selectedMigrationForCancel.slice(-8)} cancelled successfully!`,
-        details: 'The migration has been removed from active migrations and will appear in the history.',
-        timestamp: new Date()
-      });
 
       console.log('Migration cancelled successfully and removed from active list');
     } catch (err) {
@@ -257,6 +266,7 @@ export const MigrationOverview: React.FC = () => {
     lastPollingUpdate
   } = state;
 
+  // Get active migrations array (cancelled migrations are already filtered at DashboardContext level)
   const activeMigrationsArray = Array.from(activeMigrations.values());
 
   return (

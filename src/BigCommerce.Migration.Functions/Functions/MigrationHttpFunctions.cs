@@ -856,24 +856,211 @@ public class MigrationHttpFunctions
             var from = DateTime.UtcNow.AddDays(-30); // Default to last 30 days
             var to = DateTime.UtcNow;
             
-            // Query directly for Error category logs - they have all the detailed error information
-            // ✅ Include migrationId in the search term for explicit filtering
+            // ✅ SIMPLIFIED: Use individual fields instead of complex SearchTerm to avoid conflicts
             var queryRequest = new Core.Models.OpenSearchQuery
             {
                 FromDate = from,
                 ToDate = to,
                 MigrationId = migrationId,
-                SearchTerm = $"category:\"Error\" AND entityType:\"{entityType}\" AND (MigrationId:\"{migrationId}\" OR migrationId:\"{migrationId}\")", // Explicit migration ID filter
+                Level = "Error", // Use Level field for category:Error
+                EntityType = entityType, // Use EntityType field 
+                SearchTerm = null, // ✅ REMOVED: Don't use SearchTerm to avoid conflicts with individual filters
                 Size = pageSize,
                 From = (currentPage - 1) * pageSize,
-                SortField = "timestamp",
+                SortField = "timestamp", // ✅ FIXED: Use lowercase timestamp to match OpenSearch field name
                 SortOrder = Core.Models.SortOrder.Descending,
                 IncludeFields = null // Include all fields
             };
 
-            _logger.LogInformation("DEBUG: Searching with explicit MigrationId filter: MigrationId={MigrationId}, SearchTerm={SearchTerm}", migrationId, queryRequest.SearchTerm);
+            // ✅ DEBUG: Log the search parameters being used
+            _logger.LogWarning("🔍 DEBUG: Error search parameters - MigrationId: {MigrationId}, EntityType: {EntityType}, Level: {Level}, DateRange: {From} to {To}", 
+                queryRequest.MigrationId, queryRequest.EntityType, queryRequest.Level, queryRequest.FromDate, queryRequest.ToDate);
             
             var (searchResults, totalCount) = await _openSearchService.SearchLogsOptimizedAsync(queryRequest);
+            
+            // ✅ DEBUG: Always check what document types exist for this migration (regardless of search results)
+            _logger.LogWarning("🔍 DEBUG: Searching for ALL document types for this migration ID to understand available categories...");
+            
+            var debugQueryRequest = new Core.Models.OpenSearchQuery
+            {
+                FromDate = from,
+                ToDate = to,
+                MigrationId = migrationId,
+                Level = null, // ✅ Remove Level filter to see all document types
+                EntityType = entityType,
+                SearchTerm = null,
+                Size = 10, // Get more documents to see variety
+                From = 0,
+                SortField = "timestamp",
+                SortOrder = Core.Models.SortOrder.Descending,
+                IncludeFields = null
+            };
+            
+            var (debugResults, debugCount) = await _openSearchService.SearchLogsOptimizedAsync(debugQueryRequest);
+            _logger.LogWarning("🔍 DEBUG: All document types search returned {ResultCount} results, available categories:", 
+                debugResults?.Count() ?? 0);
+            
+            if (debugResults?.Any() == true)
+            {
+                // Log the first few documents to see different types
+                for (int i = 0; i < Math.Min(5, debugResults.Count()); i++)
+                {
+                    var doc = debugResults.ElementAt(i);
+                    if (doc is System.Text.Json.JsonElement element)
+                    {
+                        var categoryField = element.TryGetProperty("category", out var cat) ? cat.GetString() : "unknown";
+                        var levelField = element.TryGetProperty("level", out var lev) ? lev.GetString() : "unknown";
+                        var timestampField = element.TryGetProperty("timestamp", out var ts) ? ts.GetString() : "unknown";
+                        _logger.LogWarning("🔍 DEBUG: Document {Index} - category: {Category}, level: {Level}, timestamp: {Timestamp}", 
+                            i + 1, categoryField, levelField, timestampField);
+                    }
+                    else if (doc is Dictionary<string, object> dict)
+                    {
+                        var categoryField = dict.ContainsKey("category") ? dict["category"]?.ToString() : "unknown";
+                        var levelField = dict.ContainsKey("level") ? dict["level"]?.ToString() : "unknown";
+                        _logger.LogWarning("🔍 DEBUG: Document {Index} - category: {Category}, level: {Level}", 
+                            i + 1, categoryField, levelField);
+                    }
+                    else
+                    {
+                        _logger.LogWarning("🔍 DEBUG: Document {Index} - Unknown document type: {Type}", 
+                            i + 1, doc?.GetType().Name ?? "null");
+                    }
+                }
+                
+                // ✅ Additional diagnostic: Check if ANY Error category documents exist at all
+                var errorCategoryCount = debugResults.Count(doc => {
+                    if (doc is System.Text.Json.JsonElement element)
+                    {
+                        return element.TryGetProperty("category", out var cat) && 
+                               cat.GetString()?.Equals("Error", StringComparison.OrdinalIgnoreCase) == true;
+                    }
+                    return false;
+                });
+                
+                _logger.LogWarning("🔍 DEBUG: Found {ErrorCount} documents with category='Error' out of {TotalCount} total documents", 
+                    errorCategoryCount, debugResults.Count());
+            }
+            
+            // ✅ DEBUG: Log the raw search results
+            _logger.LogWarning("🔍 DEBUG: OpenSearch returned {ResultCount} results, TotalCount: {TotalCount}", 
+                searchResults?.Count() ?? 0, totalCount);
+            
+            if (searchResults?.Any() == true)
+            {
+                _logger.LogWarning("🔍 DEBUG: First result structure: {FirstResult}", 
+                    System.Text.Json.JsonSerializer.Serialize(searchResults.First()));
+                
+                // ✅ DEBUG: Analyze document structure to understand available fields
+                var firstDoc = searchResults.First();
+                if (firstDoc is System.Text.Json.JsonElement element)
+                {
+                    _logger.LogWarning("🔍 DEBUG: Available fields in document: {Fields}", 
+                        string.Join(", ", element.EnumerateObject().Select(p => $"{p.Name}={p.Value}")));
+                }
+                else if (firstDoc is Dictionary<string, object> dict)
+                {
+                    _logger.LogWarning("🔍 DEBUG: Available fields in document: {Fields}", 
+                        string.Join(", ", dict.Keys));
+                }
+            }
+            else
+            {
+                // ✅ DEBUG: If no results found, try a broader search without EntityType filter
+                _logger.LogWarning("🔍 DEBUG: No results found with EntityType filter. Trying broader search...");
+                
+                var fallbackQueryRequest = new Core.Models.OpenSearchQuery
+                {
+                    FromDate = from,
+                    ToDate = to,
+                    MigrationId = migrationId,
+                    Level = "Error", // Keep the Error level filter
+                    EntityType = null, // ✅ Remove EntityType filter for broader search
+                    SearchTerm = null,
+                    Size = 10, // Just a few results for debugging
+                    From = 0,
+                    SortField = "timestamp", // ✅ FIXED: Use lowercase timestamp field name
+                    SortOrder = Core.Models.SortOrder.Descending,
+                    IncludeFields = null
+                };
+                
+                var (fallbackResults, fallbackCount) = await _openSearchService.SearchLogsOptimizedAsync(fallbackQueryRequest);
+                _logger.LogWarning("🔍 DEBUG: Fallback search (no EntityType filter) returned {ResultCount} results", 
+                    fallbackResults?.Count() ?? 0);
+                
+                if (fallbackResults?.Any() == true)
+                {
+                    _logger.LogWarning("🔍 DEBUG: Fallback result structure: {FallbackResult}", 
+                        System.Text.Json.JsonSerializer.Serialize(fallbackResults.First()));
+                }
+                else
+                {
+                    // ✅ DEBUG: Try the broadest possible search - any errors at all
+                    _logger.LogWarning("🔍 DEBUG: No results even without EntityType filter. Trying broadest search for ANY errors...");
+                    
+                    var broadestQueryRequest = new Core.Models.OpenSearchQuery
+                    {
+                        FromDate = from,
+                        ToDate = to,
+                        MigrationId = null, // ✅ Remove MigrationId filter 
+                        Level = "Error", // Keep just the Error level filter
+                        EntityType = null, 
+                        SearchTerm = null,
+                        Size = 5, // Just a few results for debugging
+                        From = 0,
+                        SortField = "timestamp", // ✅ FIXED: Use lowercase timestamp field name
+                        SortOrder = Core.Models.SortOrder.Descending,
+                        IncludeFields = null
+                    };
+                    
+                    var (broadestResults, broadestCount) = await _openSearchService.SearchLogsOptimizedAsync(broadestQueryRequest);
+                    _logger.LogWarning("🔍 DEBUG: Broadest search (any errors) returned {ResultCount} results", 
+                        broadestResults?.Count() ?? 0);
+                    
+                    if (broadestResults?.Any() == true)
+                    {
+                        _logger.LogWarning("🔍 DEBUG: Broadest result structure: {BroadestResult}", 
+                            System.Text.Json.JsonSerializer.Serialize(broadestResults.First()));
+                    }
+                    else
+                    {
+                        _logger.LogError("🔍 DEBUG: NO ERRORS FOUND IN ENTIRE SYSTEM! OpenSearch may be empty or connection issue.");
+                    }
+                }
+                
+                // ✅ DEBUG: Try finding ALL document types for this migration (no Level filter)
+                _logger.LogWarning("🔍 DEBUG: Searching for ALL document types for this migration ID...");
+                
+                var allDocsQueryRequest = new Core.Models.OpenSearchQuery
+                {
+                    FromDate = from,
+                    ToDate = to,
+                    MigrationId = migrationId,
+                    Level = null, // ✅ Remove Level filter to see all document types
+                    EntityType = entityType,
+                    SearchTerm = null,
+                    Size = 10, // Get more documents to see variety
+                    From = 0,
+                    SortField = "timestamp",
+                    SortOrder = Core.Models.SortOrder.Descending,
+                    IncludeFields = null
+                };
+                
+                var (allDocsResults, allDocsCount) = await _openSearchService.SearchLogsOptimizedAsync(allDocsQueryRequest);
+                _logger.LogWarning("🔍 DEBUG: All document types search returned {ResultCount} results", 
+                    allDocsResults?.Count() ?? 0);
+                
+                if (allDocsResults?.Any() == true)
+                {
+                    // Log the first few documents to see different types
+                    for (int i = 0; i < Math.Min(3, allDocsResults.Count()); i++)
+                    {
+                        var doc = allDocsResults.ElementAt(i);
+                        _logger.LogWarning("🔍 DEBUG: Document {Index} structure: {DocStructure}", 
+                            i + 1, System.Text.Json.JsonSerializer.Serialize(doc));
+                    }
+                }
+            }
             
             // Convert OpenSearch results to proper format - handle JsonElement results
             var errorLogs = new List<Dictionary<string, object>>();

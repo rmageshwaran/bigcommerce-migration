@@ -26,7 +26,7 @@ services:
   bigcommerce-functions:
     build:
       context: .
-      dockerfile: Dockerfile.functions
+      dockerfile: Dockerfile.functions.noanalyzers
     container_name: bigcommerce-functions
     ports:
       - "7071:80"
@@ -37,6 +37,10 @@ services:
       - WEBSITE_RUN_FROM_PACKAGE=1
       - FUNCTIONS_EXTENSION_VERSION=~4
       - ASPNETCORE_ENVIRONMENT=Development
+      - AZURE_FUNCTIONS_ENVIRONMENT=Development
+      - DOTNET_ENVIRONMENT=Development
+      - Logging__LogLevel__Default=Debug
+      - Logging__LogLevel__BigCommerce.Migration=Debug
       - WEBSITE_HOSTNAME=localhost:7071
       
       # Queue Configuration (matches our fixed environment variables)

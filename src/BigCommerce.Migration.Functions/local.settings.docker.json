@@ -6,6 +6,8 @@
     "WEBSITE_RUN_FROM_PACKAGE": "1",
     "FUNCTIONS_EXTENSION_VERSION": "~4",
     "ASPNETCORE_ENVIRONMENT": "Development",
+    "AZURE_FUNCTIONS_ENVIRONMENT": "Development",
+    "DOTNET_ENVIRONMENT": "Development", 
     "WEBSITE_HOSTNAME": "localhost:7071",
 
     
@@ -35,7 +37,7 @@
     "Endpoint": "https://search-bigcommerceinsights-co3k7jb4ukk565b4c3bskzucpm.us-east-1.es.amazonaws.com",
     "Username": "admin",
     "Password": "VIQInsights@123",
-    "DefaultIndex": "migration-local-docker",
+    "DefaultIndex": "bigcommerce-migration",
     "RequestTimeout": "00:00:30",
     "MaxRetries": 3,
     "EnableDebugMode": true

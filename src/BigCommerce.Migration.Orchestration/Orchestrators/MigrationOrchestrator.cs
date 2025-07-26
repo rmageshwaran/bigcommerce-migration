@@ -196,6 +196,32 @@ public class MigrationOrchestrator
                         "EntityMigrationOrchestrator", entityRequest);
 
                     result.EntityResults[entityType] = entityResult;
+                    
+                    // ✅ VALIDATION: Check for suspiciously low entity counts that might indicate discovery issues
+                    if (entityResult.TotalEntities > 0)
+                    {
+                        // For categories specifically, warn if count is exactly 250 (pagination limit)
+                        if (entityType == "categories" && entityResult.TotalEntities == 250)
+                        {
+                            context.SetCustomStatus($"⚠️ POTENTIAL ISSUE: Discovered exactly 250 categories - this might indicate pagination limit bug");
+                            _logger.LogWarning("⚠️ POTENTIAL DISCOVERY BUG: Found exactly 250 categories for {EntityType} in migration {MigrationId}. " +
+                                "This matches the pagination limit and might indicate incomplete discovery.",
+                                entityType, request.MigrationId);
+                        }
+                        
+                        // General warning for any entity type with exactly 250 items
+                        if (entityResult.TotalEntities == 250)
+                        {
+                            _logger.LogWarning("⚠️ Entity count warning: {EntityType} has exactly 250 items (pagination limit). " +
+                                "Please verify this is the actual count and not a pagination cutoff in migration {MigrationId}",
+                                entityType, request.MigrationId);
+                        }
+                        
+                        // Report migration progress
+                        _logger.LogInformation("✅ {EntityType} migration completed: {Processed}/{Total} entities processed, {Successful} successful, {Failed} failed",
+                            entityType, entityResult.ProcessedEntities, entityResult.TotalEntities, 
+                            entityResult.SuccessfulEntities, entityResult.FailedEntities);
+                    }
 
                     // Update category tree context with category mappings if needed
                     if (entityType == "categories" && entityResult.Mappings.Any())

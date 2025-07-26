@@ -147,8 +147,9 @@ public class OpenSearchService : IOpenSearchService
         {
             // Extract migration ID from context if present
             string? migrationId = null;
+            string? entityType = null;
             
-            // Try to extract migration ID from AdditionalData
+            // Try to extract migration ID and entityType from AdditionalData
             if (additionalData != null)
             {
                 // Use reflection to get migrationId from the anonymous object
@@ -156,6 +157,13 @@ public class OpenSearchService : IOpenSearchService
                 if (migrationIdProperty != null)
                 {
                     migrationId = migrationIdProperty.GetValue(additionalData)?.ToString();
+                }
+                
+                // ✅ FIXED: Extract entityType from AdditionalData for top-level searching
+                var entityTypeProperty = additionalData.GetType().GetProperty("entityType");
+                if (entityTypeProperty != null)
+                {
+                    entityType = entityTypeProperty.GetValue(additionalData)?.ToString();
                 }
             }
             
@@ -173,6 +181,7 @@ public class OpenSearchService : IOpenSearchService
             {
                 Context = context,
                 MigrationId = migrationId, // Add MigrationId field for easier searching
+                EntityType = entityType, // ✅ FIXED: Add EntityType as top-level field for search queries
                 Exception = new
                 {
                     Message = exception.Message,
@@ -187,26 +196,19 @@ public class OpenSearchService : IOpenSearchService
 
             var indexName = $"{_configuration.DefaultIndex}-errors-{DateTime.UtcNow:yyyy-MM}";
             
-            // Add detailed logging for debugging
-            Console.WriteLine($"OpenSearch: Logging error to index '{indexName}'");
-            Console.WriteLine($"OpenSearch: Context: {context}");
-            Console.WriteLine($"OpenSearch: MigrationId: {migrationId}");
-            Console.WriteLine($"OpenSearch: Exception Type: {exception.GetType().Name}");
-            Console.WriteLine($"OpenSearch: Exception Message: {exception.Message}");
-            Console.WriteLine($"OpenSearch: Category: Error");
-            Console.WriteLine($"OpenSearch: Document structure: {JsonSerializer.Serialize(document, new JsonSerializerOptions { WriteIndented = true })}");
+            _logger.LogDebug("Logging error to OpenSearch index '{IndexName}' for context '{Context}', migrationId '{MigrationId}'", 
+                indexName, context, migrationId);
             
             var response = await _client.IndexAsync(document, i => i.Index(indexName), cancellationToken);
 
             if (!response.IsValid)
             {
                 _logger.LogError("Failed to log error: {Error}", response.OriginalException?.Message);
-                Console.WriteLine($"OpenSearch: Failed to log error - {response.OriginalException?.Message}");
                 return false;
             }
 
-            _logger.LogDebug("Error logged successfully: {Context} - {ExceptionType}", context, exception.GetType().Name);
-            Console.WriteLine($"OpenSearch: Error logged successfully to index '{indexName}' with ID '{response.Id}'");
+            _logger.LogDebug("Error logged successfully: {Context} - {ExceptionType} to index '{IndexName}' with ID '{Id}'", 
+                context, exception.GetType().Name, indexName, response.Id);
             return true;
         }
         catch (OperationCanceledException)
@@ -216,7 +218,6 @@ public class OpenSearchService : IOpenSearchService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error logging error information: {Context}", context);
-            Console.WriteLine($"OpenSearch: Exception while logging error: {ex.Message}");
             return false;
         }
     }
@@ -236,9 +237,9 @@ public class OpenSearchService : IOpenSearchService
         try
         {
             var indexPattern = $"{_configuration.DefaultIndex}-*";
-            Console.WriteLine($"OpenSearch: Searching logs with query: '{searchQuery}'");
-            Console.WriteLine($"OpenSearch: Index pattern: '{indexPattern}'");
-            Console.WriteLine($"OpenSearch: Date range: {fromDate:yyyy-MM-dd HH:mm:ss} to {toDate:yyyy-MM-dd HH:mm:ss}");
+            _logger.LogDebug("OpenSearch: Searching logs with query: '{SearchQuery}'", searchQuery);
+            _logger.LogDebug("OpenSearch: Index pattern: '{IndexPattern}'", indexPattern);
+            _logger.LogDebug("OpenSearch: Date range: {FromDate:yyyy-MM-dd HH:mm:ss} to {ToDate:yyyy-MM-dd HH:mm:ss}", fromDate, toDate);
             
             var response = await _client.SearchAsync<object>(s => s
                 .Index(indexPattern)
@@ -262,22 +263,12 @@ public class OpenSearchService : IOpenSearchService
             if (!response.IsValid)
             {
                 _logger.LogError("Failed to search logs: {Error}", response.OriginalException?.Message);
-                Console.WriteLine($"OpenSearch: Search failed - {response.OriginalException?.Message}");
+                _logger.LogDebug("OpenSearch: Search failed - {Error}", response.OriginalException?.Message);
                 return new List<object>();
             }
 
             var results = response.Documents.ToList();
-            Console.WriteLine($"OpenSearch: Search returned {results.Count} documents");
-            Console.WriteLine($"OpenSearch: Total hits: {response.Total}");
-            
-            // Add debugging to show document structure
-            if (results.Count > 0)
-            {
-                Console.WriteLine($"OpenSearch: First document structure:");
-                var firstDoc = results.First();
-                var docJson = JsonSerializer.Serialize(firstDoc, new JsonSerializerOptions { WriteIndented = true });
-                Console.WriteLine($"OpenSearch: {docJson}");
-            }
+            _logger.LogDebug("OpenSearch search returned {Count} documents, Total hits: {Total}", results.Count, response.Total);
             
             return results;
         }
@@ -288,7 +279,7 @@ public class OpenSearchService : IOpenSearchService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error searching logs: {Query}", searchQuery);
-            Console.WriteLine($"OpenSearch: Exception during search: {ex.Message}");
+            _logger.LogDebug("OpenSearch: Exception during search: {Error}", ex.Message);
             return new List<object>();
         }
     }
@@ -304,11 +295,13 @@ public class OpenSearchService : IOpenSearchService
 
         try
         {
-            // Optimize index pattern based on date range
-            var indexPattern = BuildOptimizedIndexPattern(queryRequest.FromDate, queryRequest.ToDate);
+            // Use specific error index pattern for error queries, broader pattern for others
+            var indexPattern = !string.IsNullOrEmpty(queryRequest.Level) && queryRequest.Level.Equals("Error", StringComparison.OrdinalIgnoreCase)
+                ? "bigcommerce-migration-logs-errors-*"  // Specific error index for error queries
+                : "bigcommerce-migration-*";             // Broader index for other queries
             
-            Console.WriteLine($"OpenSearch Optimized: Index pattern: '{indexPattern}'");
-            Console.WriteLine($"OpenSearch Optimized: Query - Level: {queryRequest.Level}, MigrationId: {queryRequest.MigrationId}, SearchTerm: {queryRequest.SearchTerm}");
+            // Build the actual query using descriptor pattern
+            var queryDescriptor = BuildStructuredQueryDescriptor(new QueryContainerDescriptor<object>(), queryRequest);
             
             var response = await _client.SearchAsync<object>(s => s
                 .Index(indexPattern)
@@ -324,15 +317,8 @@ public class OpenSearchService : IOpenSearchService
                     ) : null)
             , cancellationToken);
 
-            Console.WriteLine($"OpenSearch Optimized: Response.IsValid: {response.IsValid}");
-            Console.WriteLine($"OpenSearch Optimized: Total hits: {response.Total}");
-            Console.WriteLine($"OpenSearch Optimized: Document count: {response.Documents?.Count() ?? 0}");
-
             if (!response.IsValid)
             {
-                Console.WriteLine($"OpenSearch Optimized: ServerError: {response.ServerError}");
-                Console.WriteLine($"OpenSearch Optimized: OriginalException: {response.OriginalException?.Message}");
-                Console.WriteLine($"OpenSearch Optimized: DebugInformation: {response.DebugInformation}");
                 _logger.LogError("Failed to execute optimized search: ServerError={ServerError}, Exception={Exception}, Debug={Debug}", 
                     response.ServerError, response.OriginalException?.Message, response.DebugInformation);
                 return (new List<object>(), 0);
@@ -352,10 +338,17 @@ public class OpenSearchService : IOpenSearchService
     }
 
     /// <summary>
-    /// Builds optimized index pattern based on date range to limit search scope
+    /// Builds optimized index pattern based on date range and query type to limit search scope
     /// </summary>
-    private string BuildOptimizedIndexPattern(DateTime fromDate, DateTime toDate)
+    private string BuildOptimizedIndexPattern(DateTime fromDate, DateTime toDate, OpenSearchQuery queryRequest = null)
     {
+        // For error searches, use the specific error index pattern
+        if (queryRequest != null && !string.IsNullOrEmpty(queryRequest.Level) && 
+            queryRequest.Level.Equals("Error", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"{_configuration.DefaultIndex}-logs-errors-*";
+        }
+        
         // For compatibility with existing data, use wildcard pattern like legacy search
         // This ensures we find data regardless of the specific index naming patterns
         return $"{_configuration.DefaultIndex}-*";
@@ -366,65 +359,32 @@ public class OpenSearchService : IOpenSearchService
     /// </summary>
     private QueryContainer BuildStructuredQueryDescriptor(QueryContainerDescriptor<object> q, OpenSearchQuery queryRequest)
     {
-        return q.Bool(b =>
+        if (!string.IsNullOrEmpty(queryRequest.MigrationId))
         {
-            var boolDescriptor = b;
-
-            // Add date range filter (filters are cached and faster than queries)
-            boolDescriptor = boolDescriptor.Filter(f => f
-                .DateRange(dr => dr
-                    .Field("timestamp")
-                    .GreaterThanOrEquals(queryRequest.FromDate)
-                    .LessThanOrEquals(queryRequest.ToDate)
-                )
-            );
-
-            // Add level filter using query string (more flexible than term matching)
-            if (!string.IsNullOrEmpty(queryRequest.Level))
+            // Build the filter queries list using Bool.Filter (matches working OpenSearch query)
+            var filterQueries = new List<Func<QueryContainerDescriptor<object>, QueryContainer>>();
+            
+            // Migration ID filter - use migrationId.keyword
+            filterQueries.Add(f => f.Term(t => t.Field("migrationId.keyword").Value(queryRequest.MigrationId)));
+            
+            // Category filter - use category.keyword = "Error"
+            if (!string.IsNullOrEmpty(queryRequest.Level) && queryRequest.Level.Equals("Error", StringComparison.OrdinalIgnoreCase))
             {
-                if (queryRequest.Level.Equals("Error", StringComparison.OrdinalIgnoreCase))
-                {
-                    // Use query string like the legacy search for better compatibility
-                    boolDescriptor = boolDescriptor.Must(m => m
-                        .QueryString(qs => qs.Query("category:\"Error\""))
-                    );
-                }
-                else
-                {
-                    // Use query string for other levels too
-                    boolDescriptor = boolDescriptor.Must(m => m
-                        .QueryString(qs => qs.Query($"(Level:{queryRequest.Level} OR level:{queryRequest.Level})"))
-                    );
-                }
+                filterQueries.Add(f => f.Term(t => t.Field("category.keyword").Value("Error")));
             }
-
-            // Add migration ID filter using query string (more flexible) - match legacy search exactly
-            if (!string.IsNullOrEmpty(queryRequest.MigrationId))
-            {
-                // Use exact same pattern as legacy search with wildcard searches
-                boolDescriptor = boolDescriptor.Must(m => m
-                    .QueryString(qs => qs.Query($"(MigrationId:{queryRequest.MigrationId} OR migrationId:{queryRequest.MigrationId} OR Context:*{queryRequest.MigrationId}* OR context:*{queryRequest.MigrationId}*)"))
-                );
-            }
-
-            // Add entity type filter using query string
+            
+            // EntityType filter - use additionalData.entityType.keyword
             if (!string.IsNullOrEmpty(queryRequest.EntityType))
             {
-                boolDescriptor = boolDescriptor.Must(m => m
-                    .QueryString(qs => qs.Query($"(entityType:{queryRequest.EntityType} OR entityType:{queryRequest.EntityType}s)"))
-                );
+                filterQueries.Add(f => f.Term(t => t.Field("additionalData.entityType.keyword").Value(queryRequest.EntityType)));
             }
+            
+            // Use Bool.Filter (like the working query) instead of Bool.Must
+            return q.Bool(b => b.Filter(filterQueries.ToArray()));
+        }
 
-            // Add text search using query string for consistency
-            if (!string.IsNullOrEmpty(queryRequest.SearchTerm))
-            {
-                boolDescriptor = boolDescriptor.Must(m => m
-                    .QueryString(qs => qs.Query(queryRequest.SearchTerm))
-                );
-            }
-
-            return boolDescriptor;
-        });
+        // Fallback if no migration ID
+        return q.MatchAll();
     }
 
     /// <summary>

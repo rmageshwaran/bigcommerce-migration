@@ -56,7 +56,7 @@ public class V3HierarchicalStrategy : IEntityDiscoveryStrategy
             var paginationRequest = new BigCommercePaginationRequest
             {
                 Page = 1,
-                Limit = 250, // Use large limit to minimize pagination
+                Limit = 250, // Use large limit to minimize pagination - REVERTED: 250 is correct for performance
                 IncludeDeleted = request.EntityConfig.IncludeDeleted,
                 IncludeDrafts = request.EntityConfig.IncludeDrafts,
                 CategoryTreeId = request.CategoryTreeContext?.SourceCategoryTreeId,
@@ -86,8 +86,8 @@ public class V3HierarchicalStrategy : IEntityDiscoveryStrategy
                 if (response.Data != null && response.Data.Any())
                 {
                     allEntities.AddRange(response.Data);
-                    _logger.LogDebug("Cached {PageEntities} {EntityType} from page {Page}", 
-                        response.Data.Count, request.EntityType, currentPage);
+                    _logger.LogDebug("Cached {PageEntities} {EntityType} from page {Page} (total so far: {Total})", 
+                        response.Data.Count, request.EntityType, currentPage, allEntities.Count);
                 }
 
                 // Store V3 metadata from first page
@@ -96,37 +96,82 @@ public class V3HierarchicalStrategy : IEntityDiscoveryStrategy
                     v3Metadata = response.Meta.Pagination;
                 }
 
-                // Use V3 metadata for efficient pagination
+                // ✅ ROBUST PAGINATION: Use multiple exit conditions for reliability
+                // 1. No more data returned (most reliable indicator)
+                if (response.Data == null || !response.Data.Any())
+                {
+                    _logger.LogDebug("No more {EntityType} data returned from page {Page}, ending pagination", 
+                        request.EntityType, currentPage);
+                    break;
+                }
+                
+                // 2. Returned fewer items than limit (indicates last page)
+                if (response.Data.Count < paginationRequest.Limit)
+                {
+                    _logger.LogDebug("Page {Page} returned {Count} {EntityType} items (less than limit {Limit}), ending pagination",
+                        currentPage, response.Data.Count, request.EntityType, paginationRequest.Limit);
+                    break;
+                }
+                
+                // 3. API metadata indicates last page (if available and reliable)
                 if (response.TotalPages.HasValue && currentPage >= response.TotalPages.Value)
                 {
-                    _logger.LogDebug("Reached last page {TotalPages} for {EntityType}", 
+                    _logger.LogDebug("Reached API-indicated last page {TotalPages} for {EntityType}", 
                         response.TotalPages.Value, request.EntityType);
                     break;
                 }
 
                 currentPage++;
 
-                // Safety check - prevent infinite loops
-                if (currentPage > 50)
+                // 4. Safety check - prevent infinite loops
+                if (currentPage > 100)
                 {
-                    _logger.LogWarning("Breaking pagination loop after 50 pages for {EntityType} to prevent infinite loop", 
-                        request.EntityType);
+                    _logger.LogWarning("Breaking pagination loop after 100 pages for {EntityType} to prevent infinite loop. Total entities cached: {TotalCached}", 
+                        request.EntityType, allEntities.Count);
                     break;
                 }
 
             } while (true);
 
-            _logger.LogInformation("Pagination completed for {EntityType}: Cached {ActualCount} entities across {PagesProcessed} pages", 
+            _logger.LogInformation("✅ Pagination completed for {EntityType}: Cached {ActualCount} entities across {PagesProcessed} pages", 
                 request.EntityType, allEntities.Count, currentPage);
+
+            // ✅ VALIDATION: Check if we might have missed entities
+            if (v3Metadata?.Total > 0 && allEntities.Count != v3Metadata.Total)
+            {
+                _logger.LogWarning("⚠️ Entity count mismatch for {EntityType}! Cached: {CachedCount}, API reported total: {ApiTotal}",
+                    request.EntityType, allEntities.Count, v3Metadata.Total);
+            }
 
             // Sort entities hierarchically
             var sortedEntities = SortEntitiesHierarchically(allEntities);
+            
+            // ✅ VALIDATION: Check if hierarchical sorting dropped any entities
+            if (sortedEntities.Count != allEntities.Count)
+            {
+                var droppedCount = allEntities.Count - sortedEntities.Count;
+                _logger.LogWarning("⚠️ Hierarchical sorting dropped {DroppedCount} {EntityType} entities! Original: {OriginalCount}, Sorted: {SortedCount}",
+                    droppedCount, request.EntityType, allEntities.Count, sortedEntities.Count);
+                
+                // Find which entities were dropped
+                var sortedIds = new HashSet<string>(sortedEntities.Select(e => e.GetValueOrDefault("id")?.ToString() ?? ""));
+                var droppedEntities = allEntities.Where(e => !sortedIds.Contains(e.GetValueOrDefault("id")?.ToString() ?? ""));
+                
+                foreach (var dropped in droppedEntities)
+                {
+                    var id = dropped.GetValueOrDefault("id")?.ToString() ?? "unknown";
+                    var name = dropped.GetValueOrDefault("name")?.ToString() ?? "unknown";
+                    var parentId = dropped.GetValueOrDefault("parent_id");
+                    _logger.LogWarning("⚠️ Dropped {EntityType}: ID={Id}, Name='{Name}', ParentId={ParentId}", 
+                        request.EntityType, id, name, parentId);
+                }
+            }
             
             // ✅ FIX: Extract ALL entity IDs (not just hierarchically sorted ones)
             // The hierarchical sorting is for the cached data only, not for filtering which entities to process
             var allEntityIds = ExtractEntityIds(allEntities); // Use original unsorted list for complete entity IDs
             
-            _logger.LogInformation("Hierarchical sorting completed for {EntityType}: {TotalEntities} entities discovered, {SortedEntities} entities sorted and cached", 
+            _logger.LogInformation("✅ Hierarchical strategy completed for {EntityType}: {TotalEntities} entities discovered, {SortedEntities} entities sorted and cached", 
                 request.EntityType, allEntityIds.Count, sortedEntities.Count);
 
             return new EntityDiscoveryResult

@@ -30,6 +30,7 @@ interface DashboardState {
   
   // Data
   activeMigrations: Map<string, MigrationProgress>;
+  cancelledMigrations: Set<string>;
   systemHealth: SystemHealthData | null;
   
   // UI State
@@ -64,6 +65,8 @@ type DashboardAction =
   | { type: 'SET_API_CONNECTED'; payload: boolean }
   | { type: 'UPDATE_MIGRATION_PROGRESS'; payload: MigrationProgress }
   | { type: 'REMOVE_MIGRATION'; payload: string }
+  | { type: 'ADD_CANCELLED_MIGRATION'; payload: string }
+  | { type: 'REMOVE_CANCELLED_MIGRATION'; payload: string }
   | { type: 'UPDATE_SYSTEM_HEALTH'; payload: SystemHealthData }
   | { type: 'ADD_ERROR'; payload: DashboardError }
   | { type: 'REMOVE_ERROR'; payload: string }
@@ -84,6 +87,7 @@ const initialState: DashboardState = {
   },
   apiConnected: false,
   activeMigrations: new Map(),
+  cancelledMigrations: new Set(),
   systemHealth: null,
   isLoading: false,
   errors: [],
@@ -109,6 +113,11 @@ function dashboardReducer(state: DashboardState, action: DashboardAction): Dashb
       return { ...state, apiConnected: action.payload };
       
     case 'UPDATE_MIGRATION_PROGRESS':
+      // Don't add cancelled migrations back to active state
+      if (state.cancelledMigrations.has(action.payload.migrationId)) {
+        console.log('🚫 Skipping update for cancelled migration:', action.payload.migrationId);
+        return state;
+      }
       const newMigrations = new Map(state.activeMigrations);
       newMigrations.set(action.payload.migrationId, action.payload);
       return { ...state, activeMigrations: newMigrations };
@@ -117,6 +126,16 @@ function dashboardReducer(state: DashboardState, action: DashboardAction): Dashb
       const filteredMigrations = new Map(state.activeMigrations);
       filteredMigrations.delete(action.payload);
       return { ...state, activeMigrations: filteredMigrations };
+      
+    case 'ADD_CANCELLED_MIGRATION':
+      const newCancelledMigrations = new Set(state.cancelledMigrations);
+      newCancelledMigrations.add(action.payload);
+      return { ...state, cancelledMigrations: newCancelledMigrations };
+      
+    case 'REMOVE_CANCELLED_MIGRATION':
+      const updatedCancelledMigrations = new Set(state.cancelledMigrations);
+      updatedCancelledMigrations.delete(action.payload);
+      return { ...state, cancelledMigrations: updatedCancelledMigrations };
       
     case 'UPDATE_SYSTEM_HEALTH':
       return { ...state, systemHealth: action.payload };
@@ -170,6 +189,9 @@ interface DashboardContextType {
   refreshData: () => Promise<void>;
   joinMigrationGroup: (migrationId: string) => Promise<void>;
   leaveMigrationGroup: (migrationId: string) => Promise<void>;
+  removeMigration: (migrationId: string) => void;
+  addCancelledMigration: (migrationId: string) => void;
+  removeCancelledMigration: (migrationId: string) => void;
   clearErrors: () => void;
   addError: (error: DashboardError) => void;
   removeError: (errorCode: string) => void;
@@ -414,6 +436,26 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
     }
   };
 
+  // Remove migration from active state (for immediate UI updates after cancellation)
+  const removeMigration = (migrationId: string): void => {
+    console.log(`🗑️ Removing migration from active state: ${migrationId}`);
+    dispatch({ type: 'REMOVE_MIGRATION', payload: migrationId });
+    // Also add to cancelled list to prevent background processes from adding it back
+    dispatch({ type: 'ADD_CANCELLED_MIGRATION', payload: migrationId });
+  };
+
+  // Add migration to cancelled list (prevents background refresh from adding it back)
+  const addCancelledMigration = (migrationId: string): void => {
+    console.log(`🚫 Adding migration to cancelled list: ${migrationId}`);
+    dispatch({ type: 'ADD_CANCELLED_MIGRATION', payload: migrationId });
+  };
+
+  // Remove migration from cancelled list (after timeout or manual cleanup)
+  const removeCancelledMigration = (migrationId: string): void => {
+    console.log(`✅ Removing migration from cancelled list: ${migrationId}`);
+    dispatch({ type: 'REMOVE_CANCELLED_MIGRATION', payload: migrationId });
+  };
+
   // Error management
   const clearErrors = (): void => {
     dispatch({ type: 'CLEAR_ERRORS' });
@@ -474,7 +516,27 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
     // Migration progress updates
     const progressUnsubscribe = signalRService.on('migrationProgress', (progress: MigrationProgress) => {
       console.log('🎯 DashboardContext received migrationProgress:', progress);
-      dispatch({ type: 'UPDATE_MIGRATION_PROGRESS', payload: progress });
+      
+      // Fix backend status mismatch: detect if migration is actually running despite "queued" status
+      const normalizedProgress = { ...progress };
+      
+      if (progress.status === 'queued' || progress.status === 'pending') {
+        // Check if migration is actually running based on data indicators
+        const isActuallyRunning = 
+          progress.processedEntities > 0 ||
+          progress.currentPhase === 'Processing' ||
+          progress.overallProgressPercentage > 0 ||
+          (progress.currentEntity && progress.currentEntity !== '') ||
+          ((progress as any).currentProcessing && Object.keys((progress as any).currentProcessing).length > 0);
+          
+        if (isActuallyRunning) {
+          console.log(`🔧 Status normalization: Backend says "${progress.status}" but migration is actually running`);
+          console.log(`📊 Evidence: processedEntities=${progress.processedEntities}, currentPhase="${progress.currentPhase}", progress=${progress.overallProgressPercentage}%`);
+          normalizedProgress.status = 'in_progress';
+        }
+      }
+      
+      dispatch({ type: 'UPDATE_MIGRATION_PROGRESS', payload: normalizedProgress });
     });
 
     // Migration status updates (completed, failed, cancelled, etc.)
@@ -729,6 +791,9 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
     refreshData,
     joinMigrationGroup,
     leaveMigrationGroup,
+    removeMigration,
+    addCancelledMigration,
+    removeCancelledMigration,
     clearErrors,
     addError,
     removeError,

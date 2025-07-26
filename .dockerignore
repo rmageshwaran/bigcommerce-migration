@@ -1,36 +1,69 @@
-# Exclude Windows build artifacts and cache
+# ===== DOCKER BUILD OPTIMIZATION =====
+# This is the PRIMARY .dockerignore - individual project .dockerignore files don't apply
+
+# ===== BUILD ARTIFACTS (CRITICAL FOR PERFORMANCE) =====
 **/obj/
 **/bin/
 **/TestResults/
-**/.vs/
-**/.vscode/
+**/build/
+**/dist/
+**/out/
+**/.cache/
+**/.nuget/
 **/packages/
 **/node_modules/
 
-# Exclude OS files
-.DS_Store
-Thumbs.db
+# ===== SPECIFIC LARGE DIRECTORIES =====
+src/BigCommerce.Migration.Dashboard/node_modules/
+src/BigCommerce.Migration.Dashboard/dist/
+tests/
+**/tests/
 
-# Exclude Git
+# ===== DEVELOPMENT FILES =====
+**/.vs/
+**/.vscode/
+**/.idea/
+*.user
+*.suo
+*.tmp
+*.log
+**/.DS_Store
+**/Thumbs.db
+
+# ===== GIT AND DOCUMENTATION =====
 .git/
 .gitignore
-
-# Exclude documentation
+**/*.md
+**/README*
 docs/
-*.md
-README*
 
-# Exclude test projects to speed up build
-tests/
-
-# Exclude Azure pipelines
+# ===== INFRASTRUCTURE AND SCRIPTS =====
+iac/
+scripts/
+etl-benchmarks/
 azure-pipelines*.yml
 
-# Exclude scripts
-scripts/
+# ===== FUNCTION-SPECIFIC EXCLUSIONS =====
+**/local.settings.json
+**/.azure/
+**/.azurite/
+**/Properties/PublishProfiles/
 
-# Exclude infrastructure
-iac/
+# ===== REACT/NODE SPECIFIC =====
+**/coverage/
+**/.nyc_output/
+**/.parcel-cache/
+**/npm-debug.log*
+**/yarn-debug.log*
+**/yarn-error.log*
 
-# Keep required files
-!src/ 
+# ===== KEEP ESSENTIAL FILES =====
+!src/
+!src/**/*.cs
+!src/**/*.csproj
+!src/**/*.json
+!src/**/*.tsx
+!src/**/*.ts
+!src/**/*.js
+!src/**/*.html
+!src/**/*.css 

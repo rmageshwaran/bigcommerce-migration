@@ -10,7 +10,19 @@ import { getSignalRService } from '../services/signalRService';
 import { getApiService } from '../services/apiService';
 import { notificationService } from '../services/notificationService';
 
-// Dashboard State Interface
+/**
+ * Dashboard State Interface
+ * 
+ * Manages the complete state of the migration dashboard including:
+ * - SignalR connection status and real-time updates
+ * - API connection status
+ * - Active migration data and progress
+ * - UI loading states and error handling
+ * - Polling fallback mechanism for when SignalR fails
+ * 
+ * This state is shared across all dashboard components and provides
+ * a single source of truth for real-time migration monitoring.
+ */
 interface DashboardState {
   // Connection status
   signalRConnection: SignalRConnection;
@@ -27,9 +39,25 @@ interface DashboardState {
   // Settings
   autoRefreshEnabled: boolean;
   refreshInterval: number;
+  
+  // Polling fallback
+  isPollingEnabled: boolean;
+  pollingInterval: number;
+  lastPollingUpdate: Date | null;
 }
 
-// Dashboard Actions
+/**
+ * Dashboard Actions
+ * 
+ * Defines all possible actions that can be dispatched to update the dashboard state.
+ * Actions are handled by the dashboardReducer to ensure immutable state updates.
+ * 
+ * Key action categories:
+ * - Connection management (SignalR, API)
+ * - Data updates (migrations, system health)
+ * - UI state (loading, errors)
+ * - Settings (refresh intervals, polling)
+ */
 type DashboardAction =
   | { type: 'SET_LOADING'; payload: boolean }
   | { type: 'SET_SIGNALR_CONNECTION'; payload: SignalRConnection }
@@ -42,6 +70,9 @@ type DashboardAction =
   | { type: 'CLEAR_ERRORS' }
   | { type: 'SET_AUTO_REFRESH'; payload: boolean }
   | { type: 'SET_REFRESH_INTERVAL'; payload: number }
+  | { type: 'SET_POLLING_ENABLED'; payload: boolean }
+  | { type: 'SET_POLLING_INTERVAL'; payload: number }
+  | { type: 'UPDATE_LAST_POLLING'; payload: Date }
   | { type: 'RESET_STATE' };
 
 // Initial State
@@ -57,7 +88,12 @@ const initialState: DashboardState = {
   isLoading: false,
   errors: [],
   autoRefreshEnabled: true,
-  refreshInterval: 30000 // 30 seconds
+  refreshInterval: 30000, // 30 seconds
+  
+  // Polling fallback
+  isPollingEnabled: false,
+  pollingInterval: 10000, // 10 seconds for polling fallback
+  lastPollingUpdate: null
 };
 
 // Reducer
@@ -106,6 +142,15 @@ function dashboardReducer(state: DashboardState, action: DashboardAction): Dashb
     case 'SET_REFRESH_INTERVAL':
       return { ...state, refreshInterval: action.payload };
       
+    case 'SET_POLLING_ENABLED':
+      return { ...state, isPollingEnabled: action.payload };
+      
+    case 'SET_POLLING_INTERVAL':
+      return { ...state, pollingInterval: action.payload };
+      
+    case 'UPDATE_LAST_POLLING':
+      return { ...state, lastPollingUpdate: action.payload };
+      
     case 'RESET_STATE':
       return { ...initialState };
       
@@ -128,6 +173,11 @@ interface DashboardContextType {
   clearErrors: () => void;
   addError: (error: DashboardError) => void;
   removeError: (errorCode: string) => void;
+  
+  // Polling fallback
+  startPolling: () => void;
+  stopPolling: () => void;
+  setPollingInterval: (interval: number) => void;
 }
 
 // Create Context
@@ -154,14 +204,61 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
   const signalRService = getSignalRService(); // Use default configuration
   const apiService = getApiService(config.apiBaseUrl ? { baseURL: config.apiBaseUrl } : undefined);
 
-  // Connect to services
+  /**
+   * Connect to services
+   * 
+   * Initializes connections to both API and SignalR services in parallel for optimal performance.
+   * This function is called when the dashboard loads and handles the initial setup of
+   * real-time communication channels.
+   * 
+   * Implementation Details:
+   * - Starts API connection test and SignalR connection simultaneously
+   * - Uses Promise.all() for parallel execution to minimize connection time
+   * - Handles individual service failures gracefully
+   * - Only attempts data loading if API connection is successful
+   * 
+   * Error Handling:
+   * - API failures are logged but don't prevent SignalR connection
+   * - SignalR failures are logged and user is notified
+   * - Connection errors are stored in state for UI display
+   */
   const connectServices = async (): Promise<void> => {
     try {
       dispatch({ type: 'SET_LOADING', payload: true });
       
-      // Test API connection first
-      console.log('🔌 Testing API connection...');
-      const apiConnected = await apiService.testConnection();
+      // Start both API and SignalR connections in parallel for faster initialization
+      console.log('🔌 Starting parallel service connections...');
+      
+      // Start API connection test
+      const apiConnectionPromise = apiService.testConnection().catch(error => {
+        console.warn('⚠️ API connection test failed:', error);
+        return false;
+      });
+      
+      // Start SignalR connection (if not already connected)
+      const signalRConnectionPromise = signalRService.isConnected() 
+        ? Promise.resolve(true)
+        : signalRService.connect().then(() => {
+            console.log('✅ SignalR connected successfully');
+            return true;
+          }).catch(error => {
+            console.warn('⚠️ SignalR connection failed:', error);
+            addError({
+              code: 'SIGNALR_CONNECTION_FAILED',
+              message: 'Real-time connection failed',
+              details: 'SignalR connection could not be established. Real-time updates will not be available.',
+              timestamp: new Date()
+            });
+            return false;
+          });
+      
+      // Wait for both connections to complete (or fail)
+      const [apiConnected, signalRConnected] = await Promise.all([
+        apiConnectionPromise,
+        signalRConnectionPromise
+      ]);
+      
+      // Update API connection state
       dispatch({ type: 'SET_API_CONNECTED', payload: apiConnected });
       
       if (!apiConnected) {
@@ -171,28 +268,8 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
           details: 'Azure Functions may not be running on localhost:7071. Please start the backend services.',
           timestamp: new Date()
         });
-        
-        // Continue with SignalR connection attempt even if API fails
-        console.log('⚠️ API connection failed, but continuing with SignalR...');
       }
-
-      // Connect SignalR (independent of API)
-      console.log('🔌 Connecting to SignalR...');
-      if (!signalRService.isConnected()) {
-        try {
-          await signalRService.connect();
-          console.log('✅ SignalR connected successfully');
-        } catch (signalRError) {
-          console.warn('⚠️ SignalR connection failed:', signalRError);
-          addError({
-            code: 'SIGNALR_CONNECTION_FAILED',
-            message: 'Real-time connection failed',
-            details: 'SignalR connection could not be established. Real-time updates will not be available.',
-            timestamp: new Date()
-          });
-        }
-      }
-
+      
       // Only attempt data loading if API is connected
       if (apiConnected) {
         console.log('📊 Loading initial data...');
@@ -228,7 +305,24 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
     }
   };
 
-  // Refresh all data
+  /**
+   * Refresh all data
+   * 
+   * Fetches the latest migration data and system health information from the API.
+   * This function is called on initial load and can be triggered manually by users.
+   * 
+   * Key Features:
+   * - Fetches active migrations and system health in parallel
+   * - Pre-joins SignalR groups for all active migrations (Task 3)
+   * - Handles API failures gracefully without breaking the dashboard
+   * - Updates state with fresh data for real-time monitoring
+   * 
+   * Group Pre-joining (Task 3):
+   * - Automatically joins SignalR groups for all active migrations
+   * - Ensures real-time updates are received immediately
+   * - Handles group join failures gracefully
+   * - Uses Promise.allSettled() for parallel group joining
+   */
   const refreshData = async (): Promise<void> => {
     try {
       console.log('🔄 Refreshing dashboard data...');
@@ -254,6 +348,26 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
             dispatch({ type: 'UPDATE_MIGRATION_PROGRESS', payload: migration });
           });
           console.log('✅ Active migrations data refreshed:', migrationsResponse.data.length, 'migrations');
+          
+          // Pre-join SignalR groups for all active migrations (Task 3)
+          if (signalRService.isConnected()) {
+            console.log('🔗 Pre-joining SignalR groups for active migrations...');
+            const joinPromises = migrationsResponse.data.map(async (migration) => {
+              try {
+                await signalRService.joinMigrationGroup(migration.migrationId);
+                console.log(`✅ Joined SignalR group for migration: ${migration.migrationId}`);
+              } catch (joinError) {
+                console.warn(`⚠️ Failed to join SignalR group for migration ${migration.migrationId}:`, joinError);
+                // Don't throw - individual group join failures shouldn't break the whole process
+              }
+            });
+            
+            // Wait for all group joins to complete (but don't fail if some fail)
+            await Promise.allSettled(joinPromises);
+            console.log('✅ SignalR group pre-join process completed');
+          } else {
+            console.log('⚠️ SignalR not connected - skipping group pre-join');
+          }
         } else {
           console.warn('⚠️ Active migrations response has unexpected structure:', migrationsResponse);
         }
@@ -311,6 +425,33 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
 
   const removeError = (errorCode: string): void => {
     dispatch({ type: 'REMOVE_ERROR', payload: errorCode });
+  };
+
+  /**
+   * Polling fallback functions
+   * 
+   * These functions manage the polling fallback mechanism that ensures users
+   * continue to receive migration updates even when SignalR connection fails.
+   * 
+   * Polling Strategy:
+   * - Automatically starts when SignalR disconnects
+   * - Uses configurable intervals (default: 10 seconds)
+   * - Automatically stops when SignalR reconnects
+   * - Provides visual feedback to users about polling status
+   */
+  const startPolling = (): void => {
+    dispatch({ type: 'SET_POLLING_ENABLED', payload: true });
+    console.log('🔄 Starting polling fallback for migration updates');
+  };
+
+  const stopPolling = (): void => {
+    dispatch({ type: 'SET_POLLING_ENABLED', payload: false });
+    console.log('⏹️ Stopping polling fallback');
+  };
+
+  const setPollingInterval = (interval: number): void => {
+    dispatch({ type: 'SET_POLLING_INTERVAL', payload: interval });
+    console.log(`⏱️ Polling interval set to ${interval}ms`);
   };
 
   // Set up SignalR event listeners
@@ -397,6 +538,59 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
       }
     });
 
+    // Entity progress updates (when individual entities complete)
+    const entityProgressUnsubscribe = signalRService.on('EntityProgressUpdated', (entityData: any) => {
+      console.log('🔄 DashboardContext received EntityProgressUpdated:', entityData);
+      
+      const migrationId = entityData.migrationId || entityData.MigrationId;
+      if (!migrationId) return;
+      
+      // If entity status is completed, update the overall migration status
+      if (entityData.Status === 'completed' || entityData.status === 'completed') {
+        console.log('✅ DashboardContext: Entity completed, updating migration status to completed');
+        
+        // Update the migration to completed status
+        const completedProgress: MigrationProgress = {
+          migrationId: migrationId,
+          status: 'completed',
+          totalEntities: entityData.TotalCount || entityData.totalCount || 0,
+          processedEntities: entityData.ProcessedCount || entityData.processedCount || 0,
+          successfulEntities: entityData.SuccessCount || entityData.successCount || 0,
+          failedEntities: entityData.FailureCount || entityData.failureCount || 0,
+          startTime: new Date(),
+          lastUpdated: new Date(),
+          entitiesPerSecond: 0,
+          estimatedTimeRemaining: 0,
+          elapsedTime: 0,
+          currentEntity: entityData.EntityType || entityData.entityType || '',
+          currentPhase: 'completed',
+          overallProgressPercentage: 100,
+          entityProgress: {},
+          errorRate: 0
+        };
+        dispatch({ type: 'UPDATE_MIGRATION_PROGRESS', payload: completedProgress });
+        
+        // Show completion notification
+        const migrationName = `Migration ${migrationId}`;
+        notificationService.migrationCompleted(
+          migrationId,
+          migrationName,
+          entityData.ProcessingTime || 'just completed'
+        );
+      } else if (migrationId) {
+        // Update entity counts for other statuses
+        dispatch({ 
+          type: 'UPDATE_MIGRATION_PROGRESS', 
+          payload: {
+            migrationId: migrationId,
+            processedEntities: entityData.ProcessedCount || entityData.processedCount,
+            totalEntities: entityData.TotalCount || entityData.totalCount,
+            lastUpdated: new Date()
+          } as MigrationProgress
+        });
+      }
+    });
+
     // System health updates
     const healthUnsubscribe = signalRService.on('systemHealth', (health: SystemHealthData) => {
       dispatch({ type: 'UPDATE_SYSTEM_HEALTH', payload: health });
@@ -417,13 +611,114 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
 
     // Cleanup
     return () => {
+      console.log('🧹 Cleaning up DashboardContext...');
+      
+      // Unsubscribe from SignalR events
       connectionUnsubscribe();
       progressUnsubscribe();
       statusUnsubscribe();
+      entityProgressUnsubscribe();
       healthUnsubscribe();
       errorUnsubscribe();
+      
+      // Leave all joined migration groups
+      if (signalRService.isConnected()) {
+        const activeMigrationsArray = Array.from(state.activeMigrations.keys());
+        console.log(`🔗 Leaving ${activeMigrationsArray.length} migration groups on cleanup...`);
+        
+        // Leave all groups in parallel
+        Promise.allSettled(
+          activeMigrationsArray.map(migrationId => 
+            signalRService.leaveMigrationGroup(migrationId)
+          )
+        ).then(results => {
+          const successful = results.filter(r => r.status === 'fulfilled').length;
+          const failed = results.filter(r => r.status === 'rejected').length;
+          console.log(`✅ Cleanup completed: ${successful} groups left successfully, ${failed} failed`);
+        }).catch(error => {
+          console.error('❌ Error during group cleanup:', error);
+        });
+      }
     };
   }, [autoConnect]);
+
+  /**
+   * Automatic fallback to polling when SignalR fails
+   * 
+   * This effect monitors SignalR connection status and automatically switches
+   * between real-time updates and polling fallback to ensure continuous
+   * migration progress updates.
+   * 
+   * Fallback Logic:
+   * - When SignalR disconnects and API is available → Start polling
+   * - When SignalR reconnects and polling is active → Stop polling
+   * - Ensures users always have access to migration updates
+   * 
+   * This implements Task 7: Fallback to REST API polling if SignalR fails
+   */
+  useEffect(() => {
+    const { signalRConnection, isPollingEnabled } = state;
+    
+    // If SignalR is disconnected and we're not already polling, start polling
+    if (!signalRConnection.isConnected && !isPollingEnabled && state.apiConnected) {
+      console.log('🔄 SignalR disconnected - starting polling fallback');
+      startPolling();
+    }
+    
+    // If SignalR reconnects and we're polling, stop polling
+    if (signalRConnection.isConnected && isPollingEnabled) {
+      console.log('✅ SignalR reconnected - stopping polling fallback');
+      stopPolling();
+    }
+  }, [state.signalRConnection.isConnected, state.isPollingEnabled, state.apiConnected]);
+
+  /**
+   * Polling effect
+   * 
+   * Manages the polling timer that fetches migration updates at regular intervals
+   * when SignalR is not available. This ensures users continue to receive
+   * migration progress updates even during connection issues.
+   * 
+   * Polling Implementation:
+   * - Uses setInterval for regular API calls
+   * - Calls refreshData() to fetch latest migration status
+   * - Updates lastPollingUpdate timestamp for UI feedback
+   * - Handles polling errors gracefully
+   * - Cleans up timer on unmount or when polling is disabled
+   * 
+   * Error Handling:
+   * - Polling failures don't break the system
+   * - Errors are logged and user is notified
+   * - Automatic retry on next polling interval
+   */
+  useEffect(() => {
+    if (!state.isPollingEnabled || !state.apiConnected) {
+      return;
+    }
+
+    console.log('🔄 Setting up polling interval for migration updates');
+    
+    const pollingTimer = setInterval(async () => {
+      try {
+        console.log('🔄 Polling for migration updates...');
+        await refreshData();
+        dispatch({ type: 'UPDATE_LAST_POLLING', payload: new Date() });
+      } catch (error) {
+        console.warn('⚠️ Polling failed:', error);
+        addError({
+          code: 'POLLING_FAILED',
+          message: 'Failed to fetch migration updates via polling',
+          details: error instanceof Error ? error.message : 'Unknown error',
+          timestamp: new Date()
+        });
+      }
+    }, state.pollingInterval);
+
+    return () => {
+      console.log('🧹 Cleaning up polling timer');
+      clearInterval(pollingTimer);
+    };
+  }, [state.isPollingEnabled, state.pollingInterval, state.apiConnected]);
 
   // Context value
   const contextValue: DashboardContextType = {
@@ -436,7 +731,10 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
     leaveMigrationGroup,
     clearErrors,
     addError,
-    removeError
+    removeError,
+    startPolling,
+    stopPolling,
+    setPollingInterval
   };
 
   return (

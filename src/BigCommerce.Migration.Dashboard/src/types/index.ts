@@ -1,6 +1,6 @@
 // System Status Types
 export type SystemStatus = 'healthy' | 'warning' | 'error';
-export type MigrationStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+export type MigrationStatus = 'pending' | 'running' | 'in_progress' | 'inprogress' | 'completed' | 'failed' | 'cancelled';
 
 // Migration Data Types
 export interface MigrationProgress {

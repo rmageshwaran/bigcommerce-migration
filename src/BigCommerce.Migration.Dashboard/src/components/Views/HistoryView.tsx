@@ -44,6 +44,7 @@ import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
 import { apiService } from '../../services/apiService';
+import { getSignalRService } from '../../services/signalRService';
 import type { MigrationStatus, MigrationHistoryResponse } from '../../types';
 
 interface MigrationHistoryItem {
@@ -243,7 +244,15 @@ export const HistoryView: React.FC = () => {
     
     setIsCancelling(true);
     try {
+      // Cancel the migration via API
       await apiService.cancelMigration(selectedMigrationForCancel.migrationId);
+      
+      // Leave SignalR group to stop receiving real-time updates for this migration
+      console.log('🚪 Leaving SignalR group for cancelled migration:', selectedMigrationForCancel.migrationId);
+      const signalRService = getSignalRService();
+      if (signalRService.isConnected()) {
+        await signalRService.leaveMigrationGroup(selectedMigrationForCancel.migrationId);
+      }
       
       // Refresh the migration list to reflect the cancelled status
       await fetchMigrationHistory();

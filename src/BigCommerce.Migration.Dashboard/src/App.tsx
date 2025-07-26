@@ -104,28 +104,19 @@ const EnhancedMigrationPage = () => {
   }
   
   return (
-    <Box p={3}>
-      <Typography variant="h4" gutterBottom>
-        Enhanced Migration Dashboard
-      </Typography>
-      <Typography variant="body1" paragraph>
-        Advanced real-time monitoring with batch-level tracking and performance analytics.
-      </Typography>
-      
-      <EnhancedMigrationDashboard
-        migrationId={migrationId}
-        autoConnect={true}
-        enableNotifications={true}
-        onMigrationComplete={(id) => {
-          console.log('Migration completed:', id);
-          navigate('/');
-        }}
-        onMigrationError={(id, error) => {
-          console.log('Migration failed:', id, error);
-          navigate('/');
-        }}
-      />
-    </Box>
+    <EnhancedMigrationDashboard
+      migrationId={migrationId}
+      autoConnect={true}
+      enableNotifications={true}
+      onMigrationComplete={(id) => {
+        console.log('Migration completed:', id);
+        navigate('/');
+      }}
+      onMigrationError={(id, error) => {
+        console.log('Migration failed:', id, error);
+        navigate('/');
+      }}
+    />
   );
 };
 

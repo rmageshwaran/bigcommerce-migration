@@ -1,8 +1,6 @@
 # Docker Compose Override for Development Environment
 # This file is automatically used with docker-compose.yml for local development
 
-version: '3.8'
-
 services:
   # Development overrides for BigCommerce Functions
   bigcommerce-functions:

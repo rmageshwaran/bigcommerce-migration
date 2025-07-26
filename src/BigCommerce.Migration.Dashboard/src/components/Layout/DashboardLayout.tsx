@@ -11,9 +11,14 @@ import {
   Switch,
   FormControlLabel,
   Button,
+  Menu,
+  MenuItem,
+  ListItemIcon,
+  ListItemText,
 } from '@mui/material';
 import {
   Help as HelpIcon,
+  BugReport as DebugIcon,
 } from '@mui/icons-material';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import ThemeToggle from './ThemeToggle';
@@ -39,6 +44,7 @@ const navigationTabs: NavigationTab[] = [
 export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
   const navigate = useNavigate();
   const location = useLocation();
+  const [helpMenuAnchor, setHelpMenuAnchor] = useState<null | HTMLElement>(null);
 
   // Determine current tab based on location
   const getCurrentTab = () => {
@@ -58,12 +64,24 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) =>
     }
   };
 
-  const handleHelpClick = () => {
-    console.log('Help clicked');
-    // TODO: Implement help functionality
+  const handleHelpMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
+    setHelpMenuAnchor(event.currentTarget);
   };
 
+  const handleHelpMenuClose = () => {
+    setHelpMenuAnchor(null);
+  };
 
+  const handleToggleDebug = () => {
+    // Dispatch a custom event that the MigrationOverview can listen to
+    window.dispatchEvent(new CustomEvent('toggleDebugInfo'));
+    handleHelpMenuClose();
+  };
+
+  const handleSignalRTest = () => {
+    navigate('/test/signalr');
+    handleHelpMenuClose();
+  };
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
@@ -109,21 +127,50 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) =>
             {/* Theme Toggle */}
             <ThemeToggle />
 
-            {/* Help Button */}
-            <Button
-              variant="outlined"
-              startIcon={<HelpIcon />}
-              onClick={handleHelpClick}
-              size="small"
-              sx={{
-                textTransform: 'none',
-                fontWeight: 500,
-                borderRadius: '6px',
-                px: 2,
+            {/* Help Icon */}
+            <IconButton
+              onClick={handleHelpMenuOpen}
+              color="inherit"
+              sx={{ 
+                '&:hover': {
+                  backgroundColor: 'action.hover'
+                }
               }}
             >
-              Help
-            </Button>
+              <HelpIcon />
+            </IconButton>
+            
+            {/* Help Menu */}
+            <Menu
+              anchorEl={helpMenuAnchor}
+              open={Boolean(helpMenuAnchor)}
+              onClose={handleHelpMenuClose}
+              anchorOrigin={{
+                vertical: 'bottom',
+                horizontal: 'right',
+              }}
+              transformOrigin={{
+                vertical: 'top',
+                horizontal: 'right',
+              }}
+            >
+              <MenuItem onClick={handleToggleDebug}>
+                <ListItemIcon>
+                  <DebugIcon />
+                </ListItemIcon>
+                <ListItemText>
+                  Toggle Debug Info
+                </ListItemText>
+              </MenuItem>
+              <MenuItem onClick={handleSignalRTest}>
+                <ListItemIcon>
+                  <DebugIcon />
+                </ListItemIcon>
+                <ListItemText>
+                  SignalR Test Page
+                </ListItemText>
+              </MenuItem>
+            </Menu>
           </Box>
         </Toolbar>
       </AppBar>

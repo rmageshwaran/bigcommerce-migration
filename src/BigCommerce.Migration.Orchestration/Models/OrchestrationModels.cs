@@ -735,3 +735,23 @@ public class StartEntityProcessingRequest
     /// </summary>
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
 } 
+
+/// <summary>
+/// Request model for processing multiple batches in parallel using 17.0x optimizations
+/// </summary>
+public class ProcessParallelBatchesRequest
+{
+    public string MigrationId { get; set; } = string.Empty;
+    public string EntityType { get; set; } = string.Empty;
+    public int TotalBatches { get; set; }
+    public int BatchSize { get; set; }
+    public List<string> EntityIds { get; set; } = new();
+    public StoreConfiguration SourceStore { get; set; } = new();
+    public StoreConfiguration DestinationStore { get; set; } = new();
+    public CategoryTreeContext CategoryTreeContext { get; set; } = new();
+    public Dictionary<string, object>? PaginationMetadata { get; set; }
+    public bool UseDirectPagination { get; set; }
+    public bool IsCancelled { get; set; }
+    public string CancellationReason { get; set; } = string.Empty;
+    public DateTime? CancelledAt { get; set; }
+} 

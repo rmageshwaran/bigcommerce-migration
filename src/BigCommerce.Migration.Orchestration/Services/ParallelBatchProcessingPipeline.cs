@@ -333,7 +333,7 @@ public class ParallelBatchProcessingPipeline : IParallelBatchProcessingPipeline
     /// - Ensures backward compatibility with existing result consumers
     /// </summary>
     private EntityMigrationResult ConvertToEntityMigrationResult(
-        ParallelProcessingResult parallelResult,
+        Core.Models.ParallelProcessingResult parallelResult,
         EntityMigrationRequest request)
     {
         return new EntityMigrationResult

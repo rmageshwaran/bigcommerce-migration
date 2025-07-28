@@ -33,7 +33,25 @@ public class ResolveCategoryTreeIdsActivity
     {
         try
         {
-            _logger.LogInformation("Resolving category tree IDs for migration {MigrationId}", request.MigrationId);
+            _logger.LogInformation("🌳 [RESOLVE-TREE] ⭐ STARTING: Resolving category tree IDs for migration {MigrationId}", request.MigrationId);
+            
+            // 🚨 CRITICAL DEBUG: Log input details
+            _logger.LogInformation("🌳 [RESOLVE-TREE] 📋 INPUT: SourceStore='{SourceStoreId}' (Channel: '{SourceChannelId}'), DestinationStore='{DestinationStoreId}' (Channel: '{DestinationChannelId}')", 
+                request.SourceStore?.StoreId ?? "NULL", 
+                request.SourceStore?.ChannelId ?? "NULL",
+                request.DestinationStore?.StoreId ?? "NULL", 
+                request.DestinationStore?.ChannelId ?? "NULL");
+                
+            if (request.CategoryTreeContext != null)
+            {
+                _logger.LogInformation("🌳 [RESOLVE-TREE] 📋 EXISTING CategoryTreeContext: SourceTreeId='{SourceTreeId}', DestinationTreeId='{DestinationTreeId}'", 
+                    request.CategoryTreeContext.SourceCategoryTreeId ?? "NULL", 
+                    request.CategoryTreeContext.DestinationCategoryTreeId ?? "NULL");
+            }
+            else
+            {
+                _logger.LogInformation("🌳 [RESOLVE-TREE] 📋 No existing CategoryTreeContext provided, creating new one");
+            }
 
             var result = request.CategoryTreeContext ?? new CategoryTreeContext();
 
@@ -72,6 +90,14 @@ public class ResolveCategoryTreeIdsActivity
             _logger.LogInformation("Category tree IDs resolved successfully - Source: {SourceTreeId}, Destination: {DestinationTreeId} for migration {MigrationId}", 
                 result.SourceCategoryTreeId, result.DestinationCategoryTreeId, request.MigrationId);
 
+            // 🚨 CRITICAL DEBUG: Log final result details
+            _logger.LogInformation("🌳 [RESOLVE-TREE] ✅ SUCCESS: Final CategoryTreeContext - SourceTreeId='{SourceTreeId}', DestinationTreeId='{DestinationTreeId}', SourceChannelId='{SourceChannelId}', DestinationChannelId='{DestinationChannelId}' for migration {MigrationId}", 
+                result.SourceCategoryTreeId ?? "NULL", 
+                result.DestinationCategoryTreeId ?? "NULL",
+                result.SourceChannelId ?? "NULL",
+                result.DestinationChannelId ?? "NULL",
+                request.MigrationId);
+
             return result;
         }
         catch (Exception ex)
@@ -91,32 +117,62 @@ public class ResolveCategoryTreeIdsActivity
     {
         try
         {
-            _logger.LogInformation("Fetching actual category trees from BigCommerce API for {StoreType} store {StoreId}", 
-                storeType, store.StoreId);
+            _logger.LogInformation("🌳 [RESOLVE-{StoreType}] ⭐ STARTING: Fetching actual category trees from BigCommerce API for {StoreType} store {StoreId} (Channel: '{ChannelId}')", 
+                storeType.ToUpper(), storeType, store.StoreId, store.ChannelId ?? "NULL");
 
             // Call the BigCommerce API to get actual category trees
             var categoryTrees = await _apiClient.GetCategoryTreesAsync(store, CancellationToken.None);
+            
+            // 🚨 CRITICAL DEBUG: Log API response details
+            if (categoryTrees?.Any() == true)
+            {
+                _logger.LogInformation("🌳 [RESOLVE-{StoreType}] 📊 API SUCCESS: Retrieved {TreeCount} category trees for {StoreType} store {StoreId}", 
+                    storeType.ToUpper(), categoryTrees.Count, storeType, store.StoreId);
+                    
+                // Log each tree for debugging
+                for (int i = 0; i < categoryTrees.Count; i++)
+                {
+                    var tree = categoryTrees[i];
+                    var treeId = tree.GetValueOrDefault("id")?.ToString() ?? "unknown";
+                    var treeName = tree.GetValueOrDefault("name")?.ToString() ?? "unknown";
+                    var channels = tree.GetValueOrDefault("channels")?.ToString() ?? "unknown";
+                    
+                    _logger.LogDebug("🌳 [RESOLVE-{StoreType}] 📋 TREE[{Index}]: ID={TreeId}, Name='{TreeName}', Channels={Channels}", 
+                        storeType.ToUpper(), i, treeId, treeName, channels);
+                }
+            }
+            else
+            {
+                _logger.LogError("🌳 [RESOLVE-{StoreType}] ❌ API FAILED: No category trees returned from API for {StoreType} store {StoreId}", 
+                    storeType.ToUpper(), storeType, store.StoreId);
+            }
             
             if (categoryTrees?.Any() == true)
             {
                 // Look for a tree assigned to this specific channel
                 var channelId = store.ChannelId;
+                _logger.LogDebug("🌳 [RESOLVE-{StoreType}] 🔍 MATCHING: Looking for tree assigned to channel '{ChannelId}' for {StoreType} store {StoreId}", 
+                    storeType.ToUpper(), channelId ?? "NULL", storeType, store.StoreId);
+                    
                 var matchingTree = FindTreeForChannel(categoryTrees, channelId);
                 
                 if (!string.IsNullOrEmpty(matchingTree))
                 {
-                    _logger.LogInformation("Found category tree {TreeId} for {StoreType} store {StoreId}, channel {ChannelId}", 
-                        matchingTree, storeType, store.StoreId, channelId);
+                    _logger.LogInformation("🌳 [RESOLVE-{StoreType}] ✅ MATCH FOUND: Found category tree {TreeId} for {StoreType} store {StoreId}, channel {ChannelId}", 
+                        storeType.ToUpper(), matchingTree, storeType, store.StoreId, channelId);
                     return matchingTree;
                 }
+                
+                _logger.LogWarning("🌳 [RESOLVE-{StoreType}] ⚠️ NO MATCH: No specific tree found for channel {ChannelId}, using fallback strategy for {StoreType} store {StoreId}", 
+                    storeType.ToUpper(), channelId, storeType, store.StoreId);
                 
                 // Fallback: Use the first available tree
                 var firstTree = categoryTrees.FirstOrDefault();
                 if (firstTree?.TryGetValue("id", out var firstTreeId) == true)
                 {
                     var treeId = firstTreeId.ToString()!;
-                    _logger.LogWarning("No specific tree found for channel {ChannelId}, using first available tree {TreeId} for {StoreType} store {StoreId}", 
-                        channelId, treeId, storeType, store.StoreId);
+                    _logger.LogWarning("🌳 [RESOLVE-{StoreType}] ⚠️ FALLBACK: No specific tree found for channel {ChannelId}, using first available tree {TreeId} for {StoreType} store {StoreId}", 
+                        storeType.ToUpper(), channelId, treeId, storeType, store.StoreId);
                     return treeId;
                 }
             }

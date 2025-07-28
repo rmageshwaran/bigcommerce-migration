@@ -382,10 +382,10 @@ public static class ServiceCollectionExtensions
     private static IServiceCollection AddCoreServices(this IServiceCollection services, IConfiguration configuration)
     {
         // Register services as singleton for better performance and test consistency
-        services.TryAddSingleton<ICategoryTreeResolver, CategoryTreeResolver>();
+        services.AddSingleton<ICategoryTreeResolver, CategoryTreeResolver>();
 
         // Register OpenSearch service - use no-op implementation when disabled
-        services.TryAddSingleton<IOpenSearchService>(serviceProvider =>
+        services.AddSingleton<IOpenSearchService>(serviceProvider =>
         {
             var openSearchConfig = serviceProvider.GetRequiredService<OpenSearchConfiguration>();
             var logger = serviceProvider.GetRequiredService<ILogger<OpenSearchService>>();
@@ -410,12 +410,12 @@ public static class ServiceCollectionExtensions
         });
 
         // Register Azure Storage services
-        services.TryAddSingleton<IBlobService, BlobService>();
-        services.TryAddSingleton<IQueueService, QueueService>();
-        services.TryAddScoped<IMigrationStorageService, MigrationStorageService>();
+        services.AddSingleton<IBlobService, BlobService>();
+        services.AddSingleton<IQueueService, QueueService>();
+        services.AddScoped<IMigrationStorageService, MigrationStorageService>();
 
         // Register API request handler for HTTP concerns (delegation pattern)
-                    services.TryAddSingleton<IApiRequestHandler>(serviceProvider =>
+                    services.AddSingleton<IApiRequestHandler>(serviceProvider =>
             {
                 var httpClient = serviceProvider.GetRequiredService<HttpClient>();
                 var rateLimitService = serviceProvider.GetRequiredService<IRateLimitService>();
@@ -427,22 +427,22 @@ public static class ServiceCollectionExtensions
             });
 
         // Register BigCommerce API client using delegation pattern
-        services.TryAddSingleton<IBigCommerceApiClient, BigCommerceApiClient>();
+        services.AddSingleton<IBigCommerceApiClient, BigCommerceApiClient>();
 
         // Register dynamic rate limiting configuration
         services.Configure<DynamicRateLimitingConfiguration>(
             configuration.GetSection("DynamicRateLimiting"));
         
         // Register dynamic rate limiting services (Phase 1 - Dynamic Rate Limiting)
-        services.TryAddSingleton<IDateTimeProvider, DateTimeProvider>();
-        services.TryAddSingleton<IApiHealthMonitor, ApiHealthMonitor>();
-        services.TryAddSingleton<IRateCalculator, BigCommerceAwareRateCalculator>();
+        services.AddSingleton<IDateTimeProvider, DateTimeProvider>();
+        services.AddSingleton<IApiHealthMonitor, ApiHealthMonitor>();
+        services.AddSingleton<IRateCalculator, BigCommerceAwareRateCalculator>();
         
         // Register base rate limiting service first
-        services.TryAddSingleton<RateLimitService>();
+        services.AddSingleton<RateLimitService>();
         
         // Register dynamic rate limiting service using decorator pattern
-        services.TryAddSingleton<IDynamicRateLimiter>(serviceProvider =>
+        services.AddSingleton<IDynamicRateLimiter>(serviceProvider =>
         {
             var logger = serviceProvider.GetRequiredService<ILogger<DynamicRateLimitService>>();
             var baseRateLimitService = serviceProvider.GetRequiredService<RateLimitService>();
@@ -453,11 +453,11 @@ public static class ServiceCollectionExtensions
         });
         
         // Register IRateLimitService to use dynamic implementation for backward compatibility
-        services.TryAddSingleton<IRateLimitService>(serviceProvider => 
+        services.AddSingleton<IRateLimitService>(serviceProvider => 
             serviceProvider.GetRequiredService<IDynamicRateLimiter>());
         
-        services.TryAddSingleton<IBatchSizeCalculator, BatchSizeCalculator>();
-        services.TryAddSingleton<IProgressTracker>(serviceProvider =>
+        services.AddSingleton<IBatchSizeCalculator, BatchSizeCalculator>();
+        services.AddSingleton<IProgressTracker>(serviceProvider =>
         {
             var logger = serviceProvider.GetRequiredService<ILogger<ProgressTracker>>();
             var progressEventPublisher = serviceProvider.GetRequiredService<IProgressEventPublisher>();
@@ -466,23 +466,28 @@ public static class ServiceCollectionExtensions
         });
 
         // Register entity processing services (newly created during refactoring)
-        services.TryAddSingleton<IEntityFetchService, EntityFetchService>();
-        services.TryAddSingleton<IEntityTransformService, EntityTransformService>();
-        services.TryAddSingleton<IEntityCreateService, EntityCreateService>();
-        services.TryAddSingleton<IEntityMappingService, EntityMappingService>();
-        services.TryAddSingleton<IEntityErrorHandlingService, EntityErrorHandlingService>();
+        services.AddSingleton<IEntityFetchService, EntityFetchService>();
+        services.AddSingleton<IEntityTransformService, EntityTransformService>();
+        services.AddSingleton<IEntityCreateService, EntityCreateService>();
+        services.AddSingleton<IEntityMappingService, EntityMappingService>();
+        services.AddSingleton<IEntityErrorHandlingService, EntityErrorHandlingService>();
 
         // Register API authentication services
-        services.TryAddSingleton<IApiKeyService, ApiKeyService>();
+        services.AddSingleton<IApiKeyService, ApiKeyService>();
 
         // Register API rate limiting services
-        services.TryAddSingleton<IApiRateLimitService, ApiRateLimitService>();
+        services.AddSingleton<IApiRateLimitService, ApiRateLimitService>();
 
         // Register progress event publisher for queue-based SignalR broadcasting
-        services.TryAddSingleton<IProgressEventPublisher, ProgressEventPublisher>();
+        services.AddSingleton<IProgressEventPublisher, ProgressEventPublisher>();
         
         // Register progress queue service for progress event publishing (separate from migration queues)
-        services.TryAddSingleton<IProgressQueueService, AzureProgressQueueService>();
+        services.AddSingleton<IProgressQueueService, AzureProgressQueueService>();
+
+        // ✅ **P2.5: Phase 2 Enhanced Parallel Processing Pipeline** (Required for 17.0x throughput)
+        // These services were moved from Orchestration project to ensure proper DI resolution
+        services.AddSingleton<IEnhancedParallelProcessor, EnhancedParallelProcessor>();
+        services.AddSingleton<IParallelBatchProcessingPipeline, ParallelBatchProcessingPipeline>();
 
         return services;
     }

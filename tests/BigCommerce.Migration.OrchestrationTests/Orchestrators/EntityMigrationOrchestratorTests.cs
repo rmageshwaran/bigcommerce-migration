@@ -151,7 +151,7 @@ public class EntityMigrationOrchestratorTests
                        TotalEntities = 47,
                        ProcessedEntities = 47,
                        SuccessfulEntities = 47,
-                       FailedEntities = 0,
+                           FailedEntities = 0,
                        Duration = TimeSpan.FromSeconds(2)
                    });
 
@@ -414,7 +414,7 @@ public class EntityMigrationOrchestratorTests
         // Assert - ✅ **Phase 2.10a**: Check for parallel processing error handling
         Assert.NotNull(result);
         Assert.Equal(3, result.TotalEntities);
-        Assert.Equal(0, result.SuccessfulEntities); 
+        Assert.Equal(0, result.SuccessfulEntities);
         Assert.Equal(3, result.FailedEntities);
         Assert.Contains("Parallel batch processing failed", result.Errors);
     }

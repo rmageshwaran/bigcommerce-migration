@@ -123,10 +123,61 @@ public class ApiRequestHandler : IApiRequestHandler
                 response.IsSuccessStatusCode,
                 cancellationToken);
 
-            // Handle the response
-            if (response.IsSuccessStatusCode)
+            // Handle the response - BigCommerce API specific logic
+            if (response.StatusCode == HttpStatusCode.OK || 
+                response.StatusCode == HttpStatusCode.Created || 
+                response.StatusCode == HttpStatusCode.Accepted)
             {
+                // Full success - all items processed successfully
                 return await response.Content.ReadAsStringAsync(cancellationToken);
+            }
+            else if (response.StatusCode == HttpStatusCode.MultiStatus) // 207
+            {
+                // Partial success - some items succeeded, some failed
+                // BigCommerce returns 207 when batch operations have mixed results
+                var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
+                
+                _logger.LogWarning("⚠️ [API-207] PARTIAL SUCCESS: Received 207 Multi-Status response for URL: {Url}", request.Url);
+                _logger.LogWarning("📊 [API-207] RESPONSE CONTENT: {ResponseContent}", responseContent);
+                
+                // Try to parse the response to get success/failure counts
+                try
+                {
+                    var jsonResponse = JsonSerializer.Deserialize<Dictionary<string, object>>(responseContent);
+                    if (jsonResponse != null)
+                    {
+                        // Look for meta information that shows success/failure counts
+                        if (jsonResponse.TryGetValue("meta", out var metaValue))
+                        {
+                            var metaString = metaValue?.ToString() ?? "";
+                            _logger.LogWarning("📈 [API-207] META INFO: {MetaInfo}", metaString);
+                        }
+                        
+                        // Look for data array to see what was actually created
+                        if (jsonResponse.TryGetValue("data", out var dataValue))
+                        {
+                            if (dataValue is JsonElement dataElement && dataElement.ValueKind == JsonValueKind.Array)
+                            {
+                                var createdCount = dataElement.GetArrayLength();
+                                _logger.LogWarning("📋 [API-207] CREATED COUNT: {CreatedCount} entities were successfully created", createdCount);
+                            }
+                        }
+                        
+                        // Look for errors array to see what failed
+                        if (jsonResponse.TryGetValue("errors", out var errorsValue))
+                        {
+                            var errorsString = errorsValue?.ToString() ?? "";
+                            _logger.LogWarning("❌ [API-207] ERRORS: {ErrorInfo}", errorsString);
+                        }
+                    }
+                }
+                catch (Exception parseEx)
+                {
+                    _logger.LogWarning(parseEx, "⚠️ [API-207] Failed to parse 207 response for detailed analysis");
+                }
+                
+                // Return the content so calling code can parse successes vs failures
+                return responseContent;
             }
 
             var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);

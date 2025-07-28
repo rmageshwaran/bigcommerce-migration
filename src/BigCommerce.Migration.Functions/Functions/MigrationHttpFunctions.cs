@@ -123,6 +123,8 @@ public class MigrationHttpFunctions
                 return await CreateErrorResponse(req, HttpStatusCode.BadRequest, validationResult.ErrorMessage, migrationId);
             }
 
+
+
             // Create migration entry for Azure Storage
             var migrationEntry = new Core.Models.MigrationEntry
             {

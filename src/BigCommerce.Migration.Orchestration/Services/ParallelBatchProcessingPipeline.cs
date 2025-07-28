@@ -227,7 +227,7 @@ public class ParallelBatchProcessingPipeline : IParallelBatchProcessingPipeline
             EntityType = request.EntityType,
             RespectDynamicRateLimits = true, // Always integrate with Phase 1
             EnableSignalRUpdates = true,
-            SignalRUpdateIntervalMs = 1000, // 1 second updates for migration progress
+            SignalRUpdateIntervalMs = 250, // 🎯 SUB-BATCH OPTIMIZATION: 250ms updates for granular sub-batch progress
             EnableAdaptiveConcurrency = true,
             TargetCpuUtilization = 0.70, // 70% target
             BatchTimeoutMinutes = 15, // 15 minute timeout per batch

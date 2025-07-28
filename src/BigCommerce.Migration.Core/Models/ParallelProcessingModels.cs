@@ -45,7 +45,7 @@ public class ParallelProcessingConfiguration
     /// Minimum delay between SignalR progress updates (to prevent flooding)
     /// </summary>
     [JsonPropertyName("signalRUpdateIntervalMs")]
-    public int SignalRUpdateIntervalMs { get; set; } = 500;
+    public int SignalRUpdateIntervalMs { get; set; } = 250; // 🎯 SUB-BATCH OPTIMIZATION: Default 250ms for granular progress
 
     /// <summary>
     /// Whether to enable adaptive concurrency adjustments during processing

@@ -36,7 +36,7 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
     private readonly object _progressStateLock = new();
     private readonly object _signalRRateLimitLock = new();
     private DateTime _lastSignalRUpdate = DateTime.MinValue;
-    private int _signalRUpdateIntervalMs = 500; // 🚀 ENHANCED: Reduced from 1000ms to 500ms for better real-time updates (mutable for configuration)
+    private int _signalRUpdateIntervalMs = 250; // 🎯 SUB-BATCH OPTIMIZATION: Reduced to 250ms for granular sub-batch progress updates
     private bool _deterministicMode = false;
 
     // Aggregated counters (using Interlocked for thread safety)
@@ -54,6 +54,13 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
 
     // **PHASE 2.4: Performance change tracking**
     private ParallelPerformanceMetrics? _previousPerformanceMetrics;
+
+    // **🎯 SUB-BATCH OPTIMIZATION: Sub-batch progress tracking**
+    private readonly ConcurrentDictionary<string, SubBatchCompletionRecord> _completedSubBatches;
+    private readonly ConcurrentDictionary<string, SubBatchStartRecord> _activeSubBatches;
+    private long _totalSubBatchesProcessed;
+    private long _totalSubBatchEntitiesProcessed;
+    private long _totalSubBatchEntitiesFailed;
 
     #endregion
 
@@ -80,6 +87,10 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
         _completedBatches = new ConcurrentDictionary<int, BatchCompletionRecord>();
         _activeBatches = new ConcurrentDictionary<int, BatchStartRecord>();
         _aggregatedErrors = new ConcurrentBag<string>();
+
+        // 🎯 SUB-BATCH OPTIMIZATION: Initialize sub-batch tracking collections
+        _completedSubBatches = new ConcurrentDictionary<string, SubBatchCompletionRecord>();
+        _activeSubBatches = new ConcurrentDictionary<string, SubBatchStartRecord>();
 
         _startTime = _dateTimeProvider.UtcNow;
         _lastSignalRUpdate = _startTime;
@@ -200,6 +211,239 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
         {
             _logger.LogError(ex, "Failed to report batch start for batch {BatchNumber}", batchNumber);
         }
+    }
+
+    #endregion
+
+    #region 🎯 SUB-BATCH OPTIMIZATION: Sub-Batch Progress Tracking
+
+    /// <summary>
+    /// Reports completion of a sub-batch with thread-safe aggregation
+    /// Enables granular progress tracking within pages for 10x more progress updates
+    /// </summary>
+    public async Task ReportSubBatchCompletionAsync(
+        int parentBatchNumber,
+        int subBatchNumber,
+        int entitiesProcessed,
+        int entitiesFailed,
+        TimeSpan processingTime,
+        IEnumerable<string>? subBatchErrors = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (_disposed) return;
+
+        try
+        {
+            var subBatchKey = $"{parentBatchNumber}-{subBatchNumber}";
+            var completionTime = _dateTimeProvider.UtcNow;
+            var errors = subBatchErrors?.ToList() ?? new List<string>();
+
+            // Record sub-batch completion atomically
+            var completionRecord = new SubBatchCompletionRecord
+            {
+                ParentBatchNumber = parentBatchNumber,
+                SubBatchNumber = subBatchNumber,
+                EntitiesProcessed = entitiesProcessed,
+                EntitiesFailed = entitiesFailed,
+                ProcessingTime = processingTime,
+                CompletedAt = completionTime,
+                Errors = errors
+            };
+
+            _completedSubBatches.TryAdd(subBatchKey, completionRecord);
+            _activeSubBatches.TryRemove(subBatchKey, out _);
+
+            // Update aggregated sub-batch counters atomically
+            Interlocked.Increment(ref _totalSubBatchesProcessed);
+            Interlocked.Add(ref _totalSubBatchEntitiesProcessed, entitiesProcessed);
+            Interlocked.Add(ref _totalSubBatchEntitiesFailed, entitiesFailed);
+
+            // Add errors to aggregated collection
+            foreach (var error in errors)
+            {
+                _aggregatedErrors.Add(error);
+            }
+
+            // Calculate sub-batch progress percentage
+            var totalSubBatches = GetEstimatedTotalSubBatches();
+            var completedSubBatches = Interlocked.Read(ref _totalSubBatchesProcessed);
+            var subBatchProgress = totalSubBatches > 0 ? (double)completedSubBatches / totalSubBatches * 100 : 0;
+
+            _logger.LogDebug("🎯 Sub-batch {ParentBatch}-{SubBatch} completed: {Processed} processed, {Failed} failed, {Duration:F2}s " +
+                           "(sub-batch progress: {Progress:F1}%)",
+                parentBatchNumber, subBatchNumber, entitiesProcessed, entitiesFailed, processingTime.TotalSeconds, subBatchProgress);
+
+            // Send granular SignalR update for sub-batch completion
+            await SendSubBatchProgressUpdateAsync(parentBatchNumber, subBatchNumber, entitiesProcessed, entitiesFailed, subBatchProgress, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to report sub-batch completion for sub-batch {ParentBatch}-{SubBatch}", parentBatchNumber, subBatchNumber);
+        }
+    }
+
+    /// <summary>
+    /// Reports sub-batch start for tracking active parallel sub-batches
+    /// </summary>
+    public async Task ReportSubBatchStartAsync(
+        int parentBatchNumber,
+        int subBatchNumber,
+        int subBatchSize,
+        CancellationToken cancellationToken = default)
+    {
+        if (_disposed) return;
+
+        try
+        {
+            var subBatchKey = $"{parentBatchNumber}-{subBatchNumber}";
+            var startRecord = new SubBatchStartRecord
+            {
+                ParentBatchNumber = parentBatchNumber,
+                SubBatchNumber = subBatchNumber,
+                SubBatchSize = subBatchSize,
+                StartedAt = _dateTimeProvider.UtcNow
+            };
+
+            _activeSubBatches.TryAdd(subBatchKey, startRecord);
+
+            _logger.LogDebug("🎯 Sub-batch {ParentBatch}-{SubBatch} started with {SubBatchSize} entities", 
+                parentBatchNumber, subBatchNumber, subBatchSize);
+            
+            await Task.CompletedTask; // Placeholder for any async operations
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to report sub-batch start for sub-batch {ParentBatch}-{SubBatch}", 
+                parentBatchNumber, subBatchNumber);
+        }
+    }
+
+    /// <summary>
+    /// Estimates the total number of sub-batches expected based on entity count and sub-batch size
+    /// For 192 brands: 4 pages × 10 sub-batches = 40 total sub-batches
+    /// </summary>
+    private int GetEstimatedTotalSubBatches()
+    {
+        // Estimate based on typical sub-batch size of 5 entities per sub-batch
+        // and 50 entities per page = 10 sub-batches per page
+        var subBatchesPerPage = 10; // 50 entities / 5 entities per sub-batch
+        return _totalBatches * subBatchesPerPage;
+    }
+
+    /// <summary>
+    /// Sends granular progress update for sub-batch completion
+    /// Provides 10x more frequent updates than page-level progress
+    /// </summary>
+    private async Task SendSubBatchProgressUpdateAsync(
+        int parentBatchNumber,
+        int subBatchNumber,
+        int entitiesProcessed,
+        int entitiesFailed,
+        double subBatchProgress,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (_progressEventPublisher == null) return;
+
+            var completedSubBatches = Interlocked.Read(ref _totalSubBatchesProcessed);
+            var totalSubBatchEntitiesProcessed = Interlocked.Read(ref _totalSubBatchEntitiesProcessed);
+            var totalSubBatchEntitiesFailed = Interlocked.Read(ref _totalSubBatchEntitiesFailed);
+
+            // Create sub-batch migration progress event for dashboard
+            var subBatchProgressEvent = new SubBatchMigrationProgressEvent
+            {
+                MigrationId = _migrationId,
+                TotalPages = _totalBatches,
+                CompletedPages = _completedBatchCount,
+                TotalSubBatches = GetEstimatedTotalSubBatches(),
+                CompletedSubBatches = (int)completedSubBatches,
+                TotalSuccessfulEntities = (int)totalSubBatchEntitiesProcessed,
+                TotalFailedEntities = (int)totalSubBatchEntitiesFailed,
+                TotalExpectedEntities = GetEstimatedTotalEntities(),
+                ProcessingRate = CalculateCurrentProcessingRate(),
+                OverallProgressPercentage = subBatchProgress,
+                EstimatedTimeRemaining = CalculateEstimatedTimeRemaining(),
+                UpdatedAt = _dateTimeProvider.UtcNow,
+                ElapsedTime = _dateTimeProvider.UtcNow - _startTime,
+                RecentErrors = GetRecentErrors(),
+                PerformanceMetrics = GetPerformanceMetrics()
+            };
+
+            await _progressEventPublisher.PublishAsync(subBatchProgressEvent, cancellationToken);
+
+            _logger.LogDebug("📡 [SUB-BATCH-PROGRESS] Sent progress update: {Progress:F1}%, {Completed}/{Total} sub-batches", 
+                subBatchProgress, completedSubBatches, GetEstimatedTotalSubBatches());
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "⚠️ Failed to send sub-batch progress update for {ParentBatch}-{SubBatch}", 
+                parentBatchNumber, subBatchNumber);
+        }
+    }
+
+    /// <summary>
+    /// Estimates total entities expected to be processed (for progress calculation)
+    /// </summary>
+    private int GetEstimatedTotalEntities()
+    {
+        // For 192 brands: 4 pages × 50 entities per page = 200 entities
+        // This is an estimate - actual count may vary
+        return _totalBatches * 50; // Assuming 50 entities per page
+    }
+
+    /// <summary>
+    /// Calculates current processing rate (entities per second)
+    /// </summary>
+    private double CalculateCurrentProcessingRate()
+    {
+        var elapsedTime = _dateTimeProvider.UtcNow - _startTime;
+        var totalProcessed = Interlocked.Read(ref _totalSubBatchEntitiesProcessed);
+        
+        return elapsedTime.TotalSeconds > 0 ? totalProcessed / elapsedTime.TotalSeconds : 0;
+    }
+
+    /// <summary>
+    /// Calculates estimated time remaining based on current processing speed
+    /// </summary>
+    private TimeSpan? CalculateEstimatedTimeRemaining()
+    {
+        var processingRate = CalculateCurrentProcessingRate();
+        if (processingRate <= 0) return null;
+
+        var totalProcessed = Interlocked.Read(ref _totalSubBatchEntitiesProcessed);
+        var totalExpected = GetEstimatedTotalEntities();
+        var remaining = totalExpected - totalProcessed;
+
+        return remaining > 0 ? TimeSpan.FromSeconds(remaining / processingRate) : TimeSpan.Zero;
+    }
+
+    /// <summary>
+    /// Gets recent errors for progress reporting (last 10 errors)
+    /// </summary>
+    private List<string> GetRecentErrors()
+    {
+        return _aggregatedErrors.TakeLast(10).ToList();
+    }
+
+    /// <summary>
+    /// Gets performance metrics for monitoring
+    /// </summary>
+    private Dictionary<string, object> GetPerformanceMetrics()
+    {
+        var totalProcessed = Interlocked.Read(ref _totalSubBatchEntitiesProcessed);
+        var totalFailed = Interlocked.Read(ref _totalSubBatchEntitiesFailed);
+        var completedSubBatches = Interlocked.Read(ref _totalSubBatchesProcessed);
+        var elapsedTime = _dateTimeProvider.UtcNow - _startTime;
+
+        return new Dictionary<string, object>
+        {
+            ["ProcessingRate"] = CalculateCurrentProcessingRate(),
+            ["SuccessRate"] = totalProcessed > 0 ? (double)(totalProcessed - totalFailed) / totalProcessed * 100 : 0,
+            ["AverageTimePerSubBatch"] = completedSubBatches > 0 ? elapsedTime.TotalMilliseconds / completedSubBatches : 0,
+            ["ActiveSubBatches"] = _activeSubBatches.Count,
+            ["TotalElapsedMinutes"] = elapsedTime.TotalMinutes
+        };
     }
 
     #endregion
@@ -802,6 +1046,33 @@ internal class BatchStartRecord
 {
     public int BatchNumber { get; set; }
     public int BatchSize { get; set; }
+    public DateTime StartedAt { get; set; }
+}
+
+/// <summary>
+/// 🎯 SUB-BATCH OPTIMIZATION: Record of a completed sub-batch
+/// Enables granular progress tracking within pages for 10x more progress updates
+/// </summary>
+internal class SubBatchCompletionRecord
+{
+    public int ParentBatchNumber { get; set; }
+    public int SubBatchNumber { get; set; }
+    public int EntitiesProcessed { get; set; }
+    public int EntitiesFailed { get; set; }
+    public TimeSpan ProcessingTime { get; set; }
+    public DateTime CompletedAt { get; set; }
+    public List<string> Errors { get; set; } = new();
+}
+
+/// <summary>
+/// 🎯 SUB-BATCH OPTIMIZATION: Record of a started sub-batch
+/// Tracks active sub-batches for monitoring and progress aggregation
+/// </summary>
+internal class SubBatchStartRecord
+{
+    public int ParentBatchNumber { get; set; }
+    public int SubBatchNumber { get; set; }
+    public int SubBatchSize { get; set; }
     public DateTime StartedAt { get; set; }
 }
 

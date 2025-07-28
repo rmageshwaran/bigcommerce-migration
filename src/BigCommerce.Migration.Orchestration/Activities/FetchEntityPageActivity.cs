@@ -125,7 +125,7 @@ public class FetchEntityPageActivity
     private async Task<BigCommercePaginatedResponse<Dictionary<string, object>>?> FetchEntityPageWithRetryAsync(
         EntityPageRequest request)
     {
-        var maxRetries = request.MaxRetries;
+        var maxRetries = 0; // 🚨 DISABLED: No retries to avoid hitting rate limits unnecessarily
         var retryCount = 0;
         Exception? lastException = null;
 

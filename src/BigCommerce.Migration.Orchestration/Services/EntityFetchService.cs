@@ -195,10 +195,16 @@ public class EntityFetchService : IEntityFetchService
         CancellationToken cancellationToken)
     {
         var pageNumber = request.BatchNumber; // Direct mapping: batch 1 = page 1, batch 2 = page 2, etc.
-        var batchSize = 10; // Default batch size, could be configurable
         
-        _logger.LogDebug("Fetching page {PageNumber} for {EntityType} using direct pagination in migration {MigrationId}", 
-            pageNumber, request.EntityType, request.MigrationId);
+        // 🎯 OPTIMAL PARALLELISM FIX: Use the same batch size as ProcessParallelBatchesActivity (50)
+        // This ensures each batch fetches exactly 50 entities for proper parallel processing
+        var batchSize = 50; // Optimal page size for parallel processing
+        
+        _logger.LogDebug("🔧 [FETCH] Using optimal page size {PageSize} for parallel processing of {EntityType}", 
+            batchSize, request.EntityType);
+        
+        _logger.LogDebug("Fetching page {PageNumber} for {EntityType} using direct pagination (limit={Limit}) in migration {MigrationId}", 
+            pageNumber, request.EntityType, batchSize, request.MigrationId);
 
         try
         {

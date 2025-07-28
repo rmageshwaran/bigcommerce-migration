@@ -44,12 +44,12 @@ public class ApiRequest
     /// <summary>
     /// Whether to retry the request on failure
     /// </summary>
-    public bool EnableRetry { get; set; } = false;
+    public bool EnableRetry { get; set; } = false; // 🚨 DISABLED: No retries to avoid rate limit issues
 
     /// <summary>
-    /// Maximum number of retry attempts
+    /// Maximum number of retry attempts  
     /// </summary>
-    public int MaxRetryAttempts { get; set; } = 3;
+    public int MaxRetryAttempts { get; set; } = 0; // 🚨 DISABLED: No retries
 
     /// <summary>
     /// Validates that the API request has all required information

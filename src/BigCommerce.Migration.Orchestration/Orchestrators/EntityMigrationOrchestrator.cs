@@ -90,7 +90,33 @@ public class EntityMigrationOrchestrator
             context.SetCustomStatus($"Discovering {request.EntityType} entities");
             
             var discoveryResult = await DiscoverEntitiesWithRetry(context, request);
-            if (discoveryResult == null || discoveryResult.EntityIds.Count == 0)
+            
+            // 🎯 CRITICAL FIX: Handle both ID-based and page-based discovery strategies
+            bool hasEntities = false;
+            
+            if (discoveryResult == null)
+            {
+                context.SetCustomStatus($"Discovery failed for {request.EntityType} entities");
+                result.ProcessingTime = context.CurrentUtcDateTime - startTime;
+                return result;
+            }
+            
+            // Check for entities based on strategy type
+            if (discoveryResult.PaginationMetadata?.ContainsKey("UseDirectPagination") == true && 
+                discoveryResult.PaginationMetadata["UseDirectPagination"].ToString() == "True")
+            {
+                // Page-based strategy: Check TotalCount instead of EntityIds
+                hasEntities = discoveryResult.TotalCount > 0;
+                _logger.LogInformation($"📄 Page-based discovery for {request.EntityType}: TotalCount={discoveryResult.TotalCount}, HasEntities={hasEntities}");
+            }
+            else
+            {
+                // ID-based strategy: Check EntityIds count
+                hasEntities = discoveryResult.EntityIds.Count > 0;
+                _logger.LogInformation($"📋 ID-based discovery for {request.EntityType}: EntityIds={discoveryResult.EntityIds.Count}, HasEntities={hasEntities}");
+            }
+            
+            if (!hasEntities)
             {
                 context.SetCustomStatus($"No {request.EntityType} entities found to migrate");
                 result.ProcessingTime = context.CurrentUtcDateTime - startTime;
@@ -100,11 +126,57 @@ public class EntityMigrationOrchestrator
             result.TotalEntities = discoveryResult.TotalCount;
             
             // Step 3: Create batches for processing
-            var batches = CreateBatches(discoveryResult.EntityIds, request, discoveryResult);
+            List<BatchProcessingRequest> batches;
+            
+            // 🎯 STRATEGY-BASED BATCH CREATION: Use correct approach based on discovery strategy
+            if (discoveryResult.PaginationMetadata?.ContainsKey("UseDirectPagination") == true && 
+                discoveryResult.PaginationMetadata["UseDirectPagination"].ToString() == "True")
+            {
+                // Page-based processing: Use parallel pipeline for direct pagination
+                _logger.LogInformation($"📄 Using page-based batch processing for {request.EntityType} with {discoveryResult.TotalCount} entities", 
+                    request.EntityType, discoveryResult.TotalCount);
+                
+                // Create a request for the parallel pipeline
+                var parallelRequest = new ProcessParallelBatchesRequest
+                {
+                    MigrationId = request.MigrationId,
+                    EntityType = request.EntityType,
+                    TotalBatches = 1, // Will be calculated by the parallel processor
+                    BatchSize = 250, // Use same as discovery page size
+                    EntityIds = new List<string>(), // Empty for page-based processing
+                    SourceStore = request.SourceStore,
+                    DestinationStore = request.DestinationStore,
+                    CategoryTreeContext = request.CategoryTreeContext ?? new CategoryTreeContext(),
+                    PaginationMetadata = discoveryResult.PaginationMetadata,
+                    UseDirectPagination = true,
+                    IsCancelled = false,
+                    CancellationReason = "",
+                    CancelledAt = null
+                };
+                
+                // Use parallel pipeline for page-based processing
+                context.SetCustomStatus($"Processing {request.EntityType} using page-based approach");
+                await ProcessWithParallelPipeline(context, request, parallelRequest, result);
+                
+                // Step 5: Finalize result
+                result.ProcessingTime = context.CurrentUtcDateTime - startTime;
+                context.SetCustomStatus($"Completed {request.EntityType} migration: {result.SuccessfulEntities}/{result.TotalEntities} successful");
+                
+                return result;
+            }
+            else
+            {
+                // ID-based processing: Use traditional batch creation
+                _logger.LogInformation($"📋 Using ID-based batch processing for {request.EntityType} with {discoveryResult.EntityIds.Count} entity IDs", 
+                    request.EntityType, discoveryResult.EntityIds.Count);
+                
+                batches = CreateBatches(discoveryResult.EntityIds, request, discoveryResult);
+            }
+            
             context.SetCustomStatus($"Created {batches.Count} batches for {request.EntityType} migration");
 
             // Step 4: Process batches with rate limiting and enhanced progress tracking
-            await ProcessBatchesWithRateLimit(context, request, batches, result);
+            await ProcessBatchesAsync(context, request, batches, result);
 
             // Step 5: Finalize result
             result.ProcessingTime = context.CurrentUtcDateTime - startTime;
@@ -223,37 +295,46 @@ public class EntityMigrationOrchestrator
     /// </summary>
     /// <param name="context">Orchestration context</param>
     /// <param name="request">Entity migration request</param>
-    /// <param name="batches">List of batches to process</param>
-    /// <param name="result">Result object to update</param>
-    private async Task ProcessBatchesWithRateLimit(
+    /// <param name="batches">Batches to process</param>
+    /// <param name="result">Result to update</param>
+    private async Task ProcessBatchesAsync(
         IDurableOrchestrationContext context,
         EntityMigrationRequest request,
         List<BatchProcessingRequest> batches,
         EntityMigrationResult result)
     {
-        _logger.LogInformation("🚀 P2.5: Starting PARALLEL batch processing for {EntityType} - {BatchCount} batches", 
+        // 🚨 CRITICAL FIX: Categories MUST use original sequential processing until hierarchy issues are resolved
+        if (request.EntityType.ToLower() == "categories")
+        {
+            _logger.LogWarning("🚨 [CATEGORIES] ⚠️ FALLBACK TO ORIGINAL: Using original sequential processing for categories to avoid hierarchy issues in migration {MigrationId}", request.MigrationId);
+            
+            // Use the original sequential processing logic for categories
+            await ProcessBatchesSequentiallyOriginal(context, request, batches, result);
+            return;
+        }
+
+        _logger.LogInformation("🚀 P2.5: Starting PARALLEL batch processing for {EntityType} - {BatchCount} batches",
             request.EntityType, batches.Count);
 
         // Initialize enhanced progress tracking for this entity via queue event
         try
         {
-            var entityProgressEvent = new EntityProgressEvent
+            var startEvent = new EntityProgressEvent
             {
                 MigrationId = request.MigrationId,
                 EntityType = request.EntityType,
+                Status = "started",
                 TotalCount = result.TotalEntities,
                 ProcessedCount = 0,
-                SuccessCount = 0,
                 FailureCount = 0,
-                Status = "initializing",
                 ProcessingTime = TimeSpan.Zero
             };
 
-            await _progressEventPublisher.PublishEntityProgressAsync(entityProgressEvent);
+            await _progressEventPublisher.PublishEntityProgressAsync(startEvent);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to publish entity initialization event for {EntityType}", request.EntityType);
+            _logger.LogWarning(ex, "Failed to publish entity start event for {EntityType}", request.EntityType);
             // Don't throw - progress events should not break the migration
         }
 
@@ -271,7 +352,7 @@ public class EntityMigrationOrchestrator
 
             var parallelProcessingDuration = context.CurrentUtcDateTime - parallelProcessingStartTime;
 
-            _logger.LogInformation("🎉 P2.5: PARALLEL processing completed for {EntityType} in {Duration}ms - {Processed}/{Total} entities", 
+            _logger.LogInformation("🎉 P2.5: PARALLEL processing completed for {EntityType} in {Duration}ms - {Processed}/{Total} entities",
                 request.EntityType, parallelProcessingDuration.TotalMilliseconds, 
                 parallelResult.ProcessedEntities, parallelResult.TotalEntities);
 
@@ -324,8 +405,6 @@ public class EntityMigrationOrchestrator
                     BatchNumber = 0,
                     Message = ex.Message,
                     Details = ex.ToString(),
-                    Severity = "critical",
-                    IsContinuable = false,
                     Timestamp = context.CurrentUtcDateTime
                 };
 
@@ -333,32 +412,201 @@ public class EntityMigrationOrchestrator
             }
             catch (Exception publishEx)
             {
-                _logger.LogWarning(publishEx, "Failed to publish parallel processing failure event for {EntityType}", request.EntityType);
+                _logger.LogWarning(publishEx, "Failed to publish error event for {EntityType} processing failure", request.EntityType);
+                // Don't throw - just log the warning
             }
         }
+    }
 
-        // ✅ **PRESERVED FUNCTIONALITY**: Complete entity processing via queue event
+    /// <summary>
+    /// Processes entities using the parallel pipeline for page-based strategies
+    /// </summary>
+    /// <param name="context">Orchestration context</param>
+    /// <param name="request">Entity migration request</param>
+    /// <param name="parallelRequest">Parallel processing request</param>
+    /// <param name="result">Result to update</param>
+    private async Task ProcessWithParallelPipeline(
+        IDurableOrchestrationContext context,
+        EntityMigrationRequest request,
+        ProcessParallelBatchesRequest parallelRequest,
+        EntityMigrationResult result)
+    {
         try
         {
-            var entityProgressEvent = new EntityProgressEvent
-            {
-                MigrationId = request.MigrationId,
-                EntityType = request.EntityType,
-                TotalCount = result.TotalEntities,
-                ProcessedCount = result.ProcessedEntities,
-                SuccessCount = result.SuccessfulEntities,
-                FailureCount = result.FailedEntities,
-                Status = result.FailedEntities > 0 ? "completed_with_errors" : "completed",
-                ProcessingTime = result.ProcessingTime
-            };
+            _logger.LogInformation("🚀 Starting page-based parallel processing for {EntityType} in migration {MigrationId}", 
+                request.EntityType, request.MigrationId);
 
-            await _progressEventPublisher.PublishEntityProgressAsync(entityProgressEvent);
+            // Process using the parallel pipeline that supports direct pagination
+            var parallelResult = await context.CallActivityAsync<BigCommerce.Migration.Core.Interfaces.BatchProcessingResult>(
+                "ProcessParallelBatches", 
+                parallelRequest);
+
+            if (parallelResult != null)
+            {
+                // Merge results from parallel processing
+                result.ProcessedEntities = parallelResult.TotalProcessed;
+                result.SuccessfulEntities = parallelResult.SuccessfulEntities;
+                result.FailedEntities = parallelResult.FailedEntities;
+                result.Errors.AddRange(parallelResult.Errors ?? new List<string>());
+                
+                _logger.LogInformation("✅ Page-based parallel processing completed for {EntityType}: {Successful}/{Total} successful", 
+                    request.EntityType, result.SuccessfulEntities, result.ProcessedEntities);
+            }
+            else
+            {
+                _logger.LogError("❌ Page-based parallel processing returned null result for {EntityType}", request.EntityType);
+                result.Errors.Add("Parallel processing failed to return results");
+            }
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to publish entity completion event for {EntityType}", request.EntityType);
-            // Don't throw - progress events should not break the migration
+            _logger.LogError(ex, "❌ Error during page-based parallel processing for {EntityType} in migration {MigrationId}", 
+                request.EntityType, request.MigrationId);
+            
+            result.Errors.Add($"Page-based processing failed: {ex.Message}");
+            
+            // Set failed count to total if we don't have better information
+            if (result.ProcessedEntities == 0 && result.TotalEntities > 0)
+            {
+                result.ProcessedEntities = result.TotalEntities;
+                result.FailedEntities = result.TotalEntities;
+            }
         }
+    }
+
+    /// <summary>
+    /// 🚨 FALLBACK: Original sequential processing for categories until hierarchy issues are resolved
+    /// This preserves the original working logic from develop branch
+    /// </summary>
+    private async Task ProcessBatchesSequentiallyOriginal(
+        IDurableOrchestrationContext context,
+        EntityMigrationRequest request,
+        List<BatchProcessingRequest> batches,
+        EntityMigrationResult result)
+    {
+        _logger.LogInformation("🔄 [CATEGORIES] ⭐ STARTING: Original sequential processing for {EntityType} - {BatchCount} batches", 
+            request.EntityType, batches.Count);
+
+        for (int i = 0; i < batches.Count; i++)
+        {
+            var batch = batches[i];
+            var batchNumber = i + 1;
+            
+            try
+            {
+                // Step 0: Check for cancellation before processing each batch
+                var isCancelled = await context.CallActivityAsync<bool>("CheckMigrationCancellation", request.MigrationId);
+                if (isCancelled)
+                {
+                    result.Errors.Add($"{request.EntityType} migration was cancelled during batch {batchNumber} processing");
+                    return; // Exit the loop early
+                }
+
+                // Step 1: Start enhanced batch tracking via queue event
+                try
+                {
+                    var batchProgressEvent = new BatchProgressEvent
+                    {
+                        MigrationId = request.MigrationId,
+                        EntityType = request.EntityType,
+                        BatchNumber = batchNumber,
+                        TotalBatches = batches.Count,
+                        BatchSize = batch.EntityIds.Count,
+                        ProcessedCount = 0,
+                        FailedCount = 0,
+                        Status = "started",
+                        ProcessingTime = TimeSpan.Zero
+                    };
+
+                    await _progressEventPublisher.PublishBatchProgressAsync(batchProgressEvent);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to publish batch start event for {EntityType} batch {BatchNumber}", request.EntityType, batchNumber);
+                    // Don't throw - progress events should not break the migration
+                }
+
+                // Step 2: Check rate limiting before processing batch
+                await ApplyRateLimiting(context, request);
+
+                // Step 3: Update processing context
+                context.SetCustomStatus($"Processing batch {batchNumber}/{batches.Count} ({batch.EntityIds.Count} entities)");
+                
+                // Step 4: Process the batch with real-time progress updates
+                var batchStartTime = context.CurrentUtcDateTime;
+                var batchResult = await context.CallActivityAsync<BatchProcessingResult>("ProcessEntityBatch", batch);
+                var batchDuration = context.CurrentUtcDateTime - batchStartTime;
+
+                // Step 5: Complete batch tracking with results via queue event
+                try
+                {
+                    var batchProgressEvent = new BatchProgressEvent
+                    {
+                        MigrationId = request.MigrationId,
+                        EntityType = request.EntityType,
+                        BatchNumber = batchNumber,
+                        TotalBatches = batches.Count,
+                        BatchSize = batch.EntityIds.Count,
+                        ProcessedCount = batchResult.TotalProcessed,
+                        FailedCount = batchResult.FailedEntities,
+                        Status = batchResult.FailedEntities > 0 ? "completed_with_errors" : "completed",
+                        ProcessingTime = batchDuration
+                    };
+
+                    await _progressEventPublisher.PublishBatchProgressAsync(batchProgressEvent);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to publish batch completion event for {EntityType} batch {BatchNumber}", request.EntityType, batchNumber);
+                    // Don't throw - progress events should not break the migration
+                }
+
+                // Step 6: Aggregate batch results
+                AggregateBatchResults(result, batchResult);
+
+                // Step 7: Update enhanced progress after batch completion
+                await UpdateEnhancedProgress(context, request, batchNumber, batches.Count, result);
+
+                // Step 8: Update legacy progress for backward compatibility
+                await UpdateProgress(context, request, batchNumber, batches.Count, result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error processing batch {BatchNumber} for entity type {EntityType} in migration {MigrationId}",
+                    batchNumber, request.EntityType, request.MigrationId);
+
+                // Add error details
+                result.Errors.Add($"Batch {batchNumber} failed: {ex.Message}");
+
+                // Update failed count
+                result.FailedEntities += batch.EntityIds.Count;
+                result.ProcessedEntities += batch.EntityIds.Count;
+
+                // Report batch failure
+                try
+                {
+                    var errorEvent = new ErrorProgressEvent
+                    {
+                        MigrationId = request.MigrationId,
+                        EntityType = request.EntityType,
+                        BatchNumber = batchNumber,
+                        Message = ex.Message,
+                        Details = ex.ToString(),
+                        Timestamp = context.CurrentUtcDateTime
+                    };
+
+                    await _progressEventPublisher.PublishErrorAsync(errorEvent);
+                }
+                catch (Exception publishEx)
+                {
+                    _logger.LogWarning(publishEx, "Failed to publish error event for batch {BatchNumber}", batchNumber);
+                    // Don't throw - just log the warning
+                }
+            }
+        }
+
+        _logger.LogInformation("🏁 [CATEGORIES] ✅ COMPLETED: Original sequential processing for {EntityType} - {Processed}/{Total} entities processed",
+            request.EntityType, result.ProcessedEntities, result.TotalEntities);
     }
 
     /// <summary>

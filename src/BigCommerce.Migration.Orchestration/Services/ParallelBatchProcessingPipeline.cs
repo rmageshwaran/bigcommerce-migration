@@ -255,7 +255,9 @@ public class ParallelBatchProcessingPipeline : IParallelBatchProcessingPipeline
     {
         try
         {
-            // Publish enhanced batch progress event (existing pattern)
+            // 🚀 ENHANCED SIGNALR: Emit more frequent progress events to match original ProcessEntityBatch behavior
+            
+            // 1. Publish batch progress event (existing pattern) - ✅ CORRECT
             var batchProgressEvent = new BatchProgressEvent
             {
                 MigrationId = request.MigrationId,
@@ -271,12 +273,18 @@ public class ParallelBatchProcessingPipeline : IParallelBatchProcessingPipeline
 
             await _progressEventPublisher.PublishBatchProgressAsync(batchProgressEvent);
 
+            // 🚨 REMOVED: Migration progress event was using individual batch counts instead of cumulative totals
+            // This was causing incorrect success/failure counts in real-time updates
+            // The proper cumulative counts are handled by the ParallelProgressAggregator's rate-limited updates
+
             // Update orchestration context status
             context.SetCustomStatus($"Parallel processing: {update.CompletedBatchNumber}/{update.TotalBatches} batches completed " +
                                    $"({update.OverallProgressPercentage:P1})");
 
-            _logger.LogDebug("Published progress update for batch {BatchNumber}/{TotalBatches}: {Progress:P1}",
-                update.CompletedBatchNumber, update.TotalBatches, update.OverallProgressPercentage);
+            _logger.LogDebug("📡 Enhanced SignalR: Published batch progress for batch {BatchNumber}/{TotalBatches}: {Progress:P1}, " +
+                           "Batch: {BatchProcessed} processed, {BatchFailed} failed",
+                update.CompletedBatchNumber, update.TotalBatches, update.OverallProgressPercentage,
+                update.BatchEntitiesProcessed, update.BatchEntitiesFailed);
         }
         catch (Exception ex)
         {
@@ -325,23 +333,23 @@ public class ParallelBatchProcessingPipeline : IParallelBatchProcessingPipeline
 
     /// <summary>
     /// Converts parallel processing result to entity migration result format
-    /// 
-    /// **Aggregation Features:**
-    /// - Preserves all batch processing results and errors
-    /// - Maintains entity counts and processing statistics
-    /// - Calculates performance metrics for monitoring
-    /// - Ensures backward compatibility with existing result consumers
+    /// 🚨 CRITICAL FIX: Correct success/failure count calculation
     /// </summary>
-    private EntityMigrationResult ConvertToEntityMigrationResult(
-        Core.Models.ParallelProcessingResult parallelResult,
+    private static EntityMigrationResult ConvertToEntityMigrationResult(
+        ParallelProcessingResult parallelResult, 
         EntityMigrationRequest request)
     {
+        // 🚨 CRITICAL FIX: Calculate correct success count
+        // TotalEntitiesProcessed = SuccessfulEntities + FailedEntities
+        // Therefore: SuccessfulEntities = TotalEntitiesProcessed - FailedEntities
+        var actualSuccessfulEntities = parallelResult.TotalEntitiesProcessed - parallelResult.TotalEntitiesFailed;
+        
         return new EntityMigrationResult
         {
             EntityType = request.EntityType,
-            TotalEntities = parallelResult.TotalEntitiesProcessed + parallelResult.TotalEntitiesFailed,
+            TotalEntities = parallelResult.TotalEntitiesProcessed, // 🚨 FIXED: Was double-counting failed entities
             ProcessedEntities = parallelResult.TotalEntitiesProcessed,
-            SuccessfulEntities = parallelResult.TotalEntitiesProcessed,
+            SuccessfulEntities = actualSuccessfulEntities, // 🚨 FIXED: Was incorrectly using TotalEntitiesProcessed
             FailedEntities = parallelResult.TotalEntitiesFailed,
             Duration = parallelResult.TotalProcessingTime,
             Errors = parallelResult.ProcessingErrors,

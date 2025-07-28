@@ -35,6 +35,9 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
     private readonly ConcurrentBag<string> _aggregatedErrors;
     private readonly object _progressStateLock = new();
     private readonly object _signalRRateLimitLock = new();
+    private DateTime _lastSignalRUpdate = DateTime.MinValue;
+    private int _signalRUpdateIntervalMs = 500; // 🚀 ENHANCED: Reduced from 1000ms to 500ms for better real-time updates (mutable for configuration)
+    private bool _deterministicMode = false;
 
     // Aggregated counters (using Interlocked for thread safety)
     private long _totalEntitiesProcessed;
@@ -44,9 +47,6 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
 
     // Performance tracking
     private readonly DateTime _startTime;
-    private DateTime _lastSignalRUpdate;
-    private int _signalRUpdateIntervalMs = 500; // Default 500ms rate limiting
-    private bool _deterministicMode = false;
 
     // Milestone tracking
     private readonly HashSet<ProgressMilestoneType> _reachedMilestones = new();

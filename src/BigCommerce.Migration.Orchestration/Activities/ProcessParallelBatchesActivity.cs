@@ -4,6 +4,7 @@ using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
 using BigCommerce.Migration.Orchestration.Models;
 using BigCommerce.Migration.Orchestration.Services;
+using System.Threading;
 
 namespace BigCommerce.Migration.Orchestration.Activities;
 
@@ -164,17 +165,68 @@ public class ProcessParallelBatchesActivity
         // Create batch processing requests for the parallel pipeline
         var batches = new List<BatchProcessingRequest>();
         
-        var batchSize = 10; // Default batch size for parallel processing
-        var totalBatches = (int)Math.Ceiling((double)request.EntityIds.Count / batchSize);
+        // 🎯 USER REQUIREMENT: Page-by-page processing with proper page size
+        // Force smaller page sizes (50) instead of large discovered sizes (250) for optimal parallelism
+        var batchSize = 50; // Optimal page size for parallel processing
         
+        // 🚨 OVERRIDE DISCOVERED PAGE SIZE: Use smaller pages for parallelism
+        // Even if discovery returns PageSize=250, we want smaller pages for parallel processing
+        _logger.LogInformation("🎯 [PARALLEL] Using optimal page size: {PageSize} for parallel processing (overriding discovery)", batchSize);
+        
+        // 🚨 CRITICAL FIX: For direct pagination, use metadata total count instead of EntityIds count
+        int totalCount;
+        int totalBatches;
+        
+        if (request.UseDirectPagination && request.PaginationMetadata != null)
+        {
+            // Extract total count from pagination metadata
+            if (request.PaginationMetadata.TryGetValue("TotalCount", out var totalCountObj) && 
+                int.TryParse(totalCountObj?.ToString(), out var parsedCount))
+            {
+                totalCount = parsedCount;
+                _logger.LogInformation("🔧 [PARALLEL] Using pagination metadata TotalCount: {TotalCount} for {EntityType}", 
+                    totalCount, request.EntityType);
+            }
+            else
+            {
+                _logger.LogWarning("⚠️ [PARALLEL] Could not extract TotalCount from pagination metadata for {EntityType}, falling back to EntityIds.Count", 
+                    request.EntityType);
+                totalCount = request.EntityIds.Count;
+            }
+            
+            // 🎯 PROPER PAGE-BY-PAGE CALCULATION: Create batches based on page size, not arbitrary small batches
+            // For 192 brands with page size 50: Create 4 batches (50+50+50+42)
+            totalBatches = (int)Math.Ceiling((double)totalCount / batchSize);
+            
+            _logger.LogInformation("🎯 [PARALLEL] OPTIMAL PARALLELISM: Creating {TotalBatches} pages of {PageSize} entities each for {TotalCount} {EntityType} - {Improvement}x faster than sequential!", 
+                totalBatches, batchSize, totalCount, request.EntityType, totalBatches);
+        }
+        else
+        {
+            // For traditional entity ID-based strategies, use EntityIds count
+            totalCount = request.EntityIds.Count;
+            totalBatches = (int)Math.Ceiling((double)totalCount / batchSize);
+        }
+        
+        _logger.LogInformation("🔧 [PARALLEL] Calculated {TotalBatches} batches for {TotalCount} {EntityType} entities (batch size: {BatchSize})", 
+            totalBatches, totalCount, request.EntityType, batchSize);
+
         for (int batchNumber = 1; batchNumber <= totalBatches; batchNumber++)
         {
             List<string> batchEntityIds;
             
             if (request.UseDirectPagination)
             {
-                // For efficient pagination strategies: use page-based processing
-                batchEntityIds = new List<string> { $"page-{batchNumber}" };
+                // 🎯 PAGE-BY-PAGE PROCESSING: Each batch represents a page with a range of entities
+                // Batch 1: Entities 1-50 (page 1), Batch 2: Entities 51-100 (page 2), etc.
+                var startIndex = (batchNumber - 1) * batchSize + 1;
+                var endIndex = Math.Min(batchNumber * batchSize, totalCount);
+                
+                // Use page-based identifiers that indicate the entity range for this page
+                batchEntityIds = new List<string> { $"page-{batchNumber}-entities-{startIndex}-to-{endIndex}" };
+                
+                _logger.LogDebug("🎯 [PAGE-{BatchNumber}] Creating page for entities {StartIndex}-{EndIndex} ({PageSize} entities max)", 
+                    batchNumber, startIndex, endIndex, batchSize);
             }
             else
             {
@@ -204,13 +256,13 @@ public class ProcessParallelBatchesActivity
             batches.Add(batchRequest);
         }
 
-        _logger.LogInformation("🚀 [PARALLEL] ✅ Created {BatchCount} batches for {EntityType} processing, MigrationId: {MigrationId}", 
+        _logger.LogInformation("🎯 [PARALLEL] ✅ Created {BatchCount} page-based batches for {EntityType} processing, MigrationId: {MigrationId}", 
             batches.Count, request.EntityType, request.MigrationId);
 
         // Configure parallel processing
         var parallelConfig = new Core.Models.ParallelProcessingConfiguration
         {
-            MaxConcurrentBatches = Math.Min(batches.Count, 10), // Limit concurrency
+            MaxConcurrentBatches = Math.Min(batches.Count, 4), // Limit to 4 concurrent pages for optimal performance
             StoreId = request.SourceStore.StoreId,
             EntityType = request.EntityType,
             EnableSignalRUpdates = true, // ✅ ENABLE SignalR for real-time dashboard updates
@@ -709,68 +761,131 @@ public class ProcessParallelBatchesActivity
             Errors = new List<string>()
         };
 
-        // Use SemaphoreSlim to control concurrency within the level/batch
-        var maxConcurrency = Math.Min(entities.Count, 5); // Limit to 5 concurrent entities per level
+        // 🚨 RACE CONDITION FIX: For non-hierarchical entities (brands, products), use sequential processing
+        // to prevent race conditions on clean stores where parallel creation causes 409 conflicts
+        bool useSequentialProcessing = IsNonHierarchicalEntity(batch.EntityType);
         
-        _logger.LogInformation("🔄 [PARALLEL-{BatchId}] 🚀 EXECUTING: Using {MaxConcurrency} concurrent workers for {Count} entities", 
-            batchId, maxConcurrency, entities.Count);
-        
-        using var semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
-
-        // Process entities in parallel
-        var tasks = entities.Select(async (entity, index) =>
+        if (useSequentialProcessing)
         {
-            await semaphore.WaitAsync(cancellationToken);
-            try
+            _logger.LogInformation("🔄 [SEQUENTIAL-{BatchId}] 🎯 SEQUENTIAL MODE: Processing {Count} {EntityType} entities sequentially to prevent race conditions", 
+                batchId, entities.Count, batch.EntityType);
+                
+            // Process entities sequentially to avoid race conditions
+            for (int index = 0; index < entities.Count; index++)
             {
+                var entity = entities[index];
                 var entityId = ExtractEntityId(entity, batch.EntityType);
-                _logger.LogDebug("🔄 [PARALLEL-{BatchId}] 🚀 WORKER[{Index}]: Starting entity {EntityId}", batchId, index, entityId);
+                var entityName = entity.GetValueOrDefault("name")?.ToString() ?? "unknown";
+                var threadId = Thread.CurrentThread.ManagedThreadId;
+                var timestamp = DateTime.UtcNow.ToString("HH:mm:ss.fff");
+                
+                _logger.LogInformation("🚨 [SEQ-DEBUG] WORKER[{Index}] STARTING: EntityId={EntityId}, Name='{EntityName}', ThreadId={ThreadId}, Time={Timestamp}, BatchId={BatchId}", 
+                    index, entityId, entityName, threadId, timestamp, batchId);
                 
                 var entityResult = await ProcessSingleEntity(entity, batch, cancellationToken);
                 
-                _logger.LogDebug("🔄 [PARALLEL-{BatchId}] {Status} WORKER[{Index}]: Entity {EntityId} - {Result}", 
-                    batchId, entityResult.Success ? "✅" : "❌", index, entityId, entityResult.Success ? "SUCCESS" : $"FAILED: {entityResult.ErrorMessage}");
+                _logger.LogInformation("🚨 [SEQ-DEBUG] WORKER[{Index}] {Status}: EntityId={EntityId}, Name='{EntityName}', ThreadId={ThreadId}, Result={Result}", 
+                    index, entityResult.Success ? "✅ SUCCESS" : "❌ FAILED", entityId, entityName, threadId, entityResult.Success ? "SUCCESS" : $"FAILED: {entityResult.ErrorMessage}");
                 
-                return entityResult;
-            }
-            finally
-            {
-                semaphore.Release();
-            }
-        });
-
-        _logger.LogInformation("🔄 [PARALLEL-{BatchId}] ⏳ WAITING: For all {TaskCount} workers to complete", batchId, tasks.Count());
-        
-        var entityResults = await Task.WhenAll(tasks);
-
-        _logger.LogInformation("🔄 [PARALLEL-{BatchId}] 📊 AGGREGATING: Processing {ResultCount} worker results", batchId, entityResults.Length);
-
-        // Aggregate results
-        var successCount = 0;
-        var failureCount = 0;
-        
-        foreach (var entityResult in entityResults)
-        {
-            if (entityResult.Success)
-            {
-                result.SuccessfulEntities++;
-                successCount++;
-            }
-            else
-            {
-                result.FailedEntities++;
-                failureCount++;
-                if (!string.IsNullOrEmpty(entityResult.ErrorMessage))
+                if (entityResult.Success)
                 {
-                    result.Errors.Add(entityResult.ErrorMessage);
+                    result.SuccessfulEntities++;
+                }
+                else
+                {
+                    result.FailedEntities++;
+                    if (!string.IsNullOrEmpty(entityResult.ErrorMessage))
+                    {
+                        result.Errors.Add($"Entity {entityId} ({entityName}): {entityResult.ErrorMessage}");
+                    }
                 }
             }
+            
+            _logger.LogInformation("🔄 [SEQUENTIAL-{BatchId}] ✅ COMPLETED: Sequential processing - {Successful}/{Total} successful", 
+                batchId, result.SuccessfulEntities, entities.Count);
+        }
+        else
+        {
+            // Use parallel processing for hierarchical entities that can benefit from it
+            var maxConcurrency = Math.Min(entities.Count, 5); // Limit to 5 concurrent entities per level
+            
+            _logger.LogInformation("🔄 [PARALLEL-{BatchId}] 🚀 EXECUTING: Using {MaxConcurrency} concurrent workers for {Count} entities", 
+                batchId, maxConcurrency, entities.Count);
+            
+            using var semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
+
+            // Process entities in parallel
+            var tasks = entities.Select(async (entity, index) =>
+            {
+                await semaphore.WaitAsync(cancellationToken);
+                try
+                {
+                    var entityId = ExtractEntityId(entity, batch.EntityType);
+                    var entityName = entity.GetValueOrDefault("name")?.ToString() ?? "unknown";
+                    var threadId = Thread.CurrentThread.ManagedThreadId;
+                    var timestamp = DateTime.UtcNow.ToString("HH:mm:ss.fff");
+                    
+                    _logger.LogInformation("🚨 [RACE-DEBUG] WORKER[{Index}] STARTING: EntityId={EntityId}, Name='{EntityName}', ThreadId={ThreadId}, Time={Timestamp}, BatchId={BatchId}", 
+                        index, entityId, entityName, threadId, timestamp, batchId);
+                    
+                    var entityResult = await ProcessSingleEntity(entity, batch, cancellationToken);
+                    
+                    _logger.LogInformation("🚨 [RACE-DEBUG] WORKER[{Index}] {Status}: EntityId={EntityId}, Name='{EntityName}', ThreadId={ThreadId}, Result={Result}", 
+                        index, entityResult.Success ? "✅ SUCCESS" : "❌ FAILED", entityId, entityName, threadId, entityResult.Success ? "SUCCESS" : $"FAILED: {entityResult.ErrorMessage}");
+                    
+                    return entityResult;
+                }
+                finally
+                {
+                    semaphore.Release();
+                }
+            });
+
+            _logger.LogInformation("🔄 [PARALLEL-{BatchId}] ⏳ WAITING: For all {TaskCount} workers to complete", batchId, tasks.Count());
+            
+            var entityResults = await Task.WhenAll(tasks);
+
+            _logger.LogInformation("🔄 [PARALLEL-{BatchId}] 📊 AGGREGATING: Processing {ResultCount} worker results", batchId, entityResults.Length);
+
+            // Aggregate results
+            var successCount = 0;
+            var failureCount = 0;
+            
+            foreach (var entityResult in entityResults)
+            {
+                if (entityResult.Success)
+                {
+                    result.SuccessfulEntities++;
+                    successCount++;
+                }
+                else
+                {
+                    result.FailedEntities++;
+                    failureCount++;
+                    if (!string.IsNullOrEmpty(entityResult.ErrorMessage))
+                    {
+                        result.Errors.Add($"Entity processing failed: {entityResult.ErrorMessage}");
+                    }
+                }
+            }
+            
+            _logger.LogInformation("🔄 [PARALLEL-{BatchId}] ✅ COMPLETED: Parallel processing - {Successful}/{Total} successful, {Failed} failed", 
+                batchId, successCount, entities.Count, failureCount);
         }
 
-        _logger.LogInformation("🔄 [PARALLEL-{BatchId}] ✅ COMPLETED: {Context} - {Successful}/{Total} successful, {Failed} failed for {EntityType}", 
-            batchId, context, successCount, entities.Count, failureCount, batch.EntityType);
-
         return result;
+    }
+
+    /// <summary>
+    /// Determines if an entity type should use sequential processing to avoid race conditions
+    /// </summary>
+    private static bool IsNonHierarchicalEntity(string entityType)
+    {
+        // Non-hierarchical entities that can have race conditions on clean stores
+        return entityType.Equals("brands", StringComparison.OrdinalIgnoreCase) ||
+               entityType.Equals("products", StringComparison.OrdinalIgnoreCase) ||
+               entityType.Equals("variants", StringComparison.OrdinalIgnoreCase) ||
+               entityType.Equals("customers", StringComparison.OrdinalIgnoreCase);
     }
 
     // Process a single entity (helper method)

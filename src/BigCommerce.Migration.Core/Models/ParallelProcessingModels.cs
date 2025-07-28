@@ -54,6 +54,25 @@ public class ParallelProcessingConfiguration
     public bool EnableAdaptiveConcurrency { get; set; } = true;
 
     /// <summary>
+    /// 🎯 SUB-BATCH OPTIMIZATION: Per-entity sub-batch configuration settings
+    /// Allows fine-tuning of sub-batch behavior for different entity types
+    /// </summary>
+    [JsonPropertyName("subBatchConfigurations")]
+    public Dictionary<string, SubBatchConfiguration> SubBatchConfigurations { get; set; } = new();
+
+    /// <summary>
+    /// 🎯 SUB-BATCH OPTIMIZATION: Default sub-batch configuration for entities not explicitly configured
+    /// </summary>
+    [JsonPropertyName("defaultSubBatchConfiguration")]
+    public SubBatchConfiguration DefaultSubBatchConfiguration { get; set; } = new();
+
+    /// <summary>
+    /// Whether to enable sub-batch optimization for non-hierarchical entities
+    /// </summary>
+    [JsonPropertyName("enableSubBatchOptimization")]
+    public bool EnableSubBatchOptimization { get; set; } = true;
+
+    /// <summary>
     /// Target CPU utilization percentage (0.0 to 1.0)
     /// </summary>
     [JsonPropertyName("targetCpuUtilization")]
@@ -245,6 +264,151 @@ public class BatchProgressUpdate
 }
 
 #endregion
+
+/// <summary>
+/// 🎯 SUB-BATCH OPTIMIZATION: Configuration for sub-batch processing behavior per entity type
+/// Allows fine-tuning parallelism, batch sizes, and concurrency for optimal performance
+/// </summary>
+public class SubBatchConfiguration
+{
+    /// <summary>
+    /// Entity type this configuration applies to (e.g., "brands", "products", "variants", "customers")
+    /// </summary>
+    [JsonPropertyName("entityType")]
+    public string EntityType { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Page size for initial batch creation (how many entities per page)
+    /// Default: 50 entities per page for optimal parallelism
+    /// </summary>
+    [JsonPropertyName("pageSize")]
+    public int PageSize { get; set; } = 50;
+
+    /// <summary>
+    /// Number of entities per sub-batch (within each page)
+    /// Default: 5 entities per sub-batch for balanced concurrency
+    /// </summary>
+    [JsonPropertyName("subBatchSize")]
+    public int SubBatchSize { get; set; } = 5;
+
+    /// <summary>
+    /// Maximum number of entities to process concurrently within a sub-batch
+    /// Default: 5 for optimal API rate limit usage
+    /// </summary>
+    [JsonPropertyName("maxConcurrency")]
+    public int MaxConcurrency { get; set; } = 5;
+
+    /// <summary>
+    /// Whether to enable sub-batch optimization for this entity type
+    /// Default: true for non-hierarchical entities
+    /// </summary>
+    [JsonPropertyName("enableSubBatching")]
+    public bool EnableSubBatching { get; set; } = true;
+
+    /// <summary>
+    /// Delay between sub-batch processing in milliseconds (0 = no delay)
+    /// Useful for rate limit management or system load control
+    /// </summary>
+    [JsonPropertyName("subBatchDelayMs")]
+    public int SubBatchDelayMs { get; set; } = 0;
+
+    /// <summary>
+    /// Whether to process sub-batches sequentially (true) or in parallel (false)
+    /// Default: true to maintain order and prevent race conditions
+    /// </summary>
+    [JsonPropertyName("processSubBatchesSequentially")]
+    public bool ProcessSubBatchesSequentially { get; set; } = true;
+
+    /// <summary>
+    /// Custom settings specific to this entity type
+    /// </summary>
+    [JsonPropertyName("customSettings")]
+    public Dictionary<string, object> CustomSettings { get; set; } = new();
+
+    /// <summary>
+    /// Creates default configurations for common entity types
+    /// </summary>
+    public static Dictionary<string, SubBatchConfiguration> GetDefaultConfigurations()
+    {
+        return new Dictionary<string, SubBatchConfiguration>
+        {
+            ["brands"] = new SubBatchConfiguration
+            {
+                EntityType = "brands",
+                PageSize = 50,
+                SubBatchSize = 5,
+                MaxConcurrency = 5,
+                EnableSubBatching = true,
+                SubBatchDelayMs = 0,
+                ProcessSubBatchesSequentially = true
+            },
+            ["products"] = new SubBatchConfiguration
+            {
+                EntityType = "products",
+                PageSize = 25, // Products are more complex, smaller pages
+                SubBatchSize = 3, // Fewer per sub-batch due to complexity
+                MaxConcurrency = 3,
+                EnableSubBatching = true,
+                SubBatchDelayMs = 100, // Small delay for complex entities
+                ProcessSubBatchesSequentially = true
+            },
+            ["variants"] = new SubBatchConfiguration
+            {
+                EntityType = "variants",
+                PageSize = 100, // Variants are simpler, larger pages
+                SubBatchSize = 10,
+                MaxConcurrency = 8,
+                EnableSubBatching = true,
+                SubBatchDelayMs = 0,
+                ProcessSubBatchesSequentially = true
+            },
+            ["customers"] = new SubBatchConfiguration
+            {
+                EntityType = "customers",
+                PageSize = 75,
+                SubBatchSize = 7,
+                MaxConcurrency = 6,
+                EnableSubBatching = true,
+                SubBatchDelayMs = 50,
+                ProcessSubBatchesSequentially = true
+            }
+        };
+    }
+
+    /// <summary>
+    /// Gets the effective configuration for an entity type, falling back to defaults
+    /// </summary>
+    public static SubBatchConfiguration GetEffectiveConfiguration(
+        string entityType, 
+        Dictionary<string, SubBatchConfiguration>? customConfigurations = null)
+    {
+        var defaultConfigs = GetDefaultConfigurations();
+        
+        // Try custom configurations first
+        if (customConfigurations?.TryGetValue(entityType.ToLowerInvariant(), out var customConfig) == true)
+        {
+            return customConfig;
+        }
+        
+        // Try default configurations
+        if (defaultConfigs.TryGetValue(entityType.ToLowerInvariant(), out var defaultConfig))
+        {
+            return defaultConfig;
+        }
+        
+        // Fallback to generic default
+        return new SubBatchConfiguration
+        {
+            EntityType = entityType,
+            PageSize = 50,
+            SubBatchSize = 5,
+            MaxConcurrency = 5,
+            EnableSubBatching = true,
+            SubBatchDelayMs = 0,
+            ProcessSubBatchesSequentially = true
+        };
+    }
+}
 
 #region Concurrency Management Models
 

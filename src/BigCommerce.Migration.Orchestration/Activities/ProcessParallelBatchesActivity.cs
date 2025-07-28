@@ -18,6 +18,7 @@ public class ProcessParallelBatchesActivity
     private readonly IEnhancedParallelProcessor _parallelProcessor;
     private readonly IParallelBatchProcessingPipeline _parallelPipeline;
     private readonly IProgressEventPublisher _progressEventPublisher;
+    private readonly ParallelProcessingConfiguration _parallelConfig; // 🎯 SUB-BATCH CONFIG: Added for configurable sub-batch settings
     
     // ✅ ADD REAL ENTITY PROCESSING SERVICES
     private readonly IEntityFetchService _entityFetchService;
@@ -32,6 +33,7 @@ public class ProcessParallelBatchesActivity
         IEnhancedParallelProcessor parallelProcessor,
         IParallelBatchProcessingPipeline parallelPipeline,
         IProgressEventPublisher progressEventPublisher,
+        ParallelProcessingConfiguration parallelConfig, // 🎯 SUB-BATCH CONFIG: Added configuration injection
         IEntityFetchService entityFetchService,
         IEntityTransformService entityTransformService,
         IEntityCreateService entityCreateService,
@@ -43,6 +45,7 @@ public class ProcessParallelBatchesActivity
         _parallelProcessor = parallelProcessor;
         _parallelPipeline = parallelPipeline;
         _progressEventPublisher = progressEventPublisher;
+        _parallelConfig = parallelConfig; // 🎯 SUB-BATCH CONFIG: Store configuration reference
         _entityFetchService = entityFetchService;
         _entityTransformService = entityTransformService;
         _entityCreateService = entityCreateService;
@@ -168,13 +171,17 @@ public class ProcessParallelBatchesActivity
         // Create batch processing requests for the parallel pipeline
         var batches = new List<BatchProcessingRequest>();
         
-        // 🎯 USER REQUIREMENT: Page-by-page processing with proper page size
-        // Force smaller page sizes (50) instead of large discovered sizes (250) for optimal parallelism
-        var batchSize = 50; // Optimal page size for parallel processing
+        // 🎯 SUB-BATCH CONFIG: Get entity-specific configuration for optimal page size and sub-batch settings
+        var subBatchConfig = SubBatchConfiguration.GetEffectiveConfiguration(
+            request.EntityType, 
+            _parallelConfig.SubBatchConfigurations);
         
-        // 🚨 OVERRIDE DISCOVERED PAGE SIZE: Use smaller pages for parallelism
-        // Even if discovery returns PageSize=250, we want smaller pages for parallel processing
-        _logger.LogInformation("🎯 [PARALLEL] Using optimal page size: {PageSize} for parallel processing (overriding discovery)", batchSize);
+        var batchSize = subBatchConfig.PageSize; // Use configurable page size per entity type
+        
+        // 🚨 OVERRIDE DISCOVERED PAGE SIZE: Use entity-specific optimal page sizes for parallelism
+        // Even if discovery returns PageSize=250, we want optimized pages per entity type
+        _logger.LogInformation("🎯 [PARALLEL] Using {EntityType} optimal page size: {PageSize} (sub-batch size: {SubBatchSize}, concurrency: {MaxConcurrency})", 
+            request.EntityType, batchSize, subBatchConfig.SubBatchSize, subBatchConfig.MaxConcurrency);
         
         // 🚨 CRITICAL FIX: For direct pagination, use metadata total count instead of EntityIds count
         int totalCount;
@@ -1128,18 +1135,24 @@ public class ProcessParallelBatchesActivity
         return result;
     }
 
-    // 🎯 SUB-BATCH OPTIMIZATION: Main method for processing entities using sub-batch optimization
-    // Splits 50-entity pages into 10 sub-batches of 5 parallel entities for 5x performance improvement
+    // 🎯 SUB-BATCH OPTIMIZATION: Main method for processing entities using configurable sub-batch optimization
+    // Uses entity-specific page sizes and sub-batch sizes for optimal performance per entity type
     private async Task<BigCommerce.Migration.Core.Interfaces.BatchProcessingResult> ProcessSubBatchesInParallel(
         List<Dictionary<string, object>> entities, 
         BatchProcessingRequest batch, 
         CancellationToken cancellationToken)
     {
         var batchId = $"SUBBATCH-{batch.BatchNumber}";
-        _logger.LogInformation("🎯 [SUB-BATCH-{BatchId}] ⭐ STARTING: Processing {Count} entities in sub-batches of 5 parallel entities each", 
-            batchId, entities.Count);
+        
+        // 🎯 SUB-BATCH CONFIG: Get entity-specific configuration
+        var subBatchConfig = SubBatchConfiguration.GetEffectiveConfiguration(
+            batch.EntityType, 
+            _parallelConfig.SubBatchConfigurations);
+        
+        _logger.LogInformation("🎯 [SUB-BATCH-{BatchId}] ⭐ STARTING: Processing {Count} {EntityType} entities using {SubBatchSize}-entity sub-batches with {MaxConcurrency} concurrency", 
+            batchId, entities.Count, batch.EntityType, subBatchConfig.SubBatchSize, subBatchConfig.MaxConcurrency);
 
-        // Split entities into sub-batches of 5
+        // Split entities into configurable sub-batches
         var subBatches = CreateSubBatches(entities, batch);
         var overallResult = InitializeOverallResult(batch, entities.Count);
         
@@ -1171,11 +1184,18 @@ public class ProcessParallelBatchesActivity
         return overallResult;
     }
 
-    // 🎯 SUB-BATCH OPTIMIZATION: Creates sub-batches of 5 entities each from the full entity list
+    // 🎯 SUB-BATCH OPTIMIZATION: Creates sub-batches based on entity-specific configuration
     private List<SubBatchRequest> CreateSubBatches(List<Dictionary<string, object>> entities, BatchProcessingRequest batch)
     {
         var subBatches = new List<SubBatchRequest>();
-        var subBatchSize = 5;
+        
+        // 🎯 SUB-BATCH CONFIG: Get entity-specific sub-batch configuration
+        var subBatchConfig = SubBatchConfiguration.GetEffectiveConfiguration(
+            batch.EntityType, 
+            _parallelConfig.SubBatchConfigurations);
+        
+        var subBatchSize = subBatchConfig.SubBatchSize; // Use configurable sub-batch size
+        var maxConcurrency = subBatchConfig.MaxConcurrency; // Use configurable concurrency
         
         for (int i = 0; i < entities.Count; i += subBatchSize)
         {
@@ -1185,7 +1205,7 @@ public class ProcessParallelBatchesActivity
                 SubBatchNumber = (i / subBatchSize) + 1,
                 ParentBatchNumber = batch.BatchNumber,
                 Entities = subBatchEntities,
-                MaxConcurrency = 5,
+                MaxConcurrency = maxConcurrency, // Use configurable concurrency per entity type
                 MigrationId = batch.MigrationId,
                 EntityType = batch.EntityType,
                 SourceStore = batch.SourceStore,

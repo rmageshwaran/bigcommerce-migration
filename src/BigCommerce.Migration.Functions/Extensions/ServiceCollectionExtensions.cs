@@ -102,6 +102,27 @@ public static class ServiceCollectionExtensions
         // Bind OpenSearch configuration using Options pattern
         services.Configure<OpenSearchConfiguration>(configuration.GetSection("OpenSearch"));
 
+        // 🎯 SUB-BATCH CONFIG: Bind ParallelProcessingConfiguration using Options pattern
+        services.Configure<ParallelProcessingConfiguration>(configuration.GetSection("ParallelProcessing"));
+        
+        // Register ParallelProcessingConfiguration as singleton with default values for backward compatibility
+        var parallelConfig = new ParallelProcessingConfiguration();
+        configuration.GetSection("ParallelProcessing").Bind(parallelConfig);
+        
+        // Initialize default sub-batch configurations if not provided
+        if (parallelConfig.SubBatchConfigurations.Count == 0)
+        {
+            parallelConfig.SubBatchConfigurations = SubBatchConfiguration.GetDefaultConfigurations();
+        }
+        
+        // Set default sub-batch configuration if not provided
+        if (string.IsNullOrEmpty(parallelConfig.DefaultSubBatchConfiguration.EntityType))
+        {
+            parallelConfig.DefaultSubBatchConfiguration = new SubBatchConfiguration();
+        }
+        
+        services.AddSingleton(parallelConfig);
+
         // Validate OpenSearch configuration (only if configuration is provided)
         var openSearchConfig = new OpenSearchConfiguration();
         configuration.GetSection("OpenSearch").Bind(openSearchConfig);

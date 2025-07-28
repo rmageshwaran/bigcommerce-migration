@@ -42,11 +42,19 @@ public class ProcessParallelBatchesActivitySubBatchTests
         _mockErrorHandlingService = new Mock<IEntityErrorHandlingService>();
         _mockMigrationStorageService = new Mock<IMigrationStorageService>();
 
+        // 🎯 SUB-BATCH CONFIG: Create default configuration for tests
+        var defaultParallelConfig = new ParallelProcessingConfiguration
+        {
+            SubBatchConfigurations = SubBatchConfiguration.GetDefaultConfigurations(),
+            EnableSubBatchOptimization = true
+        };
+
         _activity = new ProcessParallelBatchesActivity(
             _mockLogger.Object,
             _mockParallelProcessor.Object,
             _mockParallelPipeline.Object,
             _mockProgressEventPublisher.Object,
+            defaultParallelConfig, // Added configuration parameter
             _mockEntityFetchService.Object,
             _mockEntityTransformService.Object,
             _mockEntityCreateService.Object,
@@ -417,6 +425,164 @@ public class ProcessParallelBatchesActivitySubBatchTests
 
     #endregion
 
+    #region Sub-Batch Configuration Tests
+
+    /// <summary>
+    /// 🎯 SUB-BATCH CONFIG TESTS: Validates configurable sub-batch behavior per entity type
+    /// </summary>
+    [Theory]
+    [InlineData("brands", 50, 5, 5)]
+    [InlineData("products", 25, 3, 3)]
+    [InlineData("variants", 100, 10, 8)]
+    [InlineData("customers", 75, 7, 6)]
+    public void SubBatchConfiguration_ShouldUseEntitySpecificSettings(
+        string entityType, int expectedPageSize, int expectedSubBatchSize, int expectedConcurrency)
+    {
+        // Arrange
+        var customConfigurations = SubBatchConfiguration.GetDefaultConfigurations();
+
+        // Act
+        var config = SubBatchConfiguration.GetEffectiveConfiguration(entityType, customConfigurations);
+
+        // Assert
+        Assert.Equal(entityType, config.EntityType);
+        Assert.Equal(expectedPageSize, config.PageSize);
+        Assert.Equal(expectedSubBatchSize, config.SubBatchSize);
+        Assert.Equal(expectedConcurrency, config.MaxConcurrency);
+        Assert.True(config.EnableSubBatching);
+    }
+
+    [Fact]
+    public void SubBatchConfiguration_ShouldFallbackToDefault_ForUnknownEntityType()
+    {
+        // Arrange
+        var unknownEntityType = "unknown-entity";
+        var customConfigurations = SubBatchConfiguration.GetDefaultConfigurations();
+
+        // Act
+        var config = SubBatchConfiguration.GetEffectiveConfiguration(unknownEntityType, customConfigurations);
+
+        // Assert
+        Assert.Equal(unknownEntityType, config.EntityType);
+        Assert.Equal(50, config.PageSize); // Default values
+        Assert.Equal(5, config.SubBatchSize);
+        Assert.Equal(5, config.MaxConcurrency);
+        Assert.True(config.EnableSubBatching);
+    }
+
+    [Fact]
+    public void SubBatchConfiguration_ShouldUseCustomConfiguration_WhenProvided()
+    {
+        // Arrange
+        var customConfigs = new Dictionary<string, SubBatchConfiguration>
+        {
+            ["brands"] = new SubBatchConfiguration
+            {
+                EntityType = "brands",
+                PageSize = 100, // Custom value
+                SubBatchSize = 10, // Custom value
+                MaxConcurrency = 8, // Custom value
+                EnableSubBatching = true,
+                SubBatchDelayMs = 500
+            }
+        };
+
+        // Act
+        var config = SubBatchConfiguration.GetEffectiveConfiguration("brands", customConfigs);
+
+        // Assert
+        Assert.Equal("brands", config.EntityType);
+        Assert.Equal(100, config.PageSize);
+        Assert.Equal(10, config.SubBatchSize);
+        Assert.Equal(8, config.MaxConcurrency);
+        Assert.Equal(500, config.SubBatchDelayMs);
+    }
+
+    [Theory]
+    [InlineData("brands", 50, 10)] // 50 entities, sub-batch size 5 = 10 sub-batches
+    [InlineData("products", 25, 9)] // 25 entities, sub-batch size 3 = 9 sub-batches (25/3 = 8.33, rounded up)
+    [InlineData("variants", 100, 10)] // 100 entities, sub-batch size 10 = 10 sub-batches
+    [InlineData("customers", 75, 11)] // 75 entities, sub-batch size 7 = 11 sub-batches (75/7 = 10.71, rounded up)
+    public void CreateSubBatches_ShouldCreateCorrectNumberOfSubBatches_BasedOnEntityConfiguration(
+        string entityType, int entityCount, int expectedSubBatches)
+    {
+        // Arrange
+        var entities = GenerateTestEntities(entityCount);
+        var batch = CreateTestBatchRequest(entityType, 1); // Use existing method with batchNumber
+        var parallelConfig = new ParallelProcessingConfiguration
+        {
+            SubBatchConfigurations = SubBatchConfiguration.GetDefaultConfigurations()
+        };
+
+        var activity = new ProcessParallelBatchesActivity(
+            _mockLogger.Object,
+            _mockParallelProcessor.Object,
+            _mockParallelPipeline.Object,
+            _mockProgressEventPublisher.Object,
+            parallelConfig, // Pass the configuration
+            _mockEntityFetchService.Object,
+            _mockEntityTransformService.Object,
+            _mockEntityCreateService.Object,
+            _mockEntityMappingService.Object,
+            _mockErrorHandlingService.Object,
+            _mockMigrationStorageService.Object);
+
+        // Act: Use reflection to access the private CreateSubBatches method
+        var createSubBatchesMethod = typeof(ProcessParallelBatchesActivity)
+            .GetMethod("CreateSubBatches", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        var subBatches = (List<SubBatchRequest>)createSubBatchesMethod.Invoke(activity, new object[] { entities, batch });
+
+        // Assert
+        Assert.Equal(expectedSubBatches, subBatches.Count);
+        
+        // Verify that each sub-batch uses the correct configuration
+        var expectedConfig = SubBatchConfiguration.GetEffectiveConfiguration(entityType, parallelConfig.SubBatchConfigurations);
+        foreach (var subBatch in subBatches)
+        {
+            Assert.Equal(expectedConfig.MaxConcurrency, subBatch.MaxConcurrency);
+            Assert.True(subBatch.Entities.Count <= expectedConfig.SubBatchSize);
+        }
+    }
+
+    [Fact]
+    public void SubBatchConfiguration_ShouldSupportDisablingSubBatching()
+    {
+        // Arrange
+        var customConfigs = new Dictionary<string, SubBatchConfiguration>
+        {
+            ["brands"] = new SubBatchConfiguration
+            {
+                EntityType = "brands",
+                EnableSubBatching = false, // Disabled
+                PageSize = 50,
+                SubBatchSize = 5,
+                MaxConcurrency = 5
+            }
+        };
+
+        // Act
+        var config = SubBatchConfiguration.GetEffectiveConfiguration("brands", customConfigs);
+
+        // Assert
+        Assert.False(config.EnableSubBatching);
+    }
+
+    [Fact]
+    public void ParallelProcessingConfiguration_ShouldInitializeWithDefaults()
+    {
+        // Arrange & Act
+        var config = new ParallelProcessingConfiguration();
+
+        // Assert
+        Assert.True(config.EnableSubBatchOptimization);
+        Assert.Equal(250, config.SignalRUpdateIntervalMs);
+        Assert.NotNull(config.SubBatchConfigurations);
+        Assert.NotNull(config.DefaultSubBatchConfiguration);
+    }
+
+    #endregion
+
     #region Helper Methods
 
     private List<Dictionary<string, object>> CreateTestEntities(int count)
@@ -434,6 +600,29 @@ public class ProcessParallelBatchesActivitySubBatchTests
         return entities;
     }
 
+    /// <summary>
+    /// Helper method to generate test entities for configuration testing
+    /// </summary>
+    private List<Dictionary<string, object>> GenerateTestEntities(int count)
+    {
+        var entities = new List<Dictionary<string, object>>();
+        
+        for (int i = 1; i <= count; i++)
+        {
+            entities.Add(new Dictionary<string, object>
+            {
+                ["id"] = i,
+                ["name"] = $"Entity {i}",
+                ["type"] = "test"
+            });
+        }
+        
+        return entities;
+    }
+
+    /// <summary>
+    /// Helper method to create test batch request with specific entity type
+    /// </summary>
     private BatchProcessingRequest CreateTestBatchRequest(string entityType, int batchNumber)
     {
         return new BatchProcessingRequest
@@ -446,6 +635,14 @@ public class ProcessParallelBatchesActivitySubBatchTests
             SourceStore = new StoreConfiguration { StoreId = "source" },
             DestinationStore = new StoreConfiguration { StoreId = "dest" }
         };
+    }
+
+    /// <summary>
+    /// Helper method to create test batch request with specific entity type
+    /// </summary>
+    private BatchProcessingRequest CreateTestBatchRequest(string entityType)
+    {
+        return CreateTestBatchRequest(entityType, 1); // Use existing method with batchNumber = 1
     }
 
     #endregion

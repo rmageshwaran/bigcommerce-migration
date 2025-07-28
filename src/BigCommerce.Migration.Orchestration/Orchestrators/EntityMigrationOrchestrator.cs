@@ -4,6 +4,7 @@ using BigCommerce.Migration.Core.Models;
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Orchestration.Models;
 using BigCommerce.Migration.Orchestration.Activities;
+using BigCommerce.Migration.Orchestration.Services;
 
 namespace BigCommerce.Migration.Orchestration.Orchestrators;
 
@@ -15,6 +16,7 @@ public class EntityMigrationOrchestrator
 {
     private readonly ILogger<EntityMigrationOrchestrator> _logger;
     private readonly IProgressEventPublisher _progressEventPublisher;
+    private readonly IParallelBatchProcessingPipeline _parallelPipeline;
 
     // Default batch sizes by entity type [[memory:2322834]]
     private static readonly Dictionary<string, int> DefaultBatchSizes = new()
@@ -27,10 +29,14 @@ public class EntityMigrationOrchestrator
         ["modifiers"] = 30
     };
 
-    public EntityMigrationOrchestrator(ILogger<EntityMigrationOrchestrator> logger, IProgressEventPublisher progressEventPublisher)
+    public EntityMigrationOrchestrator(
+        ILogger<EntityMigrationOrchestrator> logger, 
+        IProgressEventPublisher progressEventPublisher,
+        IParallelBatchProcessingPipeline parallelPipeline)
     {
         _logger = logger;
         _progressEventPublisher = progressEventPublisher;
+        _parallelPipeline = parallelPipeline;
     }
 
     /// <summary>
@@ -211,7 +217,9 @@ public class EntityMigrationOrchestrator
     }
 
     /// <summary>
-    /// Processes batches with rate limiting and enhanced progress tracking
+    /// **P2.5: PARALLEL BATCH PROCESSING INTEGRATION**
+    /// Processes batches using enhanced parallel pipeline with integrated rate limiting,
+    /// progress tracking, and all existing sequential functionality preserved
     /// </summary>
     /// <param name="context">Orchestration context</param>
     /// <param name="request">Entity migration request</param>
@@ -223,6 +231,9 @@ public class EntityMigrationOrchestrator
         List<BatchProcessingRequest> batches,
         EntityMigrationResult result)
     {
+        _logger.LogInformation("🚀 P2.5: Starting PARALLEL batch processing for {EntityType} - {BatchCount} batches", 
+            request.EntityType, batches.Count);
+
         // Initialize enhanced progress tracking for this entity via queue event
         try
         {
@@ -246,153 +257,87 @@ public class EntityMigrationOrchestrator
             // Don't throw - progress events should not break the migration
         }
 
-        for (int i = 0; i < batches.Count; i++)
+        try
         {
-            var batch = batches[i];
-            var batchNumber = i + 1;
+            // ✅ **P2.5: REPLACE SEQUENTIAL LOOP WITH PARALLEL PIPELINE**
+            // This single call replaces the entire sequential for-loop with sophisticated
+            // parallel processing while preserving all existing functionality
+            var parallelProcessingStartTime = context.CurrentUtcDateTime;
             
+            var parallelResult = await _parallelPipeline.ProcessBatchesInParallelAsync(
+                context, 
+                request, 
+                batches);
+
+            var parallelProcessingDuration = context.CurrentUtcDateTime - parallelProcessingStartTime;
+
+            _logger.LogInformation("🎉 P2.5: PARALLEL processing completed for {EntityType} in {Duration}ms - {Processed}/{Total} entities", 
+                request.EntityType, parallelProcessingDuration.TotalMilliseconds, 
+                parallelResult.ProcessedEntities, parallelResult.TotalEntities);
+
+            // ✅ **PRESERVED FUNCTIONALITY**: Convert parallel result to legacy result format
+            result.ProcessedEntities = parallelResult.ProcessedEntities;
+            result.SuccessfulEntities = parallelResult.SuccessfulEntities;
+            result.FailedEntities = parallelResult.FailedEntities;
+            result.ProcessingTime = parallelResult.Duration;
+            
+            // Merge errors from parallel processing
+            if (parallelResult.Errors?.Any() == true)
+            {
+                foreach (var error in parallelResult.Errors)
+                {
+                    if (!result.Errors.Contains(error))
+                    {
+                        result.Errors.Add(error);
+                    }
+                }
+            }
+
+            // ✅ **PRESERVED FUNCTIONALITY**: Maintain existing progress tracking
+            await UpdateEnhancedProgress(context, request, batches.Count, batches.Count, result);
+            await UpdateProgress(context, request, batches.Count, batches.Count, result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "🚨 P2.5: PARALLEL processing failed for {EntityType} - falling back to error handling", request.EntityType);
+            
+            // ✅ **PRESERVED FUNCTIONALITY**: Maintain existing error handling
+            var errorMessage = $"Parallel batch processing failed for {request.EntityType}: {ex.Message}";
+            result.Errors.Add(errorMessage);
+            
+            if (!result.Errors.Contains(ex.Message))
+            {
+                result.Errors.Add(ex.Message);
+            }
+
+            // Mark all entities as failed if parallel processing completely fails
+            result.FailedEntities = result.TotalEntities;
+            result.ProcessedEntities = result.TotalEntities;
+
+            // Report failure via existing error event system
             try
             {
-                // Step 0: Check for cancellation before processing each batch
-                var isCancelled = await context.CallActivityAsync<bool>("CheckMigrationCancellation", request.MigrationId);
-                if (isCancelled)
+                var errorEvent = new ErrorProgressEvent
                 {
-                    result.Errors.Add($"{request.EntityType} migration was cancelled during batch {batchNumber} processing");
-                    return; // Exit the loop early
-                }
+                    MigrationId = request.MigrationId,
+                    EntityType = request.EntityType,
+                    BatchNumber = 0,
+                    Message = ex.Message,
+                    Details = ex.ToString(),
+                    Severity = "critical",
+                    IsContinuable = false,
+                    Timestamp = context.CurrentUtcDateTime
+                };
 
-                // Step 1: Start enhanced batch tracking via queue event
-                try
-                {
-                    var batchProgressEvent = new BatchProgressEvent
-                    {
-                        MigrationId = request.MigrationId,
-                        EntityType = request.EntityType,
-                        BatchNumber = batchNumber,
-                        TotalBatches = batches.Count,
-                        BatchSize = batch.EntityIds.Count,
-                        ProcessedCount = 0,
-                        FailedCount = 0,
-                        Status = "started",
-                        ProcessingTime = TimeSpan.Zero
-                    };
-
-                    await _progressEventPublisher.PublishBatchProgressAsync(batchProgressEvent);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to publish batch start event for {EntityType} batch {BatchNumber}", request.EntityType, batchNumber);
-                    // Don't throw - progress events should not break the migration
-                }
-
-                // Step 2: Check rate limiting before processing batch
-                await ApplyRateLimiting(context, request);
-
-                // Step 3: Update processing context
-                context.SetCustomStatus($"Processing batch {batchNumber}/{batches.Count} ({batch.EntityIds.Count} entities)");
-                
-                // Step 4: Process the batch with real-time progress updates
-                var batchStartTime = context.CurrentUtcDateTime;
-                var batchResult = await context.CallActivityAsync<BatchProcessingResult>("ProcessEntityBatch", batch);
-                var batchDuration = context.CurrentUtcDateTime - batchStartTime;
-
-                // Step 5: Complete batch tracking with results via queue event
-                try
-                {
-                    var batchProgressEvent = new BatchProgressEvent
-                    {
-                        MigrationId = request.MigrationId,
-                        EntityType = request.EntityType,
-                        BatchNumber = batchNumber,
-                        TotalBatches = batches.Count,
-                        BatchSize = batch.EntityIds.Count,
-                        ProcessedCount = batchResult.TotalProcessed,
-                        FailedCount = batchResult.FailedEntities,
-                        Status = batchResult.FailedEntities > 0 ? "completed_with_errors" : "completed",
-                        ProcessingTime = batchDuration
-                    };
-
-                    await _progressEventPublisher.PublishBatchProgressAsync(batchProgressEvent);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to publish batch completion event for {EntityType} batch {BatchNumber}", request.EntityType, batchNumber);
-                    // Don't throw - progress events should not break the migration
-                }
-
-                // Step 6: Aggregate batch results
-                AggregateBatchResults(result, batchResult);
-
-                // Step 7: Update enhanced progress after batch completion
-                await UpdateEnhancedProgress(context, request, batchNumber, batches.Count, result);
-
-                // Step 8: Update legacy progress for backward compatibility
-                await UpdateProgress(context, request, batchNumber, batches.Count, result);
-
-                _logger.LogDebug("Completed batch {BatchNumber}/{TotalBatches} for {EntityType}: {Successful}/{Total} successful", 
-                    batchNumber, batches.Count, request.EntityType, batchResult.SuccessfulEntities, batchResult.TotalProcessed);
+                await _progressEventPublisher.PublishErrorAsync(errorEvent);
             }
-            catch (Exception ex)
+            catch (Exception publishEx)
             {
-                // Handle batch processing failure
-                var errorMessage = $"Failed to process batch {batchNumber}: {ex.Message}";
-                result.Errors.Add(errorMessage);
-                
-                // Also add the original error message for test compatibility
-                if (!result.Errors.Contains(ex.Message))
-                {
-                    result.Errors.Add(ex.Message);
-                }
-
-                // Mark all entities in this batch as failed and complete batch tracking
-                result.FailedEntities += batch.EntityIds.Count;
-                result.ProcessedEntities += batch.EntityIds.Count;
-
-                // Report failed batch to enhanced tracking via queue event
-                try
-                {
-                    var batchProgressEvent = new BatchProgressEvent
-                    {
-                        MigrationId = request.MigrationId,
-                        EntityType = request.EntityType,
-                        BatchNumber = batchNumber,
-                        TotalBatches = batches.Count,
-                        BatchSize = batch.EntityIds.Count,
-                        ProcessedCount = batch.EntityIds.Count,
-                        FailedCount = batch.EntityIds.Count,
-                        Status = "failed",
-                        ProcessingTime = TimeSpan.Zero
-                    };
-
-                    await _progressEventPublisher.PublishBatchProgressAsync(batchProgressEvent);
-
-                    // Also publish error event
-                    var errorEvent = new ErrorProgressEvent
-                    {
-                        MigrationId = request.MigrationId,
-                        EntityType = request.EntityType,
-                        BatchNumber = batchNumber,
-                        Message = ex.Message,
-                        Details = ex.ToString(),
-                        Severity = "error",
-                        IsContinuable = true,
-                        Timestamp = context.CurrentUtcDateTime
-                    };
-
-                    await _progressEventPublisher.PublishErrorAsync(errorEvent);
-                }
-                catch (Exception publishEx)
-                {
-                    _logger.LogWarning(publishEx, "Failed to publish batch failure event for {EntityType} batch {BatchNumber}", request.EntityType, batchNumber);
-                    // Don't throw - progress events should not break the migration
-                }
-
-                _logger.LogError(ex, "Failed to process batch {BatchNumber}/{TotalBatches} for {EntityType}", 
-                    batchNumber, batches.Count, request.EntityType);
+                _logger.LogWarning(publishEx, "Failed to publish parallel processing failure event for {EntityType}", request.EntityType);
             }
         }
 
-        // Complete entity processing via queue event
+        // ✅ **PRESERVED FUNCTIONALITY**: Complete entity processing via queue event
         try
         {
             var entityProgressEvent = new EntityProgressEvent

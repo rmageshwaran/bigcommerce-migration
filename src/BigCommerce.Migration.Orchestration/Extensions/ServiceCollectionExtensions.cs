@@ -1,7 +1,9 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using BigCommerce.Migration.Core.Interfaces;
+using BigCommerce.Migration.Core.Models;
 using BigCommerce.Migration.Infrastructure.Services;
 using BigCommerce.Migration.Orchestration.Services;
 using BigCommerce.Migration.Orchestration.Services.EntityCreation;
@@ -19,8 +21,9 @@ public static class ServiceCollectionExtensions
     /// Adds orchestration services to the service collection
     /// </summary>
     /// <param name="services">Service collection</param>
+    /// <param name="configuration">Configuration instance for service setup</param>
     /// <returns>Service collection for chaining</returns>
-    public static IServiceCollection AddOrchestrationServices(this IServiceCollection services)
+    public static IServiceCollection AddOrchestrationServices(this IServiceCollection services, IConfiguration? configuration = null)
     {
         // Add logging services (required by many services)
         services.AddLogging();
@@ -29,7 +32,7 @@ public static class ServiceCollectionExtensions
         services.AddCoreServices();
         
         // Add orchestration-specific services
-        services.AddOrchestrationSpecificServices();
+        services.AddOrchestrationSpecificServices(configuration);
         
         return services;
     }
@@ -80,7 +83,16 @@ public static class ServiceCollectionExtensions
         // Don't register it here to avoid conflicts
         
         // Register API request handler for HTTP concerns (required by BigCommerceApiClient)
-        services.TryAddSingleton<IApiRequestHandler, ApiRequestHandler>();
+        services.TryAddSingleton<IApiRequestHandler>(serviceProvider =>
+        {
+            var httpClient = serviceProvider.GetRequiredService<HttpClient>();
+            var rateLimitService = serviceProvider.GetRequiredService<IRateLimitService>();
+            var openSearchService = serviceProvider.GetRequiredService<IOpenSearchService>();
+            var logger = serviceProvider.GetRequiredService<ILogger<ApiRequestHandler>>();
+            var dynamicRateLimiter = serviceProvider.GetRequiredService<IDynamicRateLimiter>();
+            
+            return new ApiRequestHandler(httpClient, rateLimitService, openSearchService, logger, dynamicRateLimiter);
+        });
         services.TryAddSingleton<IBigCommerceApiClient, BigCommerceApiClient>();
         services.TryAddSingleton<IBatchApiClient, BatchApiClient>();
         
@@ -108,15 +120,47 @@ public static class ServiceCollectionExtensions
     /// <summary>
     /// Adds orchestration-specific services
     /// </summary>
-    private static IServiceCollection AddOrchestrationSpecificServices(this IServiceCollection services)
+    private static IServiceCollection AddOrchestrationSpecificServices(this IServiceCollection services, IConfiguration? configuration)
     {
-        // Register orchestration services as singleton
-        services.TryAddSingleton<IRateLimitService, RateLimitService>();
+        // Register dynamic rate limiting configuration
+        if (configuration != null)
+        {
+            services.Configure<DynamicRateLimitingConfiguration>(
+                configuration.GetSection("DynamicRateLimiting"));
+        }
+        
+        // Register dynamic rate limiting services (Phase 1 - Dynamic Rate Limiting)
+        services.TryAddSingleton<IDateTimeProvider, DateTimeProvider>();
+        services.TryAddSingleton<IApiHealthMonitor, ApiHealthMonitor>();
+        services.TryAddSingleton<IRateCalculator, BigCommerceAwareRateCalculator>();
+        
+        // Register base rate limiting service first
+        services.TryAddSingleton<RateLimitService>();
+        
+        // Register dynamic rate limiting service using decorator pattern
+        services.TryAddSingleton<IDynamicRateLimiter>(serviceProvider =>
+        {
+            var logger = serviceProvider.GetRequiredService<ILogger<DynamicRateLimitService>>();
+            var baseRateLimitService = serviceProvider.GetRequiredService<RateLimitService>();
+            var healthMonitor = serviceProvider.GetRequiredService<IApiHealthMonitor>();
+            var rateCalculator = serviceProvider.GetRequiredService<IRateCalculator>();
+            
+            return new DynamicRateLimitService(logger, baseRateLimitService, healthMonitor, rateCalculator);
+        });
+        
+        // Register IRateLimitService to use dynamic implementation for backward compatibility
+        services.TryAddSingleton<IRateLimitService>(serviceProvider => 
+            serviceProvider.GetRequiredService<IDynamicRateLimiter>());
+        
         services.TryAddSingleton<IBatchSizeCalculator, BatchSizeCalculator>();
         
         // Register progress event publisher for queue-based SignalR integration
         services.TryAddSingleton<IProgressEventPublisher, ProgressEventPublisher>();
         services.TryAddSingleton<IProgressTracker, ProgressTracker>();
+        
+        // ✅ **P2.5: Phase 2 Enhanced Parallel Processing Pipeline** (Required for 12.5x throughput)
+        services.TryAddSingleton<IEnhancedParallelProcessor, EnhancedParallelProcessor>();
+        services.TryAddSingleton<IParallelBatchProcessingPipeline, ParallelBatchProcessingPipeline>();
         
         // Register entity processing services (newly created during refactoring)
         services.TryAddSingleton<IEntityFetchService, EntityFetchService>();

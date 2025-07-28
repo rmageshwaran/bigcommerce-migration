@@ -17,6 +17,7 @@ public class ApiRequestHandler : IApiRequestHandler
     private readonly IRateLimitService _rateLimitService;
     private readonly IOpenSearchService _openSearchService;
     private readonly ILogger<ApiRequestHandler> _logger;
+    private readonly IDynamicRateLimiter? _dynamicRateLimiter;
 
     /// <summary>
     /// Initializes a new instance of the ApiRequestHandler
@@ -25,16 +26,19 @@ public class ApiRequestHandler : IApiRequestHandler
     /// <param name="rateLimitService">Rate limit service for request throttling</param>
     /// <param name="openSearchService">OpenSearch service for logging</param>
     /// <param name="logger">Logger instance</param>
+    /// <param name="dynamicRateLimiter">Optional dynamic rate limiter for BigCommerce health updates</param>
     public ApiRequestHandler(
         HttpClient httpClient,
         IRateLimitService rateLimitService,
         IOpenSearchService openSearchService,
-        ILogger<ApiRequestHandler> logger)
+        ILogger<ApiRequestHandler> logger,
+        IDynamicRateLimiter? dynamicRateLimiter = null)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _rateLimitService = rateLimitService ?? throw new ArgumentNullException(nameof(rateLimitService));
         _openSearchService = openSearchService ?? throw new ArgumentNullException(nameof(openSearchService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _dynamicRateLimiter = dynamicRateLimiter;
     }
 
     /// <summary>
@@ -74,8 +78,8 @@ public class ApiRequestHandler : IApiRequestHandler
         }
         catch (OperationCanceledException)
         {
-            _logger.LogInformation("Request was cancelled for URL: {Url}", request.Url);
-            throw;
+            _logger.LogInformation("API request was cancelled for URL: {Url}", request.Url);
+            throw; // Infrastructure service - let caller handle cancellation appropriately
         }
         catch (Exception ex)
         {
@@ -196,6 +200,30 @@ public class ApiRequestHandler : IApiRequestHandler
     /// </summary>
     private async Task<T> ProcessResponseAsync<T>(HttpResponseMessage response, ApiRequest request, TimeSpan elapsed, CancellationToken cancellationToken = default)
     {
+        // Extract BigCommerce rate limit headers for dynamic rate limiting
+        var rateLimitInfo = ExtractBigCommerceRateLimitHeaders(response, request.StoreConfiguration.StoreId ?? string.Empty);
+
+        // Update dynamic rate limiter with BigCommerce health data if available
+        if (rateLimitInfo != null && _dynamicRateLimiter != null)
+        {
+            try
+            {
+                await _dynamicRateLimiter.UpdateApiHealthAsync(
+                    request.StoreConfiguration.StoreId ?? string.Empty, 
+                    rateLimitInfo, 
+                    cancellationToken);
+                
+                _logger.LogTrace("Updated dynamic rate limiter with BigCommerce health data for store {StoreId}", 
+                    request.StoreConfiguration.StoreId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to update dynamic rate limiter health data for store {StoreId}", 
+                    request.StoreConfiguration.StoreId);
+                // Don't rethrow - health updates shouldn't break the main request flow
+            }
+        }
+
         if (response.IsSuccessStatusCode)
         {
             var content = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -203,8 +231,8 @@ public class ApiRequestHandler : IApiRequestHandler
             // Check for cancellation before expensive deserialization
             cancellationToken.ThrowIfCancellationRequested();
             
-            // Log performance metrics
-            await LogPerformanceMetrics(request, elapsed, true, cancellationToken);
+            // Log enhanced performance metrics with BigCommerce rate limit data
+            await LogEnhancedPerformanceMetrics(request, elapsed, true, rateLimitInfo, cancellationToken);
 
             // Handle different response types
             if (typeof(T) == typeof(string))
@@ -233,7 +261,7 @@ public class ApiRequestHandler : IApiRequestHandler
 
         // Handle error responses
         var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
-        await LogPerformanceMetrics(request, elapsed, false, cancellationToken);
+        await LogEnhancedPerformanceMetrics(request, elapsed, false, rateLimitInfo, cancellationToken);
         
         throw CreateHttpException(response.StatusCode, errorContent, request.Url);
     }
@@ -302,6 +330,148 @@ public class ApiRequestHandler : IApiRequestHandler
         catch (Exception loggingEx)
         {
             _logger.LogWarning(loggingEx, "Failed to log error to OpenSearch for {Url}", request.Url);
+        }
+    }
+
+    /// <summary>
+    /// Extracts BigCommerce rate limit information from HTTP response headers
+    /// Maps X-Rate-Limit-* headers to BigCommerceRateLimitInfo for dynamic rate limiting
+    /// Follows Single Responsibility Principle - only handles header extraction
+    /// </summary>
+    /// <param name="response">HTTP response containing potential rate limit headers</param>
+    /// <param name="storeId">Store identifier for context</param>
+    /// <returns>BigCommerceRateLimitInfo if all required headers are present and valid, null otherwise</returns>
+    /// <exception cref="ArgumentNullException">Thrown when response is null</exception>
+    /// <exception cref="ArgumentException">Thrown when storeId is null or empty</exception>
+    public BigCommerceRateLimitInfo? ExtractBigCommerceRateLimitHeaders(HttpResponseMessage response, string storeId)
+    {
+        if (response == null)
+            throw new ArgumentNullException(nameof(response));
+        
+        if (string.IsNullOrEmpty(storeId))
+            throw new ArgumentException("Store ID cannot be null or empty", nameof(storeId));
+
+        try
+        {
+            // Check if all required BigCommerce rate limit headers are present
+            var requestsLeftHeader = response.Headers.GetValues("X-Rate-Limit-Requests-Left").FirstOrDefault();
+            var requestsQuotaHeader = response.Headers.GetValues("X-Rate-Limit-Requests-Quota").FirstOrDefault();
+            var timeResetMsHeader = response.Headers.GetValues("X-Rate-Limit-Time-Reset-Ms").FirstOrDefault();
+            var timeWindowMsHeader = response.Headers.GetValues("X-Rate-Limit-Time-Window-Ms").FirstOrDefault();
+
+            // Return null if any required header is missing
+            if (string.IsNullOrEmpty(requestsLeftHeader) || 
+                string.IsNullOrEmpty(requestsQuotaHeader) ||
+                string.IsNullOrEmpty(timeResetMsHeader) || 
+                string.IsNullOrEmpty(timeWindowMsHeader))
+            {
+                return null;
+            }
+
+            // Parse header values with validation
+            if (!int.TryParse(requestsLeftHeader, out var requestsLeft) ||
+                !int.TryParse(requestsQuotaHeader, out var requestsQuota) ||
+                !long.TryParse(timeResetMsHeader, out var timeResetMs) ||
+                !long.TryParse(timeWindowMsHeader, out var timeWindowMs))
+            {
+                _logger.LogWarning("Failed to parse BigCommerce rate limit headers for store {StoreId}. " +
+                                   "RequestsLeft: {RequestsLeft}, RequestsQuota: {RequestsQuota}, " +
+                                   "TimeResetMs: {TimeResetMs}, TimeWindowMs: {TimeWindowMs}",
+                                   storeId, requestsLeftHeader, requestsQuotaHeader, timeResetMsHeader, timeWindowMsHeader);
+                return null;
+            }
+
+            // Create and validate BigCommerceRateLimitInfo
+            var rateLimitInfo = new BigCommerceRateLimitInfo(storeId, requestsLeft, requestsQuota, timeResetMs, timeWindowMs);
+
+            if (!rateLimitInfo.IsValid())
+            {
+                _logger.LogWarning("Invalid BigCommerce rate limit info extracted for store {StoreId}: {RateLimitInfo}",
+                                   storeId, rateLimitInfo);
+                return null;
+            }
+
+            _logger.LogDebug("Successfully extracted BigCommerce rate limit headers for store {StoreId}: {RateLimitInfo}",
+                             storeId, rateLimitInfo);
+
+            return rateLimitInfo;
+        }
+        catch (InvalidOperationException)
+        {
+            // Headers collection doesn't contain the requested headers
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error extracting BigCommerce rate limit headers for store {StoreId}", storeId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Logs enhanced performance metrics including BigCommerce rate limit information
+    /// Extends base performance logging with dynamic rate limiting data
+    /// </summary>
+    /// <param name="request">Original API request</param>
+    /// <param name="elapsed">Request execution time</param>
+    /// <param name="isSuccess">Whether the request was successful</param>
+    /// <param name="rateLimitInfo">BigCommerce rate limit information if available</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    private async Task LogEnhancedPerformanceMetrics(
+        ApiRequest request, 
+        TimeSpan elapsed, 
+        bool isSuccess, 
+        BigCommerceRateLimitInfo? rateLimitInfo, 
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            // Always log base performance metrics
+            await LogPerformanceMetrics(request, elapsed, isSuccess, cancellationToken);
+
+            // Log enhanced metrics if BigCommerce rate limit info is available
+            if (rateLimitInfo != null)
+            {
+                var enhancedMetrics = new
+                {
+                    StoreId = request.StoreConfiguration.StoreId,
+                    Url = request.Url,
+                    Method = request.Method.ToString(),
+                    ElapsedMs = elapsed.TotalMilliseconds,
+                    IsSuccess = isSuccess,
+                    RateLimit = new
+                    {
+                        RequestsLeft = rateLimitInfo.RequestsLeft,
+                        RequestsQuota = rateLimitInfo.RequestsQuota,
+                        UtilizationPercentage = rateLimitInfo.GetUtilizationPercentage() * 100,
+                        IsCritical = rateLimitInfo.IsCritical(),
+                        TimeResetMs = rateLimitInfo.TimeResetMs,
+                        TimeWindowMs = rateLimitInfo.TimeWindowMs,
+                        EffectiveRateLimit = rateLimitInfo.GetEffectiveRateLimit()
+                    },
+                    Timestamp = DateTime.UtcNow
+                };
+
+                // Log to OpenSearch for advanced analytics
+                await _openSearchService.LogPerformanceMetricsAsync(
+                    "EnhancedApiPerformance",
+                    elapsed,
+                    enhancedMetrics,
+                    cancellationToken);
+
+                // Log summary to structured logging
+                _logger.LogInformation("Enhanced API performance: {Method} {Url} completed in {ElapsedMs}ms. " +
+                                       "BigCommerce Rate Limit: {RequestsLeft}/{RequestsQuota} " +
+                                       "({UtilizationPercentage:F1}% used, Critical: {IsCritical})",
+                                       request.Method, request.Url, elapsed.TotalMilliseconds,
+                                       rateLimitInfo.RequestsLeft, rateLimitInfo.RequestsQuota,
+                                       rateLimitInfo.GetUtilizationPercentage() * 100, rateLimitInfo.IsCritical());
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error logging enhanced performance metrics for {Url}", request.Url);
+            // Don't rethrow - logging errors shouldn't break the main request flow
         }
     }
 } 

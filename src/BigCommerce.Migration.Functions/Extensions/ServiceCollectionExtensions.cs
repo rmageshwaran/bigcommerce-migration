@@ -48,7 +48,7 @@ public static class ServiceCollectionExtensions
         services.AddHttpClients(configuration);
 
         // Add core services
-        services.AddCoreServices();
+        services.AddCoreServices(configuration);
 
         // Add orchestration services (Strategy Pattern and Activity implementations)
         services.AddOrchestrationServices();
@@ -379,7 +379,7 @@ public static class ServiceCollectionExtensions
     /// <summary>
     /// Adds core business services with proper lifetimes
     /// </summary>
-    private static IServiceCollection AddCoreServices(this IServiceCollection services)
+    private static IServiceCollection AddCoreServices(this IServiceCollection services, IConfiguration configuration)
     {
         // Register services as singleton for better performance and test consistency
         services.TryAddSingleton<ICategoryTreeResolver, CategoryTreeResolver>();
@@ -415,13 +415,47 @@ public static class ServiceCollectionExtensions
         services.TryAddScoped<IMigrationStorageService, MigrationStorageService>();
 
         // Register API request handler for HTTP concerns (delegation pattern)
-        services.TryAddSingleton<IApiRequestHandler, ApiRequestHandler>();
+                    services.TryAddSingleton<IApiRequestHandler>(serviceProvider =>
+            {
+                var httpClient = serviceProvider.GetRequiredService<HttpClient>();
+                var rateLimitService = serviceProvider.GetRequiredService<IRateLimitService>();
+                var openSearchService = serviceProvider.GetRequiredService<IOpenSearchService>();
+                var logger = serviceProvider.GetRequiredService<ILogger<ApiRequestHandler>>();
+                var dynamicRateLimiter = serviceProvider.GetRequiredService<IDynamicRateLimiter>();
+                
+                return new ApiRequestHandler(httpClient, rateLimitService, openSearchService, logger, dynamicRateLimiter);
+            });
 
         // Register BigCommerce API client using delegation pattern
         services.TryAddSingleton<IBigCommerceApiClient, BigCommerceApiClient>();
 
-        // Register orchestration services (from gap analysis - these were missing)
-        services.TryAddSingleton<IRateLimitService, RateLimitService>();
+        // Register dynamic rate limiting configuration
+        services.Configure<DynamicRateLimitingConfiguration>(
+            configuration.GetSection("DynamicRateLimiting"));
+        
+        // Register dynamic rate limiting services (Phase 1 - Dynamic Rate Limiting)
+        services.TryAddSingleton<IDateTimeProvider, DateTimeProvider>();
+        services.TryAddSingleton<IApiHealthMonitor, ApiHealthMonitor>();
+        services.TryAddSingleton<IRateCalculator, BigCommerceAwareRateCalculator>();
+        
+        // Register base rate limiting service first
+        services.TryAddSingleton<RateLimitService>();
+        
+        // Register dynamic rate limiting service using decorator pattern
+        services.TryAddSingleton<IDynamicRateLimiter>(serviceProvider =>
+        {
+            var logger = serviceProvider.GetRequiredService<ILogger<DynamicRateLimitService>>();
+            var baseRateLimitService = serviceProvider.GetRequiredService<RateLimitService>();
+            var healthMonitor = serviceProvider.GetRequiredService<IApiHealthMonitor>();
+            var rateCalculator = serviceProvider.GetRequiredService<IRateCalculator>();
+            
+            return new DynamicRateLimitService(logger, baseRateLimitService, healthMonitor, rateCalculator);
+        });
+        
+        // Register IRateLimitService to use dynamic implementation for backward compatibility
+        services.TryAddSingleton<IRateLimitService>(serviceProvider => 
+            serviceProvider.GetRequiredService<IDynamicRateLimiter>());
+        
         services.TryAddSingleton<IBatchSizeCalculator, BatchSizeCalculator>();
         services.TryAddSingleton<IProgressTracker>(serviceProvider =>
         {

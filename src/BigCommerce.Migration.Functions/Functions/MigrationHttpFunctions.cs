@@ -1064,11 +1064,13 @@ public class MigrationHttpFunctions
             
             // Convert OpenSearch results to proper format - handle JsonElement results
             var errorLogs = new List<Dictionary<string, object>>();
-            foreach (var result in searchResults)
+            if (searchResults != null)
+            {
+                foreach (var result in searchResults)
             {
                 if (result is JsonElement jsonElement)
                 {
-                    errorLogs.Add(ParseJsonElementToDictionary(jsonElement));
+                    errorLogs.Add(ParseJsonElementToDictionary(jsonElement)!);
                 }
                 else if (result is Dictionary<string, object> dict)
                 {
@@ -1078,6 +1080,7 @@ public class MigrationHttpFunctions
                 {
                     _logger.LogWarning("Unexpected result type from OpenSearch: {Type}", result?.GetType()?.Name ?? "null");
                 }
+            }
             }
             
             // If no results with structured query, try broader search without entity type filter

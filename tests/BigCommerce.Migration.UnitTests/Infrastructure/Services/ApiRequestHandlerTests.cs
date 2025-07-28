@@ -43,7 +43,7 @@ public class ApiRequestHandlerTests
             .ToList();
         
         // Assert - Should only contain HTTP request handling methods
-        var expectedMethods = new List<string> { "ExecuteRequestAsync", "ExecuteGetRequestAsync", "ExecutePostRequestAsync" };
+        var expectedMethods = new List<string> { "ExecuteRequestAsync", "ExecuteGetRequestAsync", "ExecutePostRequestAsync", "ExtractBigCommerceRateLimitHeaders" };
         methods.Should().BeSubsetOf(expectedMethods, "Request handler should only handle HTTP request concerns");
         methods.Should().Contain("ExecuteRequestAsync", "Must handle generic HTTP requests");
     }
@@ -211,7 +211,7 @@ public class ApiRequestHandlerTests
         
         foreach (var method in publicMethods.Where(m => !m.Name.StartsWith("get_") && !m.Name.StartsWith("set_")))
         {
-            method.Name.Should().MatchRegex(@".*Request.*|.*Execute.*", 
+            method.Name.Should().MatchRegex(@".*Request.*|.*Execute.*|.*Extract.*", 
                 $"Method {method.Name} should be related to request execution");
         }
     }

@@ -348,6 +348,56 @@ export interface BatchEvent {
   timestamp: Date;
 }
 
+// Sub-batch Event Types (Configurable Sub-batch Optimization)
+export interface SubBatchStartedEvent {
+  migrationId: string;
+  parentBatchNumber: number;
+  subBatchNumber: number;
+  totalSubBatches: number;
+  entityType: string;
+  entitiesInBatch: number;
+  timestamp: Date;
+}
+
+export interface SubBatchCompletedEvent {
+  migrationId: string;
+  parentBatchNumber: number;
+  subBatchNumber: number;
+  totalSubBatches: number;
+  successfulEntities: number;
+  failedEntities: number;
+  totalEntities: number;
+  entityType: string;
+  processingTime: string; // Duration string (e.g., "00:00:02.5944213")
+  completedAt: Date;
+  errors: string[];
+  cumulativeSuccessfulEntities: number;
+  cumulativeFailedEntities: number;
+  totalMigrationEntities: number;
+  progressPercentage: number;
+  estimatedTimeRemaining: string; // Duration string (e.g., "00:00:00")
+  timestamp: Date;
+}
+
+export interface SubBatchMigrationProgressEvent {
+  migrationId: string;
+  totalPages: number;
+  completedPages: number;
+  totalSubBatches: number;
+  completedSubBatches: number;
+  totalSuccessfulEntities: number;
+  totalFailedEntities: number;
+  totalExpectedEntities: number;
+  processingRate: number;
+  overallProgressPercentage: number;
+  estimatedTimeRemaining: string; // Duration string
+  updatedAt: Date;
+  elapsedTime: string; // Duration string
+  recentErrors: string[];
+  performanceMetrics: Record<string, any>;
+  timestamp: Date;
+}
+
 export interface EntityPhaseTransition {
   migrationId: string;
   entityType: string;

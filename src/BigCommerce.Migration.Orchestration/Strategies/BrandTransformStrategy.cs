@@ -228,8 +228,8 @@ public class BrandTransformStrategy : IEntityTransformStrategy
             }
             // Handle native Dictionary<string, object>
             else if (customUrlObj is Dictionary<string, object> existingCustomUrl)
-            {
-                return existingCustomUrl;
+        {
+            return existingCustomUrl;
             }
             // Handle other dictionary types
             else if (customUrlObj is IDictionary<string, object> dictCustomUrl)

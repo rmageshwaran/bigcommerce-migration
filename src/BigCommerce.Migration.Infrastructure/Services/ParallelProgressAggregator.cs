@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
+using BigCommerce.Migration.Core.Services;
 using Microsoft.Extensions.Logging;
 
 namespace BigCommerce.Migration.Infrastructure.Services;
@@ -26,6 +27,7 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
     private readonly string _entityType;
     private readonly int _totalBatches;
     private readonly IProgressEventPublisher? _progressEventPublisher;
+    private readonly ISignalREventFactory _signalREventFactory; // 🎯 CENTRALIZED SIGNALR: Factory for consistent event creation
     private readonly ILogger _logger;
     private readonly IDateTimeProvider _dateTimeProvider;
 
@@ -74,6 +76,7 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
         string entityType,
         int totalBatches,
         IProgressEventPublisher? progressEventPublisher,
+        ISignalREventFactory signalREventFactory, // 🎯 CENTRALIZED SIGNALR: Factory for consistent event creation
         ILogger logger,
         IDateTimeProvider dateTimeProvider)
     {
@@ -81,6 +84,7 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
         _entityType = entityType ?? throw new ArgumentNullException(nameof(entityType));
         _totalBatches = totalBatches;
         _progressEventPublisher = progressEventPublisher;
+        _signalREventFactory = signalREventFactory ?? throw new ArgumentNullException(nameof(signalREventFactory)); // 🎯 CENTRALIZED SIGNALR: Store factory reference
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _dateTimeProvider = dateTimeProvider ?? throw new ArgumentNullException(nameof(dateTimeProvider));
 
@@ -350,10 +354,9 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
             var totalSubBatchEntitiesProcessed = Interlocked.Read(ref _totalSubBatchEntitiesProcessed);
             var totalSubBatchEntitiesFailed = Interlocked.Read(ref _totalSubBatchEntitiesFailed);
 
-            // Create sub-batch migration progress event for dashboard
-            var subBatchProgressEvent = new SubBatchMigrationProgressEvent
+            // ✅ CENTRALIZED SIGNALR: Use factory for consistent event creation with auto-populated base properties
+            var subBatchProgressEvent = _signalREventFactory.CreateSubBatchProgress(_migrationId, new SubBatchProgressOptions
             {
-                MigrationId = _migrationId,
                 TotalPages = _totalBatches,
                 CompletedPages = _completedBatchCount,
                 TotalSubBatches = GetEstimatedTotalSubBatches(),
@@ -368,7 +371,10 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
                 ElapsedTime = _dateTimeProvider.UtcNow - _startTime,
                 RecentErrors = GetRecentErrors(),
                 PerformanceMetrics = GetPerformanceMetrics()
-            };
+                // ✅ Base properties (Timestamp, IsCancelled, HubMethod) auto-populated by factory
+                // ✅ Validation built-in
+                // ✅ Consistent naming enforced
+            });
 
             await _progressEventPublisher.PublishAsync(subBatchProgressEvent, cancellationToken);
 
@@ -880,18 +886,19 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
                 }
             }
 
-            // Create progress event
-            var progressEvent = new MigrationProgressEvent
+            // ✅ CENTRALIZED SIGNALR: Use factory for consistent event creation with auto-populated base properties
+            var progressEvent = _signalREventFactory.CreateMigrationProgress(_migrationId, new MigrationProgressOptions
             {
-                MigrationId = _migrationId,
                 CurrentEntityType = _entityType,
                 OverallProgress = GetCurrentProgressPercentage() * 100, // Convert to percentage (0-100)
                 Status = "running",
                 TotalEntities = (int)Interlocked.Read(ref _totalEntitiesProcessed) + (int)Interlocked.Read(ref _totalEntitiesFailed),
                 ProcessedEntities = (int)Interlocked.Read(ref _totalEntitiesProcessed),
-                FailedEntities = (int)Interlocked.Read(ref _totalEntitiesFailed),
-                Timestamp = _dateTimeProvider.UtcNow
-            };
+                FailedEntities = (int)Interlocked.Read(ref _totalEntitiesFailed)
+                // ✅ Base properties (Timestamp, IsCancelled, HubMethod) auto-populated by factory
+                // ✅ Validation built-in
+                // ✅ Consistent naming enforced
+            });
 
             await _progressEventPublisher.PublishMigrationProgressAsync(progressEvent, cancellationToken);
         }

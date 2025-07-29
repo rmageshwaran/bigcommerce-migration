@@ -2,6 +2,7 @@ using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Logging;
 using BigCommerce.Migration.Core.Models;
 using BigCommerce.Migration.Core.Interfaces;
+using BigCommerce.Migration.Core.Services;
 using BigCommerce.Migration.Orchestration.Models;
 using BigCommerce.Migration.Orchestration.Activities;
 using BigCommerce.Migration.Orchestration.Services;
@@ -16,6 +17,7 @@ public class EntityMigrationOrchestrator
 {
     private readonly ILogger<EntityMigrationOrchestrator> _logger;
     private readonly IProgressEventPublisher _progressEventPublisher;
+    private readonly ISignalREventFactory _signalREventFactory; // 🎯 CENTRALIZED SIGNALR: Factory for consistent event creation
     private readonly IParallelBatchProcessingPipeline _parallelPipeline;
 
     // Default batch sizes by entity type [[memory:2322834]]
@@ -32,10 +34,12 @@ public class EntityMigrationOrchestrator
     public EntityMigrationOrchestrator(
         ILogger<EntityMigrationOrchestrator> logger, 
         IProgressEventPublisher progressEventPublisher,
+        ISignalREventFactory signalREventFactory, // 🎯 CENTRALIZED SIGNALR: Factory for consistent event creation
         IParallelBatchProcessingPipeline parallelPipeline)
     {
         _logger = logger;
         _progressEventPublisher = progressEventPublisher;
+        _signalREventFactory = signalREventFactory ?? throw new ArgumentNullException(nameof(signalREventFactory)); // 🎯 CENTRALIZED SIGNALR: Store factory reference
         _parallelPipeline = parallelPipeline;
     }
 
@@ -319,16 +323,19 @@ public class EntityMigrationOrchestrator
         // Initialize enhanced progress tracking for this entity via queue event
         try
         {
-            var startEvent = new EntityProgressEvent
+            // ✅ CENTRALIZED SIGNALR: Use factory for consistent event creation with auto-populated base properties
+            var startEvent = _signalREventFactory.CreateEntityProgress(request.MigrationId, new EntityProgressOptions
             {
-                MigrationId = request.MigrationId,
                 EntityType = request.EntityType,
                 Status = "started",
                 TotalCount = result.TotalEntities,
                 ProcessedCount = 0,
-                FailureCount = 0,
                 ProcessingTime = TimeSpan.Zero
-            };
+                // ✅ Base properties (Timestamp, IsCancelled, HubMethod) auto-populated by factory
+                // ✅ SuccessCount/FailureCount calculated from ProcessedCount/TotalCount  
+                // ✅ Validation built-in
+                // ✅ Consistent naming enforced
+            });
 
             await _progressEventPublisher.PublishEntityProgressAsync(startEvent);
         }
@@ -398,15 +405,16 @@ public class EntityMigrationOrchestrator
             // Report failure via existing error event system
             try
             {
-                var errorEvent = new ErrorProgressEvent
+                // ✅ CENTRALIZED SIGNALR: Use factory for consistent event creation with auto-populated base properties
+                var errorEvent = _signalREventFactory.CreateErrorProgress(request.MigrationId, new ErrorProgressOptions
                 {
-                    MigrationId = request.MigrationId,
+                    ErrorMessage = ex.Message,
                     EntityType = request.EntityType,
-                    BatchNumber = 0,
-                    Message = ex.Message,
-                    Details = ex.ToString(),
-                    Timestamp = context.CurrentUtcDateTime
-                };
+                    Exception = ex.ToString()
+                    // ✅ Base properties (Timestamp, IsCancelled, HubMethod) auto-populated by factory
+                    // ✅ Validation built-in
+                    // ✅ Consistent naming enforced
+                });
 
                 await _progressEventPublisher.PublishErrorAsync(errorEvent);
             }
@@ -505,9 +513,9 @@ public class EntityMigrationOrchestrator
                 // Step 1: Start enhanced batch tracking via queue event
                 try
                 {
-                    var batchProgressEvent = new BatchProgressEvent
+                    // ✅ CENTRALIZED SIGNALR: Use factory for consistent event creation with auto-populated base properties
+                    var batchProgressEvent = _signalREventFactory.CreateBatchProgress(request.MigrationId, new BatchProgressOptions
                     {
-                        MigrationId = request.MigrationId,
                         EntityType = request.EntityType,
                         BatchNumber = batchNumber,
                         TotalBatches = batches.Count,
@@ -516,7 +524,10 @@ public class EntityMigrationOrchestrator
                         FailedCount = 0,
                         Status = "started",
                         ProcessingTime = TimeSpan.Zero
-                    };
+                        // ✅ Base properties (Timestamp, IsCancelled, HubMethod) auto-populated by factory
+                        // ✅ Validation built-in
+                        // ✅ Consistent naming enforced
+                    });
 
                     await _progressEventPublisher.PublishBatchProgressAsync(batchProgressEvent);
                 }
@@ -540,9 +551,9 @@ public class EntityMigrationOrchestrator
                 // Step 5: Complete batch tracking with results via queue event
                 try
                 {
-                    var batchProgressEvent = new BatchProgressEvent
+                    // ✅ CENTRALIZED SIGNALR: Use factory for consistent event creation with auto-populated base properties
+                    var batchProgressEvent = _signalREventFactory.CreateBatchProgress(request.MigrationId, new BatchProgressOptions
                     {
-                        MigrationId = request.MigrationId,
                         EntityType = request.EntityType,
                         BatchNumber = batchNumber,
                         TotalBatches = batches.Count,
@@ -551,7 +562,10 @@ public class EntityMigrationOrchestrator
                         FailedCount = batchResult.FailedEntities,
                         Status = batchResult.FailedEntities > 0 ? "completed_with_errors" : "completed",
                         ProcessingTime = batchDuration
-                    };
+                        // ✅ Base properties (Timestamp, IsCancelled, HubMethod) auto-populated by factory
+                        // ✅ Validation built-in
+                        // ✅ Consistent naming enforced
+                    });
 
                     await _progressEventPublisher.PublishBatchProgressAsync(batchProgressEvent);
                 }
@@ -585,15 +599,16 @@ public class EntityMigrationOrchestrator
                 // Report batch failure
                 try
                 {
-                    var errorEvent = new ErrorProgressEvent
+                    // ✅ CENTRALIZED SIGNALR: Use factory for consistent event creation with auto-populated base properties
+                    var errorEvent = _signalREventFactory.CreateErrorProgress(request.MigrationId, new ErrorProgressOptions
                     {
-                        MigrationId = request.MigrationId,
+                        ErrorMessage = ex.Message,
                         EntityType = request.EntityType,
-                        BatchNumber = batchNumber,
-                        Message = ex.Message,
-                        Details = ex.ToString(),
-                        Timestamp = context.CurrentUtcDateTime
-                    };
+                        Exception = ex.ToString()
+                        // ✅ Base properties (Timestamp, IsCancelled, HubMethod) auto-populated by factory
+                        // ✅ Validation built-in
+                        // ✅ Consistent naming enforced
+                    });
 
                     await _progressEventPublisher.PublishErrorAsync(errorEvent);
                 }
@@ -679,25 +694,27 @@ public class EntityMigrationOrchestrator
             // Publish enhanced entity progress via queue event
             try
             {
-                var entityProgressEvent = new EntityProgressEvent
+                // ✅ CENTRALIZED SIGNALR: Use factory for consistent event creation with auto-populated base properties
+                var entityProgressEvent = _signalREventFactory.CreateEntityProgress(request.MigrationId, new EntityProgressOptions
                 {
-                    MigrationId = request.MigrationId,
                     EntityType = request.EntityType,
                     TotalCount = result.TotalEntities,
                     ProcessedCount = result.ProcessedEntities,
-                    SuccessCount = result.SuccessfulEntities,
-                    FailureCount = result.FailedEntities,
                     Status = currentBatch >= totalBatches ? "completed" : "processing"
-                };
+                    // ✅ Base properties (Timestamp, IsCancelled, HubMethod) auto-populated by factory
+                    // ✅ SuccessCount/FailureCount calculated from ProcessedCount/TotalCount
+                    // ✅ Validation built-in
+                    // ✅ Consistent naming enforced
+                });
 
                 await _progressEventPublisher.PublishEntityProgressAsync(entityProgressEvent);
 
                 // Also publish batch progress if we have batch information
                 if (currentBatch > 0)
                 {
-                    var batchProgressEvent = new BatchProgressEvent
+                    // ✅ CENTRALIZED SIGNALR: Use factory for consistent event creation with auto-populated base properties
+                    var batchProgressEvent = _signalREventFactory.CreateBatchProgress(request.MigrationId, new BatchProgressOptions
                     {
-                        MigrationId = request.MigrationId,
                         EntityType = request.EntityType,
                         BatchNumber = currentBatch,
                         TotalBatches = totalBatches,
@@ -706,7 +723,10 @@ public class EntityMigrationOrchestrator
                         FailedCount = result.FailedEntities,
                         Status = currentBatch >= totalBatches ? "completed" : "processing",
                         ProcessingTime = TimeSpan.FromSeconds(1) // Approximate
-                    };
+                        // ✅ Base properties (Timestamp, IsCancelled, HubMethod) auto-populated by factory
+                        // ✅ Validation built-in
+                        // ✅ Consistent naming enforced
+                    });
 
                     await _progressEventPublisher.PublishBatchProgressAsync(batchProgressEvent);
                 }
@@ -757,16 +777,18 @@ public class EntityMigrationOrchestrator
             // Publish entity progress via queue event
             try
             {
-                var entityProgressEvent = new EntityProgressEvent
+                // ✅ CENTRALIZED SIGNALR: Use factory for consistent event creation with auto-populated base properties
+                var entityProgressEvent = _signalREventFactory.CreateEntityProgress(request.MigrationId, new EntityProgressOptions
                 {
-                    MigrationId = request.MigrationId,
                     EntityType = request.EntityType,
                     TotalCount = result.TotalEntities,
                     ProcessedCount = result.ProcessedEntities,
-                    SuccessCount = result.SuccessfulEntities,
-                    FailureCount = result.FailedEntities,
                     Status = currentBatch >= totalBatches ? "completed" : "processing"
-                };
+                    // ✅ Base properties (Timestamp, IsCancelled, HubMethod) auto-populated by factory
+                    // ✅ SuccessCount/FailureCount calculated from ProcessedCount/TotalCount
+                    // ✅ Validation built-in
+                    // ✅ Consistent naming enforced
+                });
 
                 await _progressEventPublisher.PublishEntityProgressAsync(entityProgressEvent);
             }

@@ -1,5 +1,6 @@
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
+using BigCommerce.Migration.Core.Services;
 using BigCommerce.Migration.Infrastructure.Services;
 using BigCommerce.Migration.Functions.Services;
 using BigCommerce.Migration.Functions.Middleware;
@@ -482,8 +483,9 @@ public static class ServiceCollectionExtensions
         {
             var logger = serviceProvider.GetRequiredService<ILogger<ProgressTracker>>();
             var progressEventPublisher = serviceProvider.GetRequiredService<IProgressEventPublisher>();
+            var signalREventFactory = serviceProvider.GetRequiredService<ISignalREventFactory>(); // 🎯 CENTRALIZED SIGNALR: Factory for consistent event creation
             var storageService = serviceProvider.GetService<IMigrationStorageService>(); // Optional dependency
-            return new ProgressTracker(logger, progressEventPublisher, storageService);
+            return new ProgressTracker(logger, progressEventPublisher, signalREventFactory, storageService);
         });
 
         // Register entity processing services (newly created during refactoring)
@@ -504,6 +506,11 @@ public static class ServiceCollectionExtensions
         
         // Register progress queue service for progress event publishing (separate from migration queues)
         services.AddSingleton<IProgressQueueService, AzureProgressQueueService>();
+        
+        // 🎯 **CENTRALIZED SIGNALR SERVICES** (Consistency & Validation)
+        // Single source of truth for all SignalR event creation and messaging
+        services.AddSingleton<ISignalREventFactory, SignalREventFactory>();
+        services.AddSingleton<ISignalRMessageConverter, SignalRMessageConverter>();
 
         // ✅ **P2.5: Phase 2 Enhanced Parallel Processing Pipeline** (Required for 17.0x throughput)
         // These services were moved from Orchestration project to ensure proper DI resolution

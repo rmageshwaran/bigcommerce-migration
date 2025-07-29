@@ -193,6 +193,9 @@ namespace BigCommerce.Migration.Functions.Functions
                     "entity" => JsonSerializer.Deserialize<EntityProgressEvent>(queueMessage ?? string.Empty, options),
                     "error" => JsonSerializer.Deserialize<ErrorProgressEvent>(queueMessage ?? string.Empty, options),
                     "status" => JsonSerializer.Deserialize<StatusProgressEvent>(queueMessage ?? string.Empty, options),
+                    "subbatch-started" => JsonSerializer.Deserialize<SubBatchStartedEvent>(queueMessage ?? string.Empty, options),
+                    "subbatch-completed" => JsonSerializer.Deserialize<SubBatchCompletedEvent>(queueMessage ?? string.Empty, options),
+                    "subbatch-progress" => JsonSerializer.Deserialize<SubBatchMigrationProgressEvent>(queueMessage ?? string.Empty, options),
                     _ => null
                 };
 

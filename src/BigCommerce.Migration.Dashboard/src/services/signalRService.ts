@@ -134,13 +134,13 @@ export class SignalRService {
       overallProgressPercentage: overallProgress,
       entityProgress: backendData.EntityProgress || backendData.entityProgress || {},
       currentPhase: backendData.CurrentPhase || backendData.currentPhase || 'Processing',
-      currentEntity: backendData.CurrentEntity || backendData.currentEntity || 'categories',
+      currentEntity: backendData.CurrentEntity || backendData.currentEntity || backendData.CurrentEntityType || 'entities',
       entitiesPerSecond,
       errorRate: processedEntities > 0 ? (failedEntities / processedEntities) * 100 : 0,
       
       // Enhanced nested structures for detailed dashboard
       currentProcessing: {
-        currentEntity: backendData.CurrentEntity || backendData.currentEntity || 'categories',
+        currentEntity: backendData.CurrentEntity || backendData.currentEntity || backendData.CurrentEntityType || 'entities',
         currentActivity: backendData.CurrentActivity || backendData.currentActivity || 'Processing entities',
         currentBatchNumber: backendData.CurrentBatchNumber || backendData.currentBatchNumber || Math.ceil(processedEntities / 50) || 1,
         currentBatch: {
@@ -167,6 +167,94 @@ export class SignalRService {
         averageProcessingSpeed: entitiesPerSecond,
         performanceTrend: entitiesPerSecond > 5 ? 'improving' : entitiesPerSecond > 2 ? 'stable' : 'declining'
       }
+    };
+  }
+
+  /**
+   * Transform SubBatchStarted event from backend format to frontend format
+   */
+  private transformSubBatchStartedEvent(backendEvent: any): any {
+    return {
+      migrationId: backendEvent.MigrationId || backendEvent.migrationId,
+      parentBatchNumber: backendEvent.ParentBatchNumber || backendEvent.parentBatchNumber,
+      subBatchNumber: backendEvent.SubBatchNumber || backendEvent.subBatchNumber,
+      totalSubBatches: backendEvent.TotalSubBatches || backendEvent.totalSubBatches,
+      entityType: backendEvent.EntityType || backendEvent.entityType,
+      entitiesInBatch: backendEvent.EntitiesInBatch || backendEvent.entitiesInBatch,
+      timestamp: new Date(backendEvent.Timestamp || backendEvent.timestamp || Date.now()),
+      // UI event list format
+      type: 'SubBatchStarted',
+      message: `Sub-batch ${backendEvent.SubBatchNumber || 1}/${backendEvent.TotalSubBatches || 1} started for ${backendEvent.EntityType || 'entities'}`,
+      id: `subbatch-started-${backendEvent.ParentBatchNumber || 1}-${backendEvent.SubBatchNumber || 1}-${Date.now()}`
+    };
+  }
+
+  /**
+   * Transform SubBatchCompleted event from backend format to frontend format
+   */
+  private transformSubBatchCompletedEvent(backendEvent: any): any {
+    const successRate = backendEvent.TotalEntities > 0 
+      ? ((backendEvent.SuccessfulEntities || 0) / backendEvent.TotalEntities * 100).toFixed(1)
+      : '0.0';
+    
+    // 🔍 DEBUG: Log the backend event data to see what we're receiving
+    console.log('🎯 DEBUG: SubBatchCompleted backend event data:', {
+      CumulativeSuccessfulEntities: backendEvent.CumulativeSuccessfulEntities,
+      CumulativeFailedEntities: backendEvent.CumulativeFailedEntities,
+      TotalMigrationEntities: backendEvent.TotalMigrationEntities,
+      ProgressPercentage: backendEvent.ProgressPercentage
+    });
+    
+    return {
+      migrationId: backendEvent.MigrationId || backendEvent.migrationId,
+      parentBatchNumber: backendEvent.ParentBatchNumber || backendEvent.parentBatchNumber,
+      subBatchNumber: backendEvent.SubBatchNumber || backendEvent.subBatchNumber,
+      totalSubBatches: backendEvent.TotalSubBatches || backendEvent.totalSubBatches,
+      successfulEntities: backendEvent.SuccessfulEntities || 0,
+      failedEntities: backendEvent.FailedEntities || 0,
+      totalEntities: backendEvent.TotalEntities || 0,
+      entityType: backendEvent.EntityType || backendEvent.entityType,
+      processingTime: backendEvent.ProcessingTime || backendEvent.processingTime,
+      completedAt: new Date(backendEvent.CompletedAt || backendEvent.completedAt || Date.now()),
+      errors: backendEvent.Errors || backendEvent.errors || [],
+      cumulativeSuccessfulEntities: backendEvent.CumulativeSuccessfulEntities || 0,
+      cumulativeFailedEntities: backendEvent.CumulativeFailedEntities || 0,
+      totalMigrationEntities: backendEvent.TotalMigrationEntities || 0,
+      progressPercentage: backendEvent.ProgressPercentage || 0,
+      estimatedTimeRemaining: backendEvent.EstimatedTimeRemaining || backendEvent.estimatedTimeRemaining || '00:00:00',
+      timestamp: new Date(backendEvent.Timestamp || backendEvent.timestamp || Date.now()),
+      // UI event list format
+      type: 'SubBatchCompleted',
+      message: `Sub-batch ${backendEvent.SubBatchNumber || 1}/${backendEvent.TotalSubBatches || 1} completed: ${backendEvent.SuccessfulEntities || 0}/${backendEvent.TotalEntities || 0} ${backendEvent.EntityType || 'entities'} (${successRate}% success)`,
+      id: `subbatch-completed-${backendEvent.ParentBatchNumber || 1}-${backendEvent.SubBatchNumber || 1}-${Date.now()}`
+    };
+  }
+
+  /**
+   * Transform SubBatchMigrationProgressEvent from backend format to frontend format
+   */
+  private transformSubBatchProgressEvent(backendEvent: any): any {
+    return {
+      migrationId: backendEvent.MigrationId || backendEvent.migrationId,
+      totalPages: backendEvent.TotalPages || backendEvent.totalPages || 0,
+      completedPages: backendEvent.CompletedPages || backendEvent.completedPages || 0,
+      totalSubBatches: backendEvent.TotalSubBatches || backendEvent.totalSubBatches || 0,
+      completedSubBatches: backendEvent.CompletedSubBatches || backendEvent.completedSubBatches || 0,
+      totalSuccessfulEntities: backendEvent.TotalSuccessfulEntities || backendEvent.totalSuccessfulEntities || 0,
+      totalFailedEntities: backendEvent.TotalFailedEntities || backendEvent.totalFailedEntities || 0,
+      totalExpectedEntities: backendEvent.TotalExpectedEntities || backendEvent.totalExpectedEntities || 0,
+      processingRate: backendEvent.ProcessingRate || backendEvent.processingRate || 0,
+      overallProgressPercentage: backendEvent.OverallProgressPercentage || backendEvent.overallProgressPercentage || 0,
+      estimatedTimeRemaining: backendEvent.EstimatedTimeRemaining || backendEvent.estimatedTimeRemaining,
+      updatedAt: new Date(backendEvent.UpdatedAt || backendEvent.updatedAt || Date.now()),
+      elapsedTime: backendEvent.ElapsedTime || backendEvent.elapsedTime,
+      recentErrors: backendEvent.RecentErrors || backendEvent.recentErrors || [],
+      performanceMetrics: backendEvent.PerformanceMetrics || backendEvent.performanceMetrics || {},
+      timestamp: new Date(backendEvent.Timestamp || backendEvent.timestamp || Date.now()),
+      // UI event list format
+      type: 'SubBatchProgress',
+      message: `Migration progress: ${(backendEvent.OverallProgressPercentage || 0).toFixed(1)}% - ${backendEvent.CompletedSubBatches || 0}/${backendEvent.TotalSubBatches || 0} sub-batches completed`,
+      id: `subbatch-progress-${backendEvent.CompletedSubBatches || 0}-${Date.now()}`
     };
   }
 
@@ -261,6 +349,34 @@ export class SignalRService {
         details: errorEvent.Details,
         timestamp: new Date() 
       });
+    });
+
+    // Sub-batch Progress Events (New configurable sub-batch optimization)
+    this.connection.on('SubBatchStarted', (subBatchEvent: any) => {
+      console.log('🎯 DEBUG: Received SubBatchStarted:', subBatchEvent);
+      const transformedEvent = this.transformSubBatchStartedEvent(subBatchEvent);
+      console.log('🎯 DEBUG: Transformed SubBatchStarted:', transformedEvent);
+      this.notifyListeners('subBatchStarted', transformedEvent);
+      // Also notify as a general event for UI event lists
+      this.notifyListeners('DetailedProgress', transformedEvent);
+    });
+
+    this.connection.on('SubBatchCompleted', (subBatchEvent: any) => {
+      console.log('🎯 DEBUG: Received SubBatchCompleted:', subBatchEvent);
+      const transformedEvent = this.transformSubBatchCompletedEvent(subBatchEvent);
+      console.log('🎯 DEBUG: Transformed SubBatchCompleted:', transformedEvent);
+      this.notifyListeners('subBatchCompleted', transformedEvent);
+      // Also notify as a general event for UI event lists
+      this.notifyListeners('DetailedProgress', transformedEvent);
+    });
+
+    this.connection.on('SubBatchMigrationProgress', (subBatchProgressEvent: any) => {
+      console.log('🎯 DEBUG: Received SubBatchMigrationProgress:', subBatchProgressEvent);
+      const transformedEvent = this.transformSubBatchProgressEvent(subBatchProgressEvent);
+      console.log('🎯 DEBUG: Transformed SubBatchMigrationProgress:', transformedEvent);
+      this.notifyListeners('subBatchProgress', transformedEvent);
+      // Also notify as a general event for UI event lists
+      this.notifyListeners('DetailedProgress', transformedEvent);
     });
 
     // Legacy event handlers (keeping for backward compatibility during migration)

@@ -2,6 +2,7 @@ using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Logging;
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
+using BigCommerce.Migration.Core.Services;
 using BigCommerce.Migration.Orchestration.Models;
 using BigCommerce.Migration.Orchestration.Services;
 using System.Threading;
@@ -19,6 +20,7 @@ public class ProcessParallelBatchesActivity
     private readonly IParallelBatchProcessingPipeline _parallelPipeline;
     private readonly IProgressEventPublisher _progressEventPublisher;
     private readonly ParallelProcessingConfiguration _parallelConfig; // 🎯 SUB-BATCH CONFIG: Added for configurable sub-batch settings
+    private readonly ISignalREventFactory _signalREventFactory; // 🎯 CENTRALIZED SIGNALR: Factory for consistent event creation
     
     // ✅ ADD REAL ENTITY PROCESSING SERVICES
     private readonly IEntityFetchService _entityFetchService;
@@ -27,6 +29,9 @@ public class ProcessParallelBatchesActivity
     private readonly IEntityMappingService _entityMappingService;
     private readonly IEntityErrorHandlingService _errorHandlingService;
     private readonly IMigrationStorageService _migrationStorageService;
+    
+    // 🎯 REAL-TIME PROGRESS: Store total migration entities for accurate progress calculation
+    private int _totalMigrationEntities;
 
     public ProcessParallelBatchesActivity(
         ILogger<ProcessParallelBatchesActivity> logger,
@@ -34,6 +39,7 @@ public class ProcessParallelBatchesActivity
         IParallelBatchProcessingPipeline parallelPipeline,
         IProgressEventPublisher progressEventPublisher,
         ParallelProcessingConfiguration parallelConfig, // 🎯 SUB-BATCH CONFIG: Added configuration injection
+        ISignalREventFactory signalREventFactory, // 🎯 CENTRALIZED SIGNALR: Factory for consistent event creation
         IEntityFetchService entityFetchService,
         IEntityTransformService entityTransformService,
         IEntityCreateService entityCreateService,
@@ -46,6 +52,7 @@ public class ProcessParallelBatchesActivity
         _parallelPipeline = parallelPipeline;
         _progressEventPublisher = progressEventPublisher;
         _parallelConfig = parallelConfig; // 🎯 SUB-BATCH CONFIG: Store configuration reference
+        _signalREventFactory = signalREventFactory; // 🎯 CENTRALIZED SIGNALR: Store factory reference
         _entityFetchService = entityFetchService;
         _entityTransformService = entityTransformService;
         _entityCreateService = entityCreateService;
@@ -204,6 +211,9 @@ public class ProcessParallelBatchesActivity
                 totalCount = request.EntityIds.Count;
             }
             
+            // 🎯 REAL-TIME PROGRESS: Store total migration entities for accurate progress calculation
+            _totalMigrationEntities = totalCount;
+            
             // 🎯 PROPER PAGE-BY-PAGE CALCULATION: Create batches based on page size, not arbitrary small batches
             // For 192 brands with page size 50: Create 4 batches (50+50+50+42)
             totalBatches = (int)Math.Ceiling((double)totalCount / batchSize);
@@ -216,6 +226,9 @@ public class ProcessParallelBatchesActivity
             // For traditional entity ID-based strategies, use EntityIds count
             totalCount = request.EntityIds.Count;
             totalBatches = (int)Math.Ceiling((double)totalCount / batchSize);
+            
+            // 🎯 REAL-TIME PROGRESS: Store total migration entities for accurate progress calculation
+            _totalMigrationEntities = totalCount;
         }
         
         _logger.LogInformation("🔧 [PARALLEL] Calculated {TotalBatches} batches for {TotalCount} {EntityType} entities (batch size: {BatchSize})", 
@@ -1325,17 +1338,18 @@ public class ProcessParallelBatchesActivity
     {
         try
         {
-            var startedEvent = new SubBatchStartedEvent
+            // ✅ CENTRALIZED SIGNALR: Use factory for consistent event creation with auto-populated base properties
+            var startedEvent = _signalREventFactory.CreateSubBatchStarted(subBatch.MigrationId, new SubBatchStartedOptions
             {
-                MigrationId = subBatch.MigrationId,
                 ParentBatchNumber = subBatch.ParentBatchNumber,
                 SubBatchNumber = subBatch.SubBatchNumber,
                 TotalSubBatches = (int)Math.Ceiling((double)totalPageEntities / 5), // 10 sub-batches for 50 entities
-                EntitiesInSubBatch = subBatch.Entities.Count,
-                MaxConcurrency = subBatch.MaxConcurrency,
-                EntityType = subBatch.EntityType,
-                StartedAt = DateTime.UtcNow
-            };
+                EntitiesInBatch = subBatch.Entities.Count,
+                EntityType = subBatch.EntityType
+                // ✅ Base properties (Timestamp, IsCancelled, HubMethod) auto-populated by factory
+                // ✅ Validation built-in
+                // ✅ Consistent naming enforced
+            });
 
             await _progressEventPublisher.PublishAsync(startedEvent, cancellationToken);
             
@@ -1373,9 +1387,9 @@ public class ProcessParallelBatchesActivity
                 estimatedTimeRemaining = TimeSpan.FromSeconds(remainingSubBatches * avgTimePerSubBatch);
             }
 
-            var completedEvent = new SubBatchCompletedEvent
+            // ✅ CENTRALIZED SIGNALR: Use factory for consistent event creation with auto-populated base properties
+            var completedEvent = _signalREventFactory.CreateSubBatchCompleted(subBatchResult.MigrationId ?? string.Empty, new SubBatchCompletedOptions
             {
-                MigrationId = subBatchResult.MigrationId ?? string.Empty,
                 ParentBatchNumber = subBatchResult.ParentBatchNumber,
                 SubBatchNumber = subBatchResult.SubBatchNumber,
                 TotalSubBatches = totalSubBatches,
@@ -1388,16 +1402,25 @@ public class ProcessParallelBatchesActivity
                 Errors = subBatchResult.Errors,
                 CumulativeSuccessfulEntities = overallResult.SuccessfulEntities,
                 CumulativeFailedEntities = overallResult.FailedEntities,
-                TotalMigrationEntities = totalPageEntities,
+                // 🎯 REAL-TIME PROGRESS FIX: Use stored total migration entities count (192) instead of current page count (50)
+                TotalMigrationEntities = _totalMigrationEntities,
                 ProgressPercentage = progressPercentage,
                 EstimatedTimeRemaining = estimatedTimeRemaining
-            };
+                // ✅ Base properties (Timestamp, IsCancelled, HubMethod) auto-populated by factory
+                // ✅ Validation built-in
+                // ✅ Consistent naming enforced
+            });
 
+            // 🔍 DEBUG: Log cumulative values to verify they're set correctly
+            _logger.LogInformation("🎯 [SUB-BATCH-COMPLETED] Event Data - Cumulative: {CumulativeSuccessful}/{CumulativeFailed}, Total Migration: {TotalMigration}, Progress: {Progress:F1}%", 
+                completedEvent.CumulativeSuccessfulEntities, completedEvent.CumulativeFailedEntities, 
+                completedEvent.TotalMigrationEntities, completedEvent.ProgressPercentage);
+            
             await _progressEventPublisher.PublishAsync(completedEvent, cancellationToken);
             
-            _logger.LogDebug("📡 [PROGRESS-EVENT] Sub-batch completed: Page {ParentBatch}, Sub-batch {SubBatch}/{Total}, Progress: {Progress:F1}%, Cumulative: {Successful}/{Total}", 
+            _logger.LogDebug("📡 [PROGRESS-EVENT] Sub-batch completed: Page {ParentBatch}, Sub-batch {SubBatch}/{Total}, Progress: {Progress:F1}%, Cumulative: {Successful}/{Failed}", 
                 subBatchResult.ParentBatchNumber, subBatchResult.SubBatchNumber, totalSubBatches, progressPercentage, 
-                overallResult.SuccessfulEntities, totalPageEntities);
+                overallResult.SuccessfulEntities, overallResult.FailedEntities);
         }
         catch (Exception ex)
         {

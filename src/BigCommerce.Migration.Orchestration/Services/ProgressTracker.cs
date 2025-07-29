@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
+using BigCommerce.Migration.Core.Services;
 using System.Collections.Concurrent;
 
 namespace BigCommerce.Migration.Orchestration.Services;
@@ -15,6 +16,7 @@ public class ProgressTracker : IProgressTracker
     private readonly ConcurrentDictionary<string, MigrationProgress> _progressCache;
     private readonly object _lock = new object();
     private readonly IProgressEventPublisher _progressEventPublisher;
+    private readonly ISignalREventFactory _signalREventFactory; // 🎯 CENTRALIZED SIGNALR: Factory for consistent event creation
     private readonly IMigrationStorageService? _storageService;
     
     /// <summary>
@@ -22,14 +24,17 @@ public class ProgressTracker : IProgressTracker
     /// </summary>
     /// <param name="logger">Logger instance</param>
     /// <param name="progressEventPublisher">Progress event publisher for queue-based SignalR broadcasting</param>
+    /// <param name="signalREventFactory">SignalR event factory for consistent event creation</param>
     /// <param name="storageService">Storage service for persisting progress</param>
     public ProgressTracker(
         ILogger<ProgressTracker> logger, 
         IProgressEventPublisher progressEventPublisher,
+        ISignalREventFactory signalREventFactory, // 🎯 CENTRALIZED SIGNALR: Factory for consistent event creation
         IMigrationStorageService? storageService = null)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _progressEventPublisher = progressEventPublisher ?? throw new ArgumentNullException(nameof(progressEventPublisher));
+        _signalREventFactory = signalREventFactory ?? throw new ArgumentNullException(nameof(signalREventFactory)); // 🎯 CENTRALIZED SIGNALR: Store factory reference
         _progressCache = new ConcurrentDictionary<string, MigrationProgress>();
         _storageService = storageService; // Optional for backward compatibility
     }
@@ -602,9 +607,9 @@ public class ProgressTracker : IProgressTracker
             _logger.LogInformation("📊 [PROGRESS-TRACKER] Publishing migration progress event for MigrationId: {MigrationId}, Progress: {Progress}%, Status: {Status}, Entities: {ProcessedEntities}/{TotalEntities}", 
                 migrationId, progress.OverallProgressPercentage, progress.Status, progress.ProcessedEntities, progress.TotalEntities);
 
-            var progressEvent = new MigrationProgressEvent
+            // ✅ CENTRALIZED SIGNALR: Use factory for consistent event creation with auto-populated base properties
+            var progressEvent = _signalREventFactory.CreateMigrationProgress(migrationId, new MigrationProgressOptions
             {
-                MigrationId = migrationId,
                 OverallProgress = progress.OverallProgressPercentage,
                 Status = progress.Status,
                 TotalEntities = progress.TotalEntities,
@@ -616,7 +621,10 @@ public class ProgressTracker : IProgressTracker
                 IsCancelled = progress.IsCancelled ?? false,
                 CancellationReason = progress.CancellationReason,
                 CancelledAt = progress.CancelledAt
-            };
+                // ✅ Base properties (Timestamp, HubMethod) auto-populated by factory
+                // ✅ Validation built-in
+                // ✅ Consistent naming enforced
+            });
 
             _logger.LogInformation("📡 [PROGRESS-TRACKER] Calling ProgressEventPublisher for MigrationId: {MigrationId}", migrationId);
             await _progressEventPublisher.PublishMigrationProgressAsync(progressEvent, cancellationToken);
@@ -640,21 +648,23 @@ public class ProgressTracker : IProgressTracker
         {
             var entityProgress = progress.EntityProgress.ContainsKey(entityType) ? progress.EntityProgress[entityType] : null;
             
-            var entityEvent = new EntityProgressEvent
+            // ✅ CENTRALIZED SIGNALR: Use factory for consistent event creation with auto-populated base properties
+            var entityEvent = _signalREventFactory.CreateEntityProgress(migrationId, new EntityProgressOptions
             {
-                MigrationId = migrationId,
                 EntityType = entityType,
                 TotalCount = entityProgress?.TotalCount ?? 0,
                 ProcessedCount = entityProgress?.ProcessedCount ?? 0,
-                SuccessCount = entityProgress?.SuccessCount ?? 0,
-                FailureCount = entityProgress?.FailureCount ?? 0,
                 Status = entityProgress?.Status ?? "starting",
                 ProcessingTime = entityProgress?.ProcessingTime,
                 // Phase 4.2: Include soft cancellation state in entity progress event
                 IsCancelled = progress.IsCancelled ?? false,
                 CancellationReason = progress.CancellationReason,
                 CancelledAt = progress.CancelledAt
-            };
+                // ✅ Base properties (Timestamp, HubMethod) auto-populated by factory
+                // ✅ SuccessCount/FailureCount calculated from ProcessedCount/TotalCount
+                // ✅ Validation built-in
+                // ✅ Consistent naming enforced
+            });
 
             await _progressEventPublisher.PublishEntityProgressAsync(entityEvent, cancellationToken);
         }
@@ -677,9 +687,9 @@ public class ProgressTracker : IProgressTracker
             var progress = GetOrCreateProgress(migrationId);
             var entityProgress = progress.EntityProgress.ContainsKey(entityType) ? progress.EntityProgress[entityType] : null;
             
-            var batchEvent = new BatchProgressEvent
+            // ✅ CENTRALIZED SIGNALR: Use factory for consistent event creation with auto-populated base properties
+            var batchEvent = _signalREventFactory.CreateBatchProgress(migrationId, new BatchProgressOptions
             {
-                MigrationId = migrationId,
                 EntityType = entityType,
                 BatchNumber = batchNumber,
                 TotalBatches = 0, // This could be calculated if we track total batches
@@ -692,7 +702,10 @@ public class ProgressTracker : IProgressTracker
                 IsCancelled = progress.IsCancelled ?? false,
                 CancellationReason = progress.CancellationReason,
                 CancelledAt = progress.CancelledAt
-            };
+                // ✅ Base properties (Timestamp, HubMethod) auto-populated by factory
+                // ✅ Validation built-in
+                // ✅ Consistent naming enforced
+            });
 
             await _progressEventPublisher.PublishBatchProgressAsync(batchEvent, cancellationToken);
         }

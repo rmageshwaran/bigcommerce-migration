@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
+using BigCommerce.Migration.Core.Services;
 using Microsoft.Extensions.Logging;
 
 namespace BigCommerce.Migration.Infrastructure.Services;
@@ -29,6 +30,7 @@ public class EnhancedParallelProcessor : BigCommerce.Migration.Core.Interfaces.I
     #region Private Fields
 
     private readonly IDynamicRateLimiter _dynamicRateLimiter;
+    private readonly ISignalREventFactory _signalREventFactory; // 🎯 CENTRALIZED SIGNALR: Factory for consistent event creation
     private readonly ILogger<EnhancedParallelProcessor> _logger;
     private readonly IDateTimeProvider _dateTimeProvider;
     
@@ -68,10 +70,12 @@ public class EnhancedParallelProcessor : BigCommerce.Migration.Core.Interfaces.I
     /// </summary>
     public EnhancedParallelProcessor(
         IDynamicRateLimiter dynamicRateLimiter,
+        ISignalREventFactory signalREventFactory, // 🎯 CENTRALIZED SIGNALR: Factory for consistent event creation
         ILogger<EnhancedParallelProcessor> logger,
         IDateTimeProvider dateTimeProvider)
     {
         _dynamicRateLimiter = dynamicRateLimiter ?? throw new ArgumentNullException(nameof(dynamicRateLimiter));
+        _signalREventFactory = signalREventFactory ?? throw new ArgumentNullException(nameof(signalREventFactory)); // 🎯 CENTRALIZED SIGNALR: Store factory reference
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _dateTimeProvider = dateTimeProvider ?? throw new ArgumentNullException(nameof(dateTimeProvider));
 
@@ -696,7 +700,7 @@ public class EnhancedParallelProcessor : BigCommerce.Migration.Core.Interfaces.I
         IProgressEventPublisher? progressEventPublisher = null)
     {
         return new ParallelProgressAggregator(
-            migrationId, entityType, totalBatches, progressEventPublisher, _logger, _dateTimeProvider);
+            migrationId, entityType, totalBatches, progressEventPublisher, _signalREventFactory, _logger, _dateTimeProvider);
     }
 
     #endregion

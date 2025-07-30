@@ -22,6 +22,9 @@ public class ProcessParallelBatchesActivity
     private readonly ParallelProcessingConfiguration _parallelConfig; // 🎯 SUB-BATCH CONFIG: Added for configurable sub-batch settings
     private readonly ISignalREventFactory _signalREventFactory; // 🎯 CENTRALIZED SIGNALR: Factory for consistent event creation
     
+    // 🚨 GLOBAL COORDINATION: Aggregator will be created per migration, not injected
+    private IParallelProgressAggregator? _globalProgressAggregator;
+    
     // ✅ ADD REAL ENTITY PROCESSING SERVICES
     private readonly IEntityFetchService _entityFetchService;
     private readonly IEntityTransformService _entityTransformService;
@@ -218,6 +221,13 @@ public class ProcessParallelBatchesActivity
             // For 192 brands with page size 50: Create 4 batches (50+50+50+42)
             totalBatches = (int)Math.Ceiling((double)totalCount / batchSize);
             
+            // 🚨 GLOBAL COORDINATION: Initialize global progress aggregator for cross-batch tracking
+            _globalProgressAggregator = _parallelProcessor.CreateProgressAggregator(
+                request.MigrationId, request.EntityType, totalBatches, _progressEventPublisher, totalCount); // 🚨 FIX: Pass actual total entities
+            
+            _logger.LogInformation("🌐 [GLOBAL-COORDINATION] Initialized global progress aggregator for {EntityType} migration {MigrationId} with {TotalBatches} batches and {TotalEntities} entities", 
+                request.EntityType, request.MigrationId, totalBatches, totalCount);
+            
             _logger.LogInformation("🎯 [PARALLEL] OPTIMAL PARALLELISM: Creating {TotalBatches} pages of {PageSize} entities each for {TotalCount} {EntityType} - {Improvement}x faster than sequential!", 
                 totalBatches, batchSize, totalCount, request.EntityType, totalBatches);
         }
@@ -225,10 +235,18 @@ public class ProcessParallelBatchesActivity
         {
             // For traditional entity ID-based strategies, use EntityIds count
             totalCount = request.EntityIds.Count;
-            totalBatches = (int)Math.Ceiling((double)totalCount / batchSize);
             
             // 🎯 REAL-TIME PROGRESS: Store total migration entities for accurate progress calculation
             _totalMigrationEntities = totalCount;
+            
+            totalBatches = (int)Math.Ceiling((double)totalCount / batchSize);
+            
+            // 🚨 GLOBAL COORDINATION: Initialize global progress aggregator for cross-batch tracking
+            _globalProgressAggregator = _parallelProcessor.CreateProgressAggregator(
+                request.MigrationId, request.EntityType, totalBatches, _progressEventPublisher, totalCount); // 🚨 FIX: Pass actual total entities
+            
+            _logger.LogInformation("🌐 [GLOBAL-COORDINATION] Initialized global progress aggregator for {EntityType} migration {MigrationId} with {TotalBatches} batches and {TotalEntities} entities", 
+                request.EntityType, request.MigrationId, totalBatches, totalCount);
         }
         
         _logger.LogInformation("🔧 [PARALLEL] Calculated {TotalBatches} batches for {TotalCount} {EntityType} entities (batch size: {BatchSize})", 
@@ -312,6 +330,19 @@ public class ProcessParallelBatchesActivity
         _logger.LogInformation("🚀 [PARALLEL] ✅ COMPLETED: Parallel processing for {EntityType} in {Duration}ms - {Processed} entities processed for migration {MigrationId}", 
             request.EntityType, processingTime.TotalMilliseconds, 
             parallelResult.TotalEntitiesProcessed, request.MigrationId);
+
+        // 🚨 GLOBAL COORDINATION: Dispose of global progress aggregator
+        try
+        {
+            _globalProgressAggregator?.Dispose();
+            _logger.LogInformation("🌐 [GLOBAL-COORDINATION] Disposed global progress aggregator for {EntityType} migration {MigrationId}", 
+                request.EntityType, request.MigrationId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "⚠️ [GLOBAL-COORDINATION] Failed to dispose global progress aggregator for {EntityType} migration {MigrationId}", 
+                request.EntityType, request.MigrationId);
+        }
 
         return new BigCommerce.Migration.Core.Interfaces.BatchProcessingResult
         {
@@ -1174,18 +1205,44 @@ public class ProcessParallelBatchesActivity
         {
             var subBatch = subBatches[subBatchIndex];
             
-            // 🎯 PHASE 2: Send sub-batch started event
-            await SendSubBatchStartedEvent(subBatch, entities.Count, cancellationToken);
+            // 🚨 GLOBAL COORDINATION: Sub-batch started events now handled by global aggregator
+            // Individual sub-batch events removed to prevent UI warnings and conflicts
             
             var subBatchResult = await ProcessSingleSubBatch(subBatch, cancellationToken);
             
             // Update overall progress atomically
             overallResult.SuccessfulEntities += subBatchResult.SuccessfulEntities;
             overallResult.FailedEntities += subBatchResult.FailedEntities;
+            overallResult.TotalProcessed = overallResult.SuccessfulEntities + overallResult.FailedEntities;  // 🚨 FIX: Update cumulative processed count
             overallResult.Errors.AddRange(subBatchResult.Errors);
             
-            // 🎯 PHASE 2: Send granular progress update with cumulative totals
-            await SendSubBatchCompletedEvent(subBatchResult, overallResult, entities.Count, subBatches.Count, batch.EntityType, cancellationToken);
+            // 🔍 FIX VERIFICATION: Log TotalProcessed to verify it's cumulative (LOCAL to this batch)
+            _logger.LogInformation("🚨 [TOTALPROCESSED-FIX] Updated TotalProcessed: {TotalProcessed} (Successful: {Successful}, Failed: {Failed})", 
+                overallResult.TotalProcessed, overallResult.SuccessfulEntities, overallResult.FailedEntities);
+            
+            // 🚨 GLOBAL COORDINATION: Report to global aggregator instead of sending events directly
+            if (_globalProgressAggregator != null)
+            {
+                await _globalProgressAggregator.ReportSubBatchCompletionAsync(
+                    subBatchResult.ParentBatchNumber,
+                    subBatchResult.SubBatchNumber,
+                    subBatchResult.SuccessfulEntities,
+                    subBatchResult.FailedEntities,
+                    subBatchResult.ProcessingTime,
+                    subBatchResult.Errors,
+                    cancellationToken);
+                
+                _logger.LogInformation("🌐 [GLOBAL-COORDINATION] Reported sub-batch {ParentBatch}-{SubBatch} to global aggregator: {Successful}/{Total} entities", 
+                    subBatchResult.ParentBatchNumber, subBatchResult.SubBatchNumber, subBatchResult.SuccessfulEntities, subBatchResult.TotalEntities);
+            }
+            else
+            {
+                _logger.LogWarning("⚠️ [GLOBAL-COORDINATION] Global aggregator is null, falling back to direct event sending for sub-batch {ParentBatch}-{SubBatch}", 
+                    subBatchResult.ParentBatchNumber, subBatchResult.SubBatchNumber);
+                
+                // 🎯 FALLBACK: Send direct event if aggregator is not available
+                await SendSubBatchCompletedEvent(subBatchResult, overallResult, entities.Count, subBatches.Count, batch.EntityType, cancellationToken);
+            }
             
             _logger.LogInformation("🎯 [SUB-BATCH-{BatchId}] ✅ COMPLETED: Sub-batch {SubBatchNumber}/{TotalSubBatches} - {Successful}/{Total} successful", 
                 batchId, subBatchIndex + 1, subBatches.Count, subBatchResult.SuccessfulEntities, subBatchResult.TotalEntities);
@@ -1325,7 +1382,7 @@ public class ProcessParallelBatchesActivity
         return new BigCommerce.Migration.Core.Interfaces.BatchProcessingResult
         {
             BatchNumber = batch.BatchNumber,
-            TotalProcessed = totalEntities,
+            TotalProcessed = 0,  // 🚨 FIX: Start at 0, will be updated as sub-batches complete
             SuccessfulEntities = 0,
             FailedEntities = 0,
             ProcessingTime = TimeSpan.Zero,
@@ -1374,17 +1431,20 @@ public class ProcessParallelBatchesActivity
     {
         try
         {
-            // Calculate overall progress percentage
-            var completedSubBatches = subBatchResult.SubBatchNumber; // Current sub-batch number indicates how many are completed
-            var progressPercentage = (double)completedSubBatches / totalSubBatches * 100;
+            // 🎯 SYNC FIX: Calculate overall progress percentage based on entity counts, not sub-batches
+            // This ensures progress percentage matches entity count ratio (processed/total)
+            var progressPercentage = _totalMigrationEntities > 0 
+                ? (double)overallResult.SuccessfulEntities / _totalMigrationEntities * 100
+                : 0.0;
             
-            // Estimate time remaining based on current processing speed
+            // Estimate time remaining based on current processing speed and entity counts
             TimeSpan? estimatedTimeRemaining = null;
-            if (completedSubBatches > 0 && subBatchResult.ProcessingTime.TotalSeconds > 0)
+            if (overallResult.SuccessfulEntities > 0 && subBatchResult.ProcessingTime.TotalSeconds > 0)
             {
-                var remainingSubBatches = totalSubBatches - completedSubBatches;
-                var avgTimePerSubBatch = subBatchResult.ProcessingTime.TotalSeconds / 1; // Current sub-batch time
-                estimatedTimeRemaining = TimeSpan.FromSeconds(remainingSubBatches * avgTimePerSubBatch);
+                var remainingEntities = _totalMigrationEntities - overallResult.SuccessfulEntities;
+                var totalElapsedSeconds = subBatchResult.ProcessingTime.TotalSeconds; // Approximate total time
+                var entitiesPerSecond = overallResult.SuccessfulEntities / totalElapsedSeconds;
+                estimatedTimeRemaining = TimeSpan.FromSeconds(remainingEntities / entitiesPerSecond);
             }
 
             // ✅ CENTRALIZED SIGNALR: Use factory for consistent event creation with auto-populated base properties
@@ -1411,10 +1471,29 @@ public class ProcessParallelBatchesActivity
                 // ✅ Consistent naming enforced
             });
 
-            // 🔍 DEBUG: Log cumulative values to verify they're set correctly
+            // 🔍 ENHANCED DEBUG: Log detailed event data for SignalR message tracing
             _logger.LogInformation("🎯 [SUB-BATCH-COMPLETED] Event Data - Cumulative: {CumulativeSuccessful}/{CumulativeFailed}, Total Migration: {TotalMigration}, Progress: {Progress:F1}%", 
                 completedEvent.CumulativeSuccessfulEntities, completedEvent.CumulativeFailedEntities, 
                 completedEvent.TotalMigrationEntities, completedEvent.ProgressPercentage);
+            
+            _logger.LogInformation("📡 [SIGNALR-TRACE] OUTBOUND MESSAGE #{MessageNumber} - SubBatchCompleted: " +
+                "MigrationId={MigrationId}, " +
+                "ParentBatch={ParentBatch}, " +
+                "SubBatch={SubBatch}/{TotalSubBatches}, " +
+                "SubBatchEntities={SubBatchEntities} (successful={SubBatchSuccessful}, failed={SubBatchFailed}), " +
+                "CumulativeEntities={CumulativeSuccessful}/{CumulativeFailed}, " +
+                "TotalMigration={TotalMigration}, " +
+                "ProgressPercentage={Progress:F2}%, " +
+                "Timestamp={Timestamp}",
+                completedEvent.SubBatchNumber + (completedEvent.ParentBatchNumber - 1) * 10, // Approximate message sequence
+                completedEvent.MigrationId,
+                completedEvent.ParentBatchNumber,
+                completedEvent.SubBatchNumber, completedEvent.TotalSubBatches,
+                completedEvent.TotalEntities, completedEvent.SuccessfulEntities, completedEvent.FailedEntities,
+                completedEvent.CumulativeSuccessfulEntities, completedEvent.CumulativeFailedEntities,
+                completedEvent.TotalMigrationEntities,
+                completedEvent.ProgressPercentage,
+                completedEvent.Timestamp.ToString("HH:mm:ss.fff"));
             
             await _progressEventPublisher.PublishAsync(completedEvent, cancellationToken);
             

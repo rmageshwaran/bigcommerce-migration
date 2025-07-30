@@ -197,9 +197,13 @@ public static class EntityMigrationDurableOrchestrator
                 parallelResult.TotalProcessed, discoverResult?.TotalCount ?? 0);
 
             // Update result with parallel processing results
-            result.ProcessedEntities = parallelResult.TotalProcessed;
+            // 🚨 FIX: Use actual cumulative processed count, not wrong TotalProcessed value
+            result.ProcessedEntities = parallelResult.SuccessfulEntities + parallelResult.FailedEntities;  // Actual processed count
             result.SuccessfulEntities = parallelResult.SuccessfulEntities;
             result.FailedEntities = parallelResult.FailedEntities;
+            
+            logger.LogInformation("🚨 [DURABLE-ORCHESTRATOR-FIX] Fixed ProcessedEntities: TotalProcessed={TotalProcessed} (WRONG) -> ProcessedEntities={ProcessedEntities} (CORRECT) = Successful={Successful} + Failed={Failed}", 
+                parallelResult.TotalProcessed, result.ProcessedEntities, result.SuccessfulEntities, result.FailedEntities);
 
             // Step 6: Complete entity processing
             await context.CallActivityAsync(

@@ -26,6 +26,7 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
     private readonly string _migrationId;
     private readonly string _entityType;
     private readonly int _totalBatches;
+    private readonly int? _actualTotalEntities; // 🚨 FIX: Store actual total entities from migration context
     private readonly IProgressEventPublisher? _progressEventPublisher;
     private readonly ISignalREventFactory _signalREventFactory; // 🎯 CENTRALIZED SIGNALR: Factory for consistent event creation
     private readonly ILogger _logger;
@@ -78,11 +79,13 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
         IProgressEventPublisher? progressEventPublisher,
         ISignalREventFactory signalREventFactory, // 🎯 CENTRALIZED SIGNALR: Factory for consistent event creation
         ILogger logger,
-        IDateTimeProvider dateTimeProvider)
+        IDateTimeProvider dateTimeProvider,
+        int? actualTotalEntities = null) // 🚨 FIX: Accept actual total entities from migration context
     {
         _migrationId = migrationId ?? throw new ArgumentNullException(nameof(migrationId));
         _entityType = entityType ?? throw new ArgumentNullException(nameof(entityType));
         _totalBatches = totalBatches;
+        _actualTotalEntities = actualTotalEntities; // 🚨 FIX: Store actual total entities
         _progressEventPublisher = progressEventPublisher;
         _signalREventFactory = signalREventFactory ?? throw new ArgumentNullException(nameof(signalREventFactory)); // 🎯 CENTRALIZED SIGNALR: Store factory reference
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -354,29 +357,24 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
             var totalSubBatchEntitiesProcessed = Interlocked.Read(ref _totalSubBatchEntitiesProcessed);
             var totalSubBatchEntitiesFailed = Interlocked.Read(ref _totalSubBatchEntitiesFailed);
 
-            // ✅ CENTRALIZED SIGNALR: Use factory for consistent event creation with auto-populated base properties
-            var subBatchProgressEvent = _signalREventFactory.CreateSubBatchProgress(_migrationId, new SubBatchProgressOptions
+            // 🚨 GLOBAL COORDINATION FIX: Use MigrationProgress events instead of SubBatchProgress
+            // UI now only listens for MigrationProgress events from global coordination
+            var progressEvent = _signalREventFactory.CreateMigrationProgress(_migrationId, new MigrationProgressOptions
             {
-                TotalPages = _totalBatches,
-                CompletedPages = _completedBatchCount,
-                TotalSubBatches = GetEstimatedTotalSubBatches(),
-                CompletedSubBatches = (int)completedSubBatches,
-                TotalSuccessfulEntities = (int)totalSubBatchEntitiesProcessed,
-                TotalFailedEntities = (int)totalSubBatchEntitiesFailed,
-                TotalExpectedEntities = GetEstimatedTotalEntities(),
-                ProcessingRate = CalculateCurrentProcessingRate(),
-                OverallProgressPercentage = subBatchProgress,
-                EstimatedTimeRemaining = CalculateEstimatedTimeRemaining(),
-                UpdatedAt = _dateTimeProvider.UtcNow,
+                CurrentEntityType = _entityType,
+                OverallProgress = subBatchProgress, // Already in percentage (0-100)
+                Status = "running",
+                TotalEntities = GetEstimatedTotalEntities(),
+                ProcessedEntities = (int)totalSubBatchEntitiesProcessed,
+                FailedEntities = (int)totalSubBatchEntitiesFailed,
                 ElapsedTime = _dateTimeProvider.UtcNow - _startTime,
-                RecentErrors = GetRecentErrors(),
-                PerformanceMetrics = GetPerformanceMetrics()
+                EstimatedTimeRemaining = CalculateEstimatedTimeRemaining()
                 // ✅ Base properties (Timestamp, IsCancelled, HubMethod) auto-populated by factory
                 // ✅ Validation built-in
                 // ✅ Consistent naming enforced
             });
 
-            await _progressEventPublisher.PublishAsync(subBatchProgressEvent, cancellationToken);
+            await _progressEventPublisher.PublishMigrationProgressAsync(progressEvent, cancellationToken);
 
             _logger.LogDebug("📡 [SUB-BATCH-PROGRESS] Sent progress update: {Progress:F1}%, {Completed}/{Total} sub-batches", 
                 subBatchProgress, completedSubBatches, GetEstimatedTotalSubBatches());
@@ -389,11 +387,18 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
     }
 
     /// <summary>
-    /// Estimates total entities expected to be processed (for progress calculation)
+    /// Gets total entities expected to be processed (for progress calculation)
+    /// 🚨 FIX: Use actual total entities from migration context if available
     /// </summary>
     private int GetEstimatedTotalEntities()
     {
-        // For 192 brands: 4 pages × 50 entities per page = 200 entities
+        // 🚨 FIX: Use actual total entities from migration context if available (e.g., 192 brands)
+        if (_actualTotalEntities.HasValue)
+        {
+            return _actualTotalEntities.Value;
+        }
+        
+        // Fallback to estimation: For 192 brands: 4 pages × 50 entities per page = 200 entities
         // This is an estimate - actual count may vary
         return _totalBatches * 50; // Assuming 50 entities per page
     }
@@ -868,6 +873,7 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
 
     /// <summary>
     /// Sends SignalR update
+    /// 🚨 FIX: Prevent sending reset-to-0 events during disposal
     /// </summary>
     private async Task SendSignalRUpdateAsync(bool force, CancellationToken cancellationToken)
     {
@@ -888,21 +894,35 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
                 }
             }
 
+            var processedEntities = (int)Interlocked.Read(ref _totalEntitiesProcessed);
+            var failedEntities = (int)Interlocked.Read(ref _totalEntitiesFailed);
+            var currentProgress = GetCurrentProgressPercentage() * 100;
+
+            // 🚨 FIX: Prevent sending problematic reset-to-0 events during disposal
+            if (processedEntities == 0 && failedEntities == 0 && currentProgress == 0 && _disposed)
+            {
+                _logger.LogWarning("🚨 [DISPOSAL-FIX] Blocked reset-to-0 event during disposal for migration {MigrationId}", _migrationId);
+                return;
+            }
+
             // ✅ CENTRALIZED SIGNALR: Use factory for consistent event creation with auto-populated base properties
             var progressEvent = _signalREventFactory.CreateMigrationProgress(_migrationId, new MigrationProgressOptions
             {
                 CurrentEntityType = _entityType,
-                OverallProgress = GetCurrentProgressPercentage() * 100, // Convert to percentage (0-100)
+                OverallProgress = currentProgress, // Convert to percentage (0-100)
                 Status = "running",
-                TotalEntities = GetEstimatedTotalEntities(), // 🚨 CRITICAL FIX: Use fixed total (192) instead of dynamic ProcessedEntities + FailedEntities
-                ProcessedEntities = (int)Interlocked.Read(ref _totalEntitiesProcessed),
-                FailedEntities = (int)Interlocked.Read(ref _totalEntitiesFailed)
+                TotalEntities = GetEstimatedTotalEntities(), // 🚨 CRITICAL FIX: Use actual total entities (192) instead of estimated (200)
+                ProcessedEntities = processedEntities,
+                FailedEntities = failedEntities
                 // ✅ Base properties (Timestamp, IsCancelled, HubMethod) auto-populated by factory
                 // ✅ Validation built-in
                 // ✅ Consistent naming enforced
             });
 
             await _progressEventPublisher.PublishMigrationProgressAsync(progressEvent, cancellationToken);
+            
+            _logger.LogDebug("📊 [SIGNALR-UPDATE] Sent progress: {ProcessedEntities}/{TotalEntities} ({Progress:F1}%)", 
+                processedEntities, GetEstimatedTotalEntities(), currentProgress);
         }
         catch (Exception ex)
         {

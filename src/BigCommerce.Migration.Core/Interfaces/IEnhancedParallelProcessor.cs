@@ -119,12 +119,14 @@ public interface IEnhancedParallelProcessor
     /// <param name="entityType">Entity type being processed</param>
     /// <param name="totalBatches">Total number of batches in the migration</param>
     /// <param name="progressEventPublisher">Progress event publisher for SignalR real-time updates</param>
+    /// <param name="totalEntities">Actual total number of entities (optional, will estimate from batches if not provided)</param>
     /// <returns>Thread-safe progress aggregator instance</returns>
     IParallelProgressAggregator CreateProgressAggregator(
         string migrationId,
         string entityType,
         int totalBatches,
-        IProgressEventPublisher? progressEventPublisher = null);
+        IProgressEventPublisher? progressEventPublisher = null,
+        int? totalEntities = null);
 
     #endregion
 

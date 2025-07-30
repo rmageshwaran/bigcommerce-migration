@@ -697,10 +697,11 @@ public class EnhancedParallelProcessor : BigCommerce.Migration.Core.Interfaces.I
         string migrationId,
         string entityType,
         int totalBatches,
-        IProgressEventPublisher? progressEventPublisher = null)
+        IProgressEventPublisher? progressEventPublisher = null,
+        int? totalEntities = null)
     {
         return new ParallelProgressAggregator(
-            migrationId, entityType, totalBatches, progressEventPublisher, _signalREventFactory, _logger, _dateTimeProvider);
+            migrationId, entityType, totalBatches, progressEventPublisher, _signalREventFactory, _logger, _dateTimeProvider, totalEntities);
     }
 
     #endregion

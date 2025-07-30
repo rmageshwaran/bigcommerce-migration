@@ -70,6 +70,36 @@ public interface IParallelProgressAggregator : IDisposable
         int batchSize,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Reports completion of a sub-batch with thread-safe aggregation
+    /// 
+    /// **Sub-Batch Granularity:**
+    /// - Enables granular progress tracking within pages for 10x more progress updates
+    /// - Thread-safe concurrent updates from multiple sub-batch processors
+    /// - Provides real-time entity-level progress for smooth UI updates
+    /// 
+    /// **Global Coordination:**
+    /// - Coordinates progress across all parallel batches
+    /// - Ensures consistent cumulative entity counts across batches
+    /// - Eliminates progress jumps by using global aggregation
+    /// </summary>
+    /// <param name="parentBatchNumber">Parent batch number (1-based)</param>
+    /// <param name="subBatchNumber">Sub-batch number within parent batch (1-based)</param>
+    /// <param name="entitiesProcessed">Number of entities successfully processed in this sub-batch</param>
+    /// <param name="entitiesFailed">Number of entities that failed processing in this sub-batch</param>
+    /// <param name="processingTime">Time taken to process the sub-batch</param>
+    /// <param name="subBatchErrors">Collection of errors that occurred in the sub-batch</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>Task representing the async progress update operation</returns>
+    Task ReportSubBatchCompletionAsync(
+        int parentBatchNumber,
+        int subBatchNumber,
+        int entitiesProcessed,
+        int entitiesFailed,
+        TimeSpan processingTime,
+        IEnumerable<string>? subBatchErrors = null,
+        CancellationToken cancellationToken = default);
+
     #endregion
 
     #region Progress Aggregation

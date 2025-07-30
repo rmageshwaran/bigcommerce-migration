@@ -236,11 +236,43 @@ namespace BigCommerce.Migration.Functions.Functions
                 _logger.LogInformation("🔨 [SIGNALR-CREATE] Target hub method: {HubMethod}", progressEvent.HubMethod);
                 _logger.LogInformation("🔨 [SIGNALR-CREATE] Message payload type: {PayloadType}", progressEvent.GetType().Name);
 
-                // Log the payload that will be sent to SignalR clients
+                // 📡 ENHANCED SIGNALR TRACING: Log detailed payload for debugging sync issues
                 try
                 {
                     var payloadJson = JsonSerializer.Serialize(progressEvent, new JsonSerializerOptions { WriteIndented = true });
                     _logger.LogInformation("🔨 [SIGNALR-CREATE] SignalR payload:\n{PayloadJson}", payloadJson);
+                    
+                    // 🎯 SPECIFIC LOGGING FOR SUB-BATCH EVENTS: Track entity counts and progress for sync debugging
+                    if (progressEvent is SubBatchCompletedEvent subBatchEvent)
+                    {
+                        _logger.LogInformation("📊 [SIGNALR-BROADCAST] SubBatchCompleted OUTBOUND: " +
+                            "ParentBatch={ParentBatch}, " +
+                            "SubBatch={SubBatch}/{TotalSubBatches}, " +
+                            "Cumulative={CumulativeSuccessful}/{CumulativeFailed} of {TotalMigration}, " +
+                            "Progress={Progress:F2}%, " +
+                            "Expected Frontend Display: '{ExpectedDisplay}', " +
+                            "Timestamp={Timestamp}",
+                            subBatchEvent.ParentBatchNumber,
+                            subBatchEvent.SubBatchNumber, subBatchEvent.TotalSubBatches,
+                            subBatchEvent.CumulativeSuccessfulEntities, subBatchEvent.CumulativeFailedEntities, subBatchEvent.TotalMigrationEntities,
+                            subBatchEvent.ProgressPercentage,
+                            $"{subBatchEvent.CumulativeSuccessfulEntities}/{subBatchEvent.TotalMigrationEntities} ({subBatchEvent.ProgressPercentage:F1}%)",
+                            subBatchEvent.Timestamp.ToString("HH:mm:ss.fff"));
+                    }
+                    else if (progressEvent is MigrationProgressEvent migrationEvent)
+                    {
+                        _logger.LogInformation("📊 [SIGNALR-BROADCAST] MigrationProgress OUTBOUND: " +
+                            "ProcessedEntities={ProcessedEntities}/{TotalEntities}, " +
+                            "OverallProgress={OverallProgress}%, " +
+                            "Status={Status}, " +
+                            "Expected Frontend Display: '{ExpectedDisplay}', " +
+                            "Timestamp={Timestamp}",
+                            migrationEvent.ProcessedEntities, migrationEvent.TotalEntities,
+                            migrationEvent.OverallProgress,
+                            migrationEvent.Status,
+                            $"{migrationEvent.ProcessedEntities}/{migrationEvent.TotalEntities} ({migrationEvent.OverallProgress:F1}%)",
+                            migrationEvent.Timestamp.ToString("HH:mm:ss.fff"));
+                    }
                 }
                 catch (Exception ex)
                 {

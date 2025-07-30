@@ -140,6 +140,7 @@ export class SignalRService {
       ...eventData, // Use data directly from backend (already in camelCase)
       // Add calculated/enhanced properties for UI
       successfulEntities,
+      // ✅ Backend now sends correct progress percentage in sync with entity counts
       overallProgressPercentage: overallProgress,
       entitiesPerSecond,
       errorRate: processedEntities > 0 ? (failedEntities / processedEntities) * 100 : 0,
@@ -212,56 +213,9 @@ export class SignalRService {
     };
   }
 
-  /**
-   * 🎯 CENTRALIZED SIGNALR: Add UI-specific properties to sub-batch started events
-   * Backend now sends camelCase via SignalRMessageConverter - no transformation needed
-   */
-  private enrichSubBatchStartedEvent(eventData: any): any {
-    return {
-      ...eventData, // Use data directly from backend (already in camelCase)
-      // Add UI-specific properties
-      type: 'SubBatchStarted',
-      message: `Sub-batch ${eventData.subBatchNumber || 1}/${eventData.totalSubBatches || 1} started for ${eventData.entityType || 'entities'}`,
-      id: `subbatch-started-${eventData.parentBatchNumber || 1}-${eventData.subBatchNumber || 1}-${Date.now()}`,
-      timestamp: this.createSafeTimestamp(eventData.timestamp)
-    };
-  }
-
-  /**
-   * 🎯 CENTRALIZED SIGNALR: Add UI-specific properties to sub-batch completed events
-   * Backend now sends camelCase via SignalRMessageConverter - no transformation needed
-   */
-  private enrichSubBatchCompletedEvent(eventData: any): any {
-    const successRate = eventData.totalEntities > 0 
-      ? ((eventData.successfulEntities || 0) / eventData.totalEntities * 100).toFixed(1)
-      : '0.0';
-    
-    return {
-      ...eventData, // Use data directly from backend (already in camelCase)
-      // Add UI-specific properties
-      type: 'SubBatchCompleted',
-      message: `Sub-batch ${eventData.subBatchNumber || 1}/${eventData.totalSubBatches || 1} completed: ${eventData.successfulEntities || 0}/${eventData.totalEntities || 0} ${eventData.entityType || 'entities'} (${successRate}% success)`,
-      id: `subbatch-completed-${eventData.parentBatchNumber || 1}-${eventData.subBatchNumber || 1}-${Date.now()}`,
-      timestamp: this.createSafeTimestamp(eventData.timestamp),
-      completedAt: this.createSafeTimestamp(eventData.completedAt)
-    };
-  }
-
-  /**
-   * 🎯 CENTRALIZED SIGNALR: Add UI-specific properties to sub-batch progress events
-   * Backend now sends camelCase via SignalRMessageConverter - no transformation needed
-   */
-  private enrichSubBatchProgressEvent(eventData: any): any {
-    return {
-      ...eventData, // Use data directly from backend (already in camelCase)
-      // Add UI-specific properties
-      type: 'SubBatchProgress',
-      message: `Migration progress: ${(eventData.overallProgressPercentage || 0).toFixed(1)}% - ${eventData.completedSubBatches || 0}/${eventData.totalSubBatches || 0} sub-batches completed`,
-      id: `subbatch-progress-${eventData.completedSubBatches || 0}-${Date.now()}`,
-      timestamp: this.createSafeTimestamp(eventData.timestamp),
-      updatedAt: this.createSafeTimestamp(eventData.updatedAt)
-    };
-  }
+  // 🚨 GLOBAL COORDINATION CLEANUP: Sub-batch enrichment methods removed
+  // These methods are no longer needed since we use coordinated MigrationProgress events
+  // from the global ParallelProgressAggregator instead of individual sub-batch events
 
   /**
    * Set up connection event handlers
@@ -351,33 +305,12 @@ export class SignalRService {
       });
     });
 
-    // 🎯 CENTRALIZED SIGNALR: Sub-batch Progress Events (backend now sends camelCase directly)
-    this.connection.on('SubBatchStarted', (eventData: any) => {
-      console.log('🎯 DEBUG: Received SubBatchStarted:', eventData);
-      const enrichedEvent = this.enrichSubBatchStartedEvent(eventData);
-      console.log('🎯 DEBUG: Enriched SubBatchStarted:', enrichedEvent);
-      this.notifyListeners('subBatchStarted', enrichedEvent);
-      // Also notify as a general event for UI event lists
-      this.notifyListeners('DetailedProgress', enrichedEvent);
-    });
-
-    this.connection.on('SubBatchCompleted', (eventData: any) => {
-      console.log('🎯 DEBUG: Received SubBatchCompleted:', eventData);
-      const enrichedEvent = this.enrichSubBatchCompletedEvent(eventData);
-      console.log('🎯 DEBUG: Enriched SubBatchCompleted:', enrichedEvent);
-      this.notifyListeners('subBatchCompleted', enrichedEvent);
-      // Also notify as a general event for UI event lists
-      this.notifyListeners('DetailedProgress', enrichedEvent);
-    });
-
-    this.connection.on('SubBatchMigrationProgress', (eventData: any) => {
-      console.log('🎯 DEBUG: Received SubBatchMigrationProgress:', eventData);
-      const enrichedEvent = this.enrichSubBatchProgressEvent(eventData);
-      console.log('🎯 DEBUG: Enriched SubBatchMigrationProgress:', enrichedEvent);
-      this.notifyListeners('subBatchProgress', enrichedEvent);
-      // Also notify as a general event for UI event lists
-      this.notifyListeners('DetailedProgress', enrichedEvent);
-    });
+    // 🚨 GLOBAL COORDINATION: Sub-batch events now handled by global aggregator
+    // Individual sub-batch events are reported to ParallelProgressAggregator which sends coordinated MigrationProgress events
+    // This eliminates the 50→192 jump issue by ensuring proper cross-batch coordination
+    
+    // 🎯 NOTE: Sub-batch event subscriptions REMOVED - UI now relies on coordinated MigrationProgress events only
+    // This prevents duplicate/conflicting events and ensures smooth progress: 5→10→15...→192
 
     // Legacy event handlers (keeping for backward compatibility during migration)
     // TODO: Remove these after confirming queue-based events work correctly

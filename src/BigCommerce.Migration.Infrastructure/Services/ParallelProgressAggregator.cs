@@ -357,14 +357,19 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
             var totalSubBatchEntitiesProcessed = Interlocked.Read(ref _totalSubBatchEntitiesProcessed);
             var totalSubBatchEntitiesFailed = Interlocked.Read(ref _totalSubBatchEntitiesFailed);
 
+            // 🚨 STATUS FIX: Determine if migration is completed
+            var totalEntities = GetEstimatedTotalEntities();
+            var totalProcessed = (int)(totalSubBatchEntitiesProcessed + totalSubBatchEntitiesFailed);
+            var migrationStatus = totalProcessed >= totalEntities ? "completed" : "running";
+
             // 🚨 GLOBAL COORDINATION FIX: Use MigrationProgress events instead of SubBatchProgress
             // UI now only listens for MigrationProgress events from global coordination
             var progressEvent = _signalREventFactory.CreateMigrationProgress(_migrationId, new MigrationProgressOptions
             {
                 CurrentEntityType = _entityType,
                 OverallProgress = subBatchProgress, // Already in percentage (0-100)
-                Status = "running",
-                TotalEntities = GetEstimatedTotalEntities(),
+                Status = migrationStatus, // 🚨 STATUS FIX: Use dynamic status instead of hardcoded "running"
+                TotalEntities = totalEntities,
                 ProcessedEntities = (int)totalSubBatchEntitiesProcessed,
                 FailedEntities = (int)totalSubBatchEntitiesFailed,
                 ElapsedTime = _dateTimeProvider.UtcNow - _startTime,
@@ -376,8 +381,15 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
 
             await _progressEventPublisher.PublishMigrationProgressAsync(progressEvent, cancellationToken);
 
-            _logger.LogDebug("📡 [SUB-BATCH-PROGRESS] Sent progress update: {Progress:F1}%, {Completed}/{Total} sub-batches", 
-                subBatchProgress, completedSubBatches, GetEstimatedTotalSubBatches());
+            _logger.LogInformation("📡 [SUB-BATCH-PROGRESS] Sent progress update: {Progress:F1}%, {Status}, {ProcessedEntities}/{TotalEntities} entities", 
+                subBatchProgress, migrationStatus, totalSubBatchEntitiesProcessed, totalEntities);
+            
+            // 🎯 STATUS TRACKING: Log when migration completes
+            if (migrationStatus == "completed")
+            {
+                _logger.LogInformation("🎉 [MIGRATION-COMPLETED] Migration {MigrationId} reached completion status! Final: {ProcessedEntities}/{TotalEntities} entities", 
+                    _migrationId, totalSubBatchEntitiesProcessed, totalEntities);
+            }
         }
         catch (Exception ex)
         {
@@ -905,13 +917,18 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
                 return;
             }
 
+            // 🚨 STATUS FIX: Determine if migration is completed
+            var totalEntities = GetEstimatedTotalEntities();
+            var totalProcessed = processedEntities + failedEntities;
+            var migrationStatus = totalProcessed >= totalEntities ? "completed" : "running";
+
             // ✅ CENTRALIZED SIGNALR: Use factory for consistent event creation with auto-populated base properties
             var progressEvent = _signalREventFactory.CreateMigrationProgress(_migrationId, new MigrationProgressOptions
             {
                 CurrentEntityType = _entityType,
                 OverallProgress = currentProgress, // Convert to percentage (0-100)
-                Status = "running",
-                TotalEntities = GetEstimatedTotalEntities(), // 🚨 CRITICAL FIX: Use actual total entities (192) instead of estimated (200)
+                Status = migrationStatus, // 🚨 STATUS FIX: Use dynamic status instead of hardcoded "running"
+                TotalEntities = totalEntities, // 🚨 CRITICAL FIX: Use actual total entities (192) instead of estimated (200)
                 ProcessedEntities = processedEntities,
                 FailedEntities = failedEntities
                 // ✅ Base properties (Timestamp, IsCancelled, HubMethod) auto-populated by factory
@@ -921,8 +938,15 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
 
             await _progressEventPublisher.PublishMigrationProgressAsync(progressEvent, cancellationToken);
             
-            _logger.LogDebug("📊 [SIGNALR-UPDATE] Sent progress: {ProcessedEntities}/{TotalEntities} ({Progress:F1}%)", 
-                processedEntities, GetEstimatedTotalEntities(), currentProgress);
+            _logger.LogInformation("📊 [SIGNALR-UPDATE] Sent progress: {ProcessedEntities}/{TotalEntities} ({Progress:F1}%), Status: {Status}", 
+                processedEntities, totalEntities, currentProgress, migrationStatus);
+                
+            // 🎯 STATUS TRACKING: Log when migration completes
+            if (migrationStatus == "completed")
+            {
+                _logger.LogInformation("🎉 [MIGRATION-COMPLETED] Migration {MigrationId} reached completion status! Final: {ProcessedEntities}/{TotalEntities} entities", 
+                    _migrationId, processedEntities, totalEntities);
+            }
         }
         catch (Exception ex)
         {

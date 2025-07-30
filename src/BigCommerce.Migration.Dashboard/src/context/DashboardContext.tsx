@@ -544,9 +544,17 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
       console.log('🎯 DashboardContext received MigrationStatus:', statusData);
       // Handle different types of migration status updates
       if (statusData.status === 'completed') {
+        console.log('🎉 [DASHBOARD-CONTEXT] Migration completion detected:', statusData);
+        
         // Calculate duration if possible (fallback to "just now" if no duration data)
-        const duration = statusData.data?.duration || 'just now';
-        const migrationName = statusData.data?.name || `Migration ${statusData.migrationId}`;
+        const duration = statusData.data?.duration || statusData.data?.processingTime || 'just now';
+        const migrationName = statusData.data?.name || `Migration ${statusData.migrationId?.slice(-8) || 'Unknown'}`;
+        
+        console.log('🔔 [DASHBOARD-CONTEXT] Triggering completion notification:', {
+          migrationId: statusData.migrationId?.slice(-8),
+          migrationName,
+          duration
+        });
         
         notificationService.migrationCompleted(
           statusData.migrationId,

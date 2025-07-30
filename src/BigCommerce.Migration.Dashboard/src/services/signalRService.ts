@@ -280,6 +280,17 @@ export class SignalRService {
 
     this.connection.on('EntityProgressUpdated', (eventData: any) => {
       console.log('🎯 DEBUG: Received EntityProgressUpdated:', eventData);
+      
+      // 🚨 STATUS FIX: Forward completion status to DashboardContext
+      if (eventData.status === 'completed') {
+        console.log('🎉 STATUS-FIX: Forwarding EntityProgressUpdated completion status to MigrationStatus listener');
+        this.notifyListeners('MigrationStatus', {
+          migrationId: eventData.migrationId,
+          status: 'completed',
+          data: eventData
+        });
+      }
+      
       // Entity events can be used directly - already in camelCase from backend
       this.notifyListeners('DetailedProgress', eventData);
       this.notifyListeners('entityUpdate', eventData);

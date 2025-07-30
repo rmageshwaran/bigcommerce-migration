@@ -37,6 +37,23 @@ export class SignalRService {
   }
 
   /**
+   * 🛡️ Safe timestamp creation with validation
+   */
+  private createSafeTimestamp(timestampValue?: any): Date {
+    try {
+      const value = timestampValue || Date.now();
+      const date = new Date(value);
+      // Validate the date is not invalid
+      if (isNaN(date.getTime())) {
+        return new Date();
+      }
+      return date;
+    } catch {
+      return new Date();
+    }
+  }
+
+  /**
    * Initialize SignalR connection with backend integration
    */
   private async initializeConnection(): Promise<void> {
@@ -102,51 +119,41 @@ export class SignalRService {
     }
   }
 
-  /**
-   * Transform backend data (PascalCase) to frontend data (camelCase)
-   */
-  private transformBackendProgress(backendData: any): any {
-    if (!backendData) return null;
 
-    const totalEntities = backendData.TotalEntities || backendData.totalEntities || 0;
-    const processedEntities = backendData.ProcessedEntities || backendData.processedEntities || 0;
-    const successfulEntities = backendData.SuccessfulEntities || backendData.successfulEntities || processedEntities; // Default to processed if not specified
-    const failedEntities = backendData.FailedEntities || backendData.failedEntities || 0;
-    const overallProgress = backendData.OverallProgress || backendData.overallProgressPercentage || 0;
-    const entitiesPerSecond = backendData.EntitiesPerSecond || backendData.entitiesPerSecond || 0;
+
+  /**
+   * 🎯 CENTRALIZED SIGNALR: Add UI-specific properties to migration progress events
+   * Backend now sends camelCase via SignalRMessageConverter - no transformation needed
+   */
+  private enrichMigrationProgressEvent(eventData: any): any {
+    // Calculate enhanced properties for UI
+    const totalEntities = eventData.totalEntities || 0;
+    const processedEntities = eventData.processedEntities || 0;
+    const failedEntities = eventData.failedEntities || 0;
+    const successfulEntities = processedEntities - failedEntities;
+    const overallProgress = eventData.overallProgress || 0;
     
-    // Calculate elapsed time (simple calculation based on progress)
-    const estimatedTotalTime = entitiesPerSecond > 0 ? (totalEntities / entitiesPerSecond) : 0;
-    const elapsedTime = estimatedTotalTime > 0 ? (estimatedTotalTime * (overallProgress / 100)) : 0;
-    const estimatedTimeRemaining = estimatedTotalTime > elapsedTime ? (estimatedTotalTime - elapsedTime) : 0;
+    const elapsedTime = eventData.elapsedTime || 0;
+    const entitiesPerSecond = elapsedTime > 0 ? processedEntities / (elapsedTime / 1000) : 0;
 
     return {
-      migrationId: backendData.MigrationId || backendData.migrationId || '',
-      status: (backendData.Status || backendData.status || 'unknown').toLowerCase(),
-      startTime: backendData.StartTime || backendData.startTime || new Date(),
-      lastUpdated: new Date(),
-      elapsedTime: Math.round(elapsedTime),
-      estimatedTimeRemaining: Math.round(estimatedTimeRemaining),
-      totalEntities,
-      processedEntities,
+      ...eventData, // Use data directly from backend (already in camelCase)
+      // Add calculated/enhanced properties for UI
       successfulEntities,
-      failedEntities,
       overallProgressPercentage: overallProgress,
-      entityProgress: backendData.EntityProgress || backendData.entityProgress || {},
-      currentPhase: backendData.CurrentPhase || backendData.currentPhase || 'Processing',
-      currentEntity: backendData.CurrentEntity || backendData.currentEntity || backendData.CurrentEntityType || 'entities',
       entitiesPerSecond,
       errorRate: processedEntities > 0 ? (failedEntities / processedEntities) * 100 : 0,
+      lastUpdated: new Date(),
       
       // Enhanced nested structures for detailed dashboard
       currentProcessing: {
-        currentEntity: backendData.CurrentEntity || backendData.currentEntity || backendData.CurrentEntityType || 'entities',
-        currentActivity: backendData.CurrentActivity || backendData.currentActivity || 'Processing entities',
-        currentBatchNumber: backendData.CurrentBatchNumber || backendData.currentBatchNumber || Math.ceil(processedEntities / 50) || 1,
+        currentEntity: eventData.currentEntityType || 'entities',
+        currentActivity: 'Processing entities',
+        currentBatchNumber: Math.ceil(processedEntities / 50) || 1,
         currentBatch: {
-          batchProgressPercentage: backendData.BatchProgress || backendData.batchProgress || (overallProgress % 10) * 10,
-          batchSize: backendData.BatchSize || backendData.batchSize || 50,
-          processedInBatch: backendData.ProcessedInBatch || backendData.processedInBatch || (processedEntities % 50),
+          batchProgressPercentage: (overallProgress % 10) * 10,
+          batchSize: 50,
+          processedInBatch: (processedEntities % 50),
           batchProcessingSpeed: entitiesPerSecond
         }
       },
@@ -159,7 +166,16 @@ export class SignalRService {
       remainingWork: {
         remainingEntities: totalEntities - processedEntities,
         remainingBatches: Math.ceil((totalEntities - processedEntities) / 50) || 0,
-        estimatedTimeRemaining: Math.round(estimatedTimeRemaining)
+        // Safe numeric parsing for estimatedTimeRemaining
+        estimatedTimeRemaining: (() => {
+          const timeValue = eventData.estimatedTimeRemaining;
+          if (typeof timeValue === 'number' && !isNaN(timeValue) && timeValue >= 0) {
+            return timeValue;
+          }
+          // Calculate fallback based on remaining entities and current speed
+          const remainingEntities = totalEntities - processedEntities;
+          return entitiesPerSecond > 0 ? Math.ceil(remainingEntities / entitiesPerSecond) : 0;
+        })()
       },
       
       performance: {
@@ -171,90 +187,79 @@ export class SignalRService {
   }
 
   /**
-   * Transform SubBatchStarted event from backend format to frontend format
+   * 🎯 CENTRALIZED SIGNALR: Add UI-specific properties to migration status events
+   * Backend now sends camelCase via SignalRMessageConverter - no transformation needed
    */
-  private transformSubBatchStartedEvent(backendEvent: any): any {
+  private enrichMigrationStatusEvent(eventData: any): any {
+    // Safe timestamp parsing with validation
+    let timestamp: Date;
+    try {
+      const timestampValue = eventData.timestamp || Date.now();
+      timestamp = new Date(timestampValue);
+      // Validate the date is not invalid
+      if (isNaN(timestamp.getTime())) {
+        timestamp = new Date();
+      }
+    } catch {
+      timestamp = new Date();
+    }
+
     return {
-      migrationId: backendEvent.MigrationId || backendEvent.migrationId,
-      parentBatchNumber: backendEvent.ParentBatchNumber || backendEvent.parentBatchNumber,
-      subBatchNumber: backendEvent.SubBatchNumber || backendEvent.subBatchNumber,
-      totalSubBatches: backendEvent.TotalSubBatches || backendEvent.totalSubBatches,
-      entityType: backendEvent.EntityType || backendEvent.entityType,
-      entitiesInBatch: backendEvent.EntitiesInBatch || backendEvent.entitiesInBatch,
-      timestamp: new Date(backendEvent.Timestamp || backendEvent.timestamp || Date.now()),
-      // UI event list format
-      type: 'SubBatchStarted',
-      message: `Sub-batch ${backendEvent.SubBatchNumber || 1}/${backendEvent.TotalSubBatches || 1} started for ${backendEvent.EntityType || 'entities'}`,
-      id: `subbatch-started-${backendEvent.ParentBatchNumber || 1}-${backendEvent.SubBatchNumber || 1}-${Date.now()}`
+      ...eventData, // Use data directly from backend (already in camelCase)
+      // Ensure consistent status format
+      status: (eventData.status || 'unknown').toLowerCase(),
+      timestamp
     };
   }
 
   /**
-   * Transform SubBatchCompleted event from backend format to frontend format
+   * 🎯 CENTRALIZED SIGNALR: Add UI-specific properties to sub-batch started events
+   * Backend now sends camelCase via SignalRMessageConverter - no transformation needed
    */
-  private transformSubBatchCompletedEvent(backendEvent: any): any {
-    const successRate = backendEvent.TotalEntities > 0 
-      ? ((backendEvent.SuccessfulEntities || 0) / backendEvent.TotalEntities * 100).toFixed(1)
+  private enrichSubBatchStartedEvent(eventData: any): any {
+    return {
+      ...eventData, // Use data directly from backend (already in camelCase)
+      // Add UI-specific properties
+      type: 'SubBatchStarted',
+      message: `Sub-batch ${eventData.subBatchNumber || 1}/${eventData.totalSubBatches || 1} started for ${eventData.entityType || 'entities'}`,
+      id: `subbatch-started-${eventData.parentBatchNumber || 1}-${eventData.subBatchNumber || 1}-${Date.now()}`,
+      timestamp: this.createSafeTimestamp(eventData.timestamp)
+    };
+  }
+
+  /**
+   * 🎯 CENTRALIZED SIGNALR: Add UI-specific properties to sub-batch completed events
+   * Backend now sends camelCase via SignalRMessageConverter - no transformation needed
+   */
+  private enrichSubBatchCompletedEvent(eventData: any): any {
+    const successRate = eventData.totalEntities > 0 
+      ? ((eventData.successfulEntities || 0) / eventData.totalEntities * 100).toFixed(1)
       : '0.0';
     
-    // 🔍 DEBUG: Log the backend event data to see what we're receiving
-    console.log('🎯 DEBUG: SubBatchCompleted backend event data:', {
-      CumulativeSuccessfulEntities: backendEvent.CumulativeSuccessfulEntities,
-      CumulativeFailedEntities: backendEvent.CumulativeFailedEntities,
-      TotalMigrationEntities: backendEvent.TotalMigrationEntities,
-      ProgressPercentage: backendEvent.ProgressPercentage
-    });
-    
     return {
-      migrationId: backendEvent.MigrationId || backendEvent.migrationId,
-      parentBatchNumber: backendEvent.ParentBatchNumber || backendEvent.parentBatchNumber,
-      subBatchNumber: backendEvent.SubBatchNumber || backendEvent.subBatchNumber,
-      totalSubBatches: backendEvent.TotalSubBatches || backendEvent.totalSubBatches,
-      successfulEntities: backendEvent.SuccessfulEntities || 0,
-      failedEntities: backendEvent.FailedEntities || 0,
-      totalEntities: backendEvent.TotalEntities || 0,
-      entityType: backendEvent.EntityType || backendEvent.entityType,
-      processingTime: backendEvent.ProcessingTime || backendEvent.processingTime,
-      completedAt: new Date(backendEvent.CompletedAt || backendEvent.completedAt || Date.now()),
-      errors: backendEvent.Errors || backendEvent.errors || [],
-      cumulativeSuccessfulEntities: backendEvent.CumulativeSuccessfulEntities || 0,
-      cumulativeFailedEntities: backendEvent.CumulativeFailedEntities || 0,
-      totalMigrationEntities: backendEvent.TotalMigrationEntities || 0,
-      progressPercentage: backendEvent.ProgressPercentage || 0,
-      estimatedTimeRemaining: backendEvent.EstimatedTimeRemaining || backendEvent.estimatedTimeRemaining || '00:00:00',
-      timestamp: new Date(backendEvent.Timestamp || backendEvent.timestamp || Date.now()),
-      // UI event list format
+      ...eventData, // Use data directly from backend (already in camelCase)
+      // Add UI-specific properties
       type: 'SubBatchCompleted',
-      message: `Sub-batch ${backendEvent.SubBatchNumber || 1}/${backendEvent.TotalSubBatches || 1} completed: ${backendEvent.SuccessfulEntities || 0}/${backendEvent.TotalEntities || 0} ${backendEvent.EntityType || 'entities'} (${successRate}% success)`,
-      id: `subbatch-completed-${backendEvent.ParentBatchNumber || 1}-${backendEvent.SubBatchNumber || 1}-${Date.now()}`
+      message: `Sub-batch ${eventData.subBatchNumber || 1}/${eventData.totalSubBatches || 1} completed: ${eventData.successfulEntities || 0}/${eventData.totalEntities || 0} ${eventData.entityType || 'entities'} (${successRate}% success)`,
+      id: `subbatch-completed-${eventData.parentBatchNumber || 1}-${eventData.subBatchNumber || 1}-${Date.now()}`,
+      timestamp: this.createSafeTimestamp(eventData.timestamp),
+      completedAt: this.createSafeTimestamp(eventData.completedAt)
     };
   }
 
   /**
-   * Transform SubBatchMigrationProgressEvent from backend format to frontend format
+   * 🎯 CENTRALIZED SIGNALR: Add UI-specific properties to sub-batch progress events
+   * Backend now sends camelCase via SignalRMessageConverter - no transformation needed
    */
-  private transformSubBatchProgressEvent(backendEvent: any): any {
+  private enrichSubBatchProgressEvent(eventData: any): any {
     return {
-      migrationId: backendEvent.MigrationId || backendEvent.migrationId,
-      totalPages: backendEvent.TotalPages || backendEvent.totalPages || 0,
-      completedPages: backendEvent.CompletedPages || backendEvent.completedPages || 0,
-      totalSubBatches: backendEvent.TotalSubBatches || backendEvent.totalSubBatches || 0,
-      completedSubBatches: backendEvent.CompletedSubBatches || backendEvent.completedSubBatches || 0,
-      totalSuccessfulEntities: backendEvent.TotalSuccessfulEntities || backendEvent.totalSuccessfulEntities || 0,
-      totalFailedEntities: backendEvent.TotalFailedEntities || backendEvent.totalFailedEntities || 0,
-      totalExpectedEntities: backendEvent.TotalExpectedEntities || backendEvent.totalExpectedEntities || 0,
-      processingRate: backendEvent.ProcessingRate || backendEvent.processingRate || 0,
-      overallProgressPercentage: backendEvent.OverallProgressPercentage || backendEvent.overallProgressPercentage || 0,
-      estimatedTimeRemaining: backendEvent.EstimatedTimeRemaining || backendEvent.estimatedTimeRemaining,
-      updatedAt: new Date(backendEvent.UpdatedAt || backendEvent.updatedAt || Date.now()),
-      elapsedTime: backendEvent.ElapsedTime || backendEvent.elapsedTime,
-      recentErrors: backendEvent.RecentErrors || backendEvent.recentErrors || [],
-      performanceMetrics: backendEvent.PerformanceMetrics || backendEvent.performanceMetrics || {},
-      timestamp: new Date(backendEvent.Timestamp || backendEvent.timestamp || Date.now()),
-      // UI event list format
+      ...eventData, // Use data directly from backend (already in camelCase)
+      // Add UI-specific properties
       type: 'SubBatchProgress',
-      message: `Migration progress: ${(backendEvent.OverallProgressPercentage || 0).toFixed(1)}% - ${backendEvent.CompletedSubBatches || 0}/${backendEvent.TotalSubBatches || 0} sub-batches completed`,
-      id: `subbatch-progress-${backendEvent.CompletedSubBatches || 0}-${Date.now()}`
+      message: `Migration progress: ${(eventData.overallProgressPercentage || 0).toFixed(1)}% - ${eventData.completedSubBatches || 0}/${eventData.totalSubBatches || 0} sub-batches completed`,
+      id: `subbatch-progress-${eventData.completedSubBatches || 0}-${Date.now()}`,
+      timestamp: this.createSafeTimestamp(eventData.timestamp),
+      updatedAt: this.createSafeTimestamp(eventData.updatedAt)
     };
   }
 
@@ -304,39 +309,34 @@ export class SignalRService {
       });
     });
 
-    // Core Progress Events (Queue-based from backend)
-    this.connection.on('MigrationProgressUpdated', (backendProgress: any) => {
-      console.log('🎯 DEBUG: Received MigrationProgressUpdated (raw):', backendProgress);
-      const transformedProgress = this.transformBackendProgress(backendProgress);
-      console.log('🎯 DEBUG: Transformed to frontend format:', transformedProgress);
-      this.notifyListeners('migrationProgress', transformedProgress);
+    // 🎯 CENTRALIZED SIGNALR: Core Progress Events (backend now sends camelCase directly)
+    this.connection.on('MigrationProgressUpdated', (eventData: any) => {
+      console.log('🎯 DEBUG: Received MigrationProgressUpdated:', eventData);
+      const enrichedProgress = this.enrichMigrationProgressEvent(eventData);
+      console.log('🎯 DEBUG: Enriched MigrationProgress:', enrichedProgress);
+      this.notifyListeners('migrationProgress', enrichedProgress);
     });
 
-    this.connection.on('MigrationStatusChanged', (backendStatus: any) => {
-      console.log('🎯 DEBUG: Received MigrationStatusChanged (raw):', backendStatus);
-      const transformedStatus = {
-        migrationId: backendStatus.MigrationId || backendStatus.migrationId,
-        status: (backendStatus.Status || backendStatus.status || 'unknown').toLowerCase(),
-        message: backendStatus.Message || backendStatus.message,
-        data: backendStatus.Data || backendStatus.data,
-        error: backendStatus.Error || backendStatus.error
-      };
-      console.log('🎯 DEBUG: Transformed status:', transformedStatus);
-      this.notifyListeners('MigrationStatus', transformedStatus);
+    this.connection.on('MigrationStatusChanged', (eventData: any) => {
+      console.log('🎯 DEBUG: Received MigrationStatusChanged:', eventData);
+      const enrichedStatus = this.enrichMigrationStatusEvent(eventData);
+      console.log('🎯 DEBUG: Enriched MigrationStatus:', enrichedStatus);
+      this.notifyListeners('MigrationStatus', enrichedStatus);
     });
 
-    this.connection.on('EntityProgressUpdated', (entityProgress: any) => {
-      console.log('🎯 DEBUG: Received EntityProgressUpdated:', entityProgress);
-      this.notifyListeners('DetailedProgress', entityProgress);
-      // Also notify entity-specific listeners
-      this.notifyListeners('entityUpdate', entityProgress);
+    this.connection.on('EntityProgressUpdated', (eventData: any) => {
+      console.log('🎯 DEBUG: Received EntityProgressUpdated:', eventData);
+      // Entity events can be used directly - already in camelCase from backend
+      this.notifyListeners('DetailedProgress', eventData);
+      this.notifyListeners('entityUpdate', eventData);
     });
 
-    this.connection.on('BatchProgressUpdated', (batchProgress: any) => {
-      console.log('🎯 DEBUG: Received BatchProgressUpdated:', batchProgress);
-      this.notifyListeners('BatchStarted', batchProgress);
-      this.notifyListeners('BatchProgress', batchProgress);
-      this.notifyListeners('BatchCompleted', batchProgress);
+    this.connection.on('BatchProgressUpdated', (eventData: any) => {
+      console.log('🎯 DEBUG: Received BatchProgressUpdated:', eventData);
+      // Batch events can be used directly - already in camelCase from backend
+      this.notifyListeners('BatchStarted', eventData);
+      this.notifyListeners('BatchProgress', eventData);
+      this.notifyListeners('BatchCompleted', eventData);
     });
 
     this.connection.on('ErrorOccurred', (errorEvent: any) => {
@@ -351,32 +351,32 @@ export class SignalRService {
       });
     });
 
-    // Sub-batch Progress Events (New configurable sub-batch optimization)
-    this.connection.on('SubBatchStarted', (subBatchEvent: any) => {
-      console.log('🎯 DEBUG: Received SubBatchStarted:', subBatchEvent);
-      const transformedEvent = this.transformSubBatchStartedEvent(subBatchEvent);
-      console.log('🎯 DEBUG: Transformed SubBatchStarted:', transformedEvent);
-      this.notifyListeners('subBatchStarted', transformedEvent);
+    // 🎯 CENTRALIZED SIGNALR: Sub-batch Progress Events (backend now sends camelCase directly)
+    this.connection.on('SubBatchStarted', (eventData: any) => {
+      console.log('🎯 DEBUG: Received SubBatchStarted:', eventData);
+      const enrichedEvent = this.enrichSubBatchStartedEvent(eventData);
+      console.log('🎯 DEBUG: Enriched SubBatchStarted:', enrichedEvent);
+      this.notifyListeners('subBatchStarted', enrichedEvent);
       // Also notify as a general event for UI event lists
-      this.notifyListeners('DetailedProgress', transformedEvent);
+      this.notifyListeners('DetailedProgress', enrichedEvent);
     });
 
-    this.connection.on('SubBatchCompleted', (subBatchEvent: any) => {
-      console.log('🎯 DEBUG: Received SubBatchCompleted:', subBatchEvent);
-      const transformedEvent = this.transformSubBatchCompletedEvent(subBatchEvent);
-      console.log('🎯 DEBUG: Transformed SubBatchCompleted:', transformedEvent);
-      this.notifyListeners('subBatchCompleted', transformedEvent);
+    this.connection.on('SubBatchCompleted', (eventData: any) => {
+      console.log('🎯 DEBUG: Received SubBatchCompleted:', eventData);
+      const enrichedEvent = this.enrichSubBatchCompletedEvent(eventData);
+      console.log('🎯 DEBUG: Enriched SubBatchCompleted:', enrichedEvent);
+      this.notifyListeners('subBatchCompleted', enrichedEvent);
       // Also notify as a general event for UI event lists
-      this.notifyListeners('DetailedProgress', transformedEvent);
+      this.notifyListeners('DetailedProgress', enrichedEvent);
     });
 
-    this.connection.on('SubBatchMigrationProgress', (subBatchProgressEvent: any) => {
-      console.log('🎯 DEBUG: Received SubBatchMigrationProgress:', subBatchProgressEvent);
-      const transformedEvent = this.transformSubBatchProgressEvent(subBatchProgressEvent);
-      console.log('🎯 DEBUG: Transformed SubBatchMigrationProgress:', transformedEvent);
-      this.notifyListeners('subBatchProgress', transformedEvent);
+    this.connection.on('SubBatchMigrationProgress', (eventData: any) => {
+      console.log('🎯 DEBUG: Received SubBatchMigrationProgress:', eventData);
+      const enrichedEvent = this.enrichSubBatchProgressEvent(eventData);
+      console.log('🎯 DEBUG: Enriched SubBatchMigrationProgress:', enrichedEvent);
+      this.notifyListeners('subBatchProgress', enrichedEvent);
       // Also notify as a general event for UI event lists
-      this.notifyListeners('DetailedProgress', transformedEvent);
+      this.notifyListeners('DetailedProgress', enrichedEvent);
     });
 
     // Legacy event handlers (keeping for backward compatibility during migration)

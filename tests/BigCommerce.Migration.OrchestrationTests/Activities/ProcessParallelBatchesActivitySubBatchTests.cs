@@ -1,5 +1,6 @@
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
+using BigCommerce.Migration.Core.Services;
 using BigCommerce.Migration.Orchestration.Activities;
 using BigCommerce.Migration.Orchestration.Models;
 using BigCommerce.Migration.Orchestration.Services;
@@ -21,6 +22,7 @@ public class ProcessParallelBatchesActivitySubBatchTests
     private readonly Mock<IEnhancedParallelProcessor> _mockParallelProcessor;
     private readonly Mock<IParallelBatchProcessingPipeline> _mockParallelPipeline;
     private readonly Mock<IProgressEventPublisher> _mockProgressEventPublisher;
+    private readonly Mock<ISignalREventFactory> _mockSignalREventFactory;
     private readonly Mock<IEntityFetchService> _mockEntityFetchService;
     private readonly Mock<IEntityTransformService> _mockEntityTransformService;
     private readonly Mock<IEntityCreateService> _mockEntityCreateService;
@@ -35,6 +37,7 @@ public class ProcessParallelBatchesActivitySubBatchTests
         _mockParallelProcessor = new Mock<IEnhancedParallelProcessor>();
         _mockParallelPipeline = new Mock<IParallelBatchProcessingPipeline>();
         _mockProgressEventPublisher = new Mock<IProgressEventPublisher>();
+        _mockSignalREventFactory = new Mock<ISignalREventFactory>();
         _mockEntityFetchService = new Mock<IEntityFetchService>();
         _mockEntityTransformService = new Mock<IEntityTransformService>();
         _mockEntityCreateService = new Mock<IEntityCreateService>();
@@ -55,6 +58,7 @@ public class ProcessParallelBatchesActivitySubBatchTests
             _mockParallelPipeline.Object,
             _mockProgressEventPublisher.Object,
             defaultParallelConfig, // Added configuration parameter
+            _mockSignalREventFactory.Object, // Added missing SignalR factory
             _mockEntityFetchService.Object,
             _mockEntityTransformService.Object,
             _mockEntityCreateService.Object,
@@ -520,6 +524,7 @@ public class ProcessParallelBatchesActivitySubBatchTests
             _mockParallelPipeline.Object,
             _mockProgressEventPublisher.Object,
             parallelConfig, // Pass the configuration
+            _mockSignalREventFactory.Object, // Added missing SignalR factory
             _mockEntityFetchService.Object,
             _mockEntityTransformService.Object,
             _mockEntityCreateService.Object,

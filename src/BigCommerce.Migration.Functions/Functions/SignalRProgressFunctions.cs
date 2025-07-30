@@ -8,6 +8,7 @@ using Microsoft.Azure.Functions.Worker.Extensions.SignalRService;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
 using BigCommerce.Migration.Core.Models;
+using BigCommerce.Migration.Core.Services;
 
 namespace BigCommerce.Migration.Functions.Functions
 {
@@ -19,10 +20,14 @@ namespace BigCommerce.Migration.Functions.Functions
     public class SignalRProgressFunctions
     {
         private readonly ILogger<SignalRProgressFunctions> _logger;
+        private readonly ISignalRMessageConverter _signalRMessageConverter; // 🎯 CENTRALIZED SIGNALR: Frontend conversion
 
-        public SignalRProgressFunctions(ILogger<SignalRProgressFunctions> logger)
+        public SignalRProgressFunctions(
+            ILogger<SignalRProgressFunctions> logger,
+            ISignalRMessageConverter signalRMessageConverter) // 🎯 CENTRALIZED SIGNALR: Frontend conversion
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _signalRMessageConverter = signalRMessageConverter ?? throw new ArgumentNullException(nameof(signalRMessageConverter)); // 🎯 CENTRALIZED SIGNALR: Store converter reference
         }
 
         /// <summary>
@@ -242,8 +247,9 @@ namespace BigCommerce.Migration.Functions.Functions
                     _logger.LogWarning(ex, "⚠️ [SIGNALR-CREATE] Failed to serialize payload for logging");
                 }
 
-                // Create SignalR message with proper constructor
-                var signalRMessage = new SignalRMessageAction(progressEvent.HubMethod, new object[] { progressEvent });
+                // 🎯 CENTRALIZED SIGNALR: Convert to frontend format (PascalCase → camelCase) before sending
+                var frontendEvent = _signalRMessageConverter.ConvertToFrontendObject(progressEvent);
+                var signalRMessage = new SignalRMessageAction(progressEvent.HubMethod, new object[] { frontendEvent });
                 
                 _logger.LogInformation("✅ [SIGNALR-CREATE] Successfully created SignalR message action!");
                 return signalRMessage;

@@ -279,8 +279,8 @@ public class ProgressTracker : IProgressTracker
                 progress.SuccessfulEntities += successCount;
                 progress.FailedEntities += failureCount;
                 
+                // 🎯 ESTIMATED TIME FIX: CalculateOverallProgress now automatically calculates processing speed before time estimation
                 CalculateOverallProgress(progress);
-                CalculateProcessingSpeed(progress);
             }
             
             // Publish batch completion event to queue for SignalR broadcasting
@@ -451,6 +451,9 @@ public class ProgressTracker : IProgressTracker
             progress.ErrorRate = (double)progress.FailedEntities / progress.ProcessedEntities;
         }
         
+        // 🎯 ESTIMATED TIME FIX: Calculate processing speed first so EntitiesPerSecond is available for time estimation
+        CalculateProcessingSpeed(progress);
+        
         // Estimate time remaining
         CalculateTimeRemaining(progress);
     }
@@ -615,8 +618,15 @@ public class ProgressTracker : IProgressTracker
                 TotalEntities = progress.TotalEntities,
                 ProcessedEntities = progress.ProcessedEntities,
                 FailedEntities = progress.FailedEntities,
+                SuccessfulEntities = progress.SuccessfulEntities, // 🎯 SUCCESS RATE FIX: Pass backend-calculated SuccessfulEntities to frontend
                 CurrentEntityType = progress.CurrentEntity,
+                
+                // 🎯 TIME TRACKING FIX: Pass time properties to fix "0m 0s" displays
+                StartTime = progress.StartTime,
+                ElapsedTime = progress.ElapsedTime,
+                EntitiesPerSecond = progress.EntitiesPerSecond,
                 EstimatedTimeRemaining = progress.EstimatedTimeRemaining,
+                
                 // Phase 4.2: Include soft cancellation state in progress event
                 IsCancelled = progress.IsCancelled ?? false,
                 CancellationReason = progress.CancellationReason,

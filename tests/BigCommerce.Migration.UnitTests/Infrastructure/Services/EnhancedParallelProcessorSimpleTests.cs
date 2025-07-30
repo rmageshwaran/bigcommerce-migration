@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
+using BigCommerce.Migration.Core.Services;
 using BatchProcessingResult = BigCommerce.Migration.Core.Interfaces.BatchProcessingResult;
 using BigCommerce.Migration.Infrastructure.Services;
 using FluentAssertions;
@@ -25,6 +26,7 @@ namespace BigCommerce.Migration.UnitTests.Infrastructure.Services;
 public class EnhancedParallelProcessorSimpleTests : IDisposable
 {
     private readonly Mock<IDynamicRateLimiter> _mockDynamicRateLimiter;
+    private readonly Mock<ISignalREventFactory> _mockSignalREventFactory;
     private readonly Mock<ILogger<EnhancedParallelProcessor>> _mockLogger;
     private readonly Mock<IDateTimeProvider> _mockDateTimeProvider;
     private readonly EnhancedParallelProcessor _processor;
@@ -32,6 +34,7 @@ public class EnhancedParallelProcessorSimpleTests : IDisposable
     public EnhancedParallelProcessorSimpleTests()
     {
         _mockDynamicRateLimiter = new Mock<IDynamicRateLimiter>();
+        _mockSignalREventFactory = new Mock<ISignalREventFactory>();
         _mockLogger = new Mock<ILogger<EnhancedParallelProcessor>>();
         _mockDateTimeProvider = new Mock<IDateTimeProvider>();
         
@@ -55,6 +58,7 @@ public class EnhancedParallelProcessorSimpleTests : IDisposable
         
         _processor = new EnhancedParallelProcessor(
             _mockDynamicRateLimiter.Object,
+            _mockSignalREventFactory.Object,
             _mockLogger.Object,
             _mockDateTimeProvider.Object);
     }
@@ -84,6 +88,7 @@ public class EnhancedParallelProcessorSimpleTests : IDisposable
         // Act & Assert
         var act = () => new EnhancedParallelProcessor(
             null!,
+            _mockSignalREventFactory.Object,
             _mockLogger.Object,
             _mockDateTimeProvider.Object);
         
@@ -97,6 +102,7 @@ public class EnhancedParallelProcessorSimpleTests : IDisposable
         // Act & Assert
         var act = () => new EnhancedParallelProcessor(
             _mockDynamicRateLimiter.Object,
+            _mockSignalREventFactory.Object,
             null!,
             _mockDateTimeProvider.Object);
         
@@ -110,6 +116,7 @@ public class EnhancedParallelProcessorSimpleTests : IDisposable
         // Act & Assert
         var act = () => new EnhancedParallelProcessor(
             _mockDynamicRateLimiter.Object,
+            _mockSignalREventFactory.Object,
             _mockLogger.Object,
             null!);
         

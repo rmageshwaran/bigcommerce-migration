@@ -554,7 +554,21 @@ export const EnhancedMigrationDashboard: React.FC<EnhancedMigrationDashboardProp
                         At current speed ({displayValues.currentSpeed.toFixed(1)} entities/sec)
                       </Typography>
                       <Typography variant="caption" color="textSecondary">
-                        Expected completion: {format(new Date(Date.now() + displayValues.estimatedCompletion * 1000), 'PPpp')}
+                        Expected completion: {(() => {
+                          try {
+                            const estimatedMs = displayValues.estimatedCompletion * 1000;
+                            if (isNaN(estimatedMs) || estimatedMs < 0) {
+                              return 'Calculating...';
+                            }
+                            const completionDate = new Date(Date.now() + estimatedMs);
+                            if (isNaN(completionDate.getTime())) {
+                              return 'Calculating...';
+                            }
+                            return format(completionDate, 'PPpp');
+                          } catch {
+                            return 'Calculating...';
+                          }
+                        })()}
                       </Typography>
                     </Box>
                   </Stack>

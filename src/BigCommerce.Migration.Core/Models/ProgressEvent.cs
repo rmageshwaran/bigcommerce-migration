@@ -109,14 +109,56 @@ namespace BigCommerce.Migration.Core.Models
         public int FailedEntities { get; set; }
 
         /// <summary>
+        /// Number of entities successfully processed (ProcessedEntities - FailedEntities)
+        /// Calculated by backend to avoid frontend computation
+        /// </summary>
+        public int SuccessfulEntities { get; set; }
+
+        /// <summary>
         /// Current entity type being processed
         /// </summary>
         public string? CurrentEntityType { get; set; }
 
         /// <summary>
+        /// When the migration started
+        /// Used to calculate elapsed time and processing speed
+        /// </summary>
+        public DateTime? StartTime { get; set; }
+
+        /// <summary>
+        /// How long the migration has been running
+        /// Calculated from StartTime to current time
+        /// </summary>
+        public TimeSpan? ElapsedTime { get; set; }
+
+        /// <summary>
+        /// Current processing speed in entities per second
+        /// Calculated as ProcessedEntities / ElapsedTime.TotalSeconds
+        /// </summary>
+        public double? EntitiesPerSecond { get; set; }
+
+        /// <summary>
         /// Estimated time remaining (optional)
         /// </summary>
         public TimeSpan? EstimatedTimeRemaining { get; set; }
+
+        /// <summary>
+        /// Current batch number being processed
+        /// Used for "Current Processing Status" section
+        /// </summary>
+        public int? CurrentBatchNumber { get; set; }
+
+        /// <summary>
+        /// Current processing activity (e.g., "Fetching", "Processing", "Transforming")
+        /// Used for "Current Processing Status" section
+        /// </summary>
+        public string? CurrentActivity { get; set; }
+
+        /// <summary>
+        /// Detailed information about the current batch being processed
+        /// Used for "Current Processing Status" section batch progress display
+        /// </summary>
+        public CurrentBatchDetails? CurrentBatch { get; set; }
     }
 
     /// <summary>

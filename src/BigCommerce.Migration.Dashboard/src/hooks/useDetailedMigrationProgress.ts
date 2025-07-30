@@ -493,6 +493,44 @@ export const useDetailedMigrationProgress = (
         const unsubscribeEntityProgress = signalRService.current.on('EntityProgressUpdated', handleEntityUpdate);
         const unsubscribeErrors = signalRService.current.on('ErrorOccurred', handleErrorEvent);
         const unsubscribeConnectionState = signalRService.current.on('connectionStateChanged', handleConnectionStateChange);
+
+        // 🎯 CENTRALIZED SIGNALR: Subscribe to DetailedProgress events from sub-batch operations
+        const unsubscribeDetailedProgress = signalRService.current.on('DetailedProgress', (event: any) => {
+          console.log('🎯 DEBUG: Received DetailedProgress event (autoConnect):', event);
+          
+          // Check if this event contains progress data that should update the overall progress
+          if (event && (event.MigrationId === migrationId || event.migrationId === migrationId)) {
+            // If the event has overall progress data, use it to update the progress state
+            if (event.overallProgressPercentage !== undefined || event.overallProgress !== undefined || 
+                event.processedEntities !== undefined || event.totalEntities !== undefined) {
+              
+              console.log('🎯 DEBUG: DetailedProgress contains progress data, updating state (autoConnect)');
+              
+              // Create a progress object from the event data
+              const progressData = {
+                migrationId: event.migrationId || migrationId,
+                status: event.status || 'in_progress',
+                overallProgressPercentage: event.overallProgressPercentage || event.overallProgress || 0,
+                totalEntities: event.totalEntities || 0,
+                processedEntities: event.processedEntities || 0,
+                successfulEntities: event.successfulEntities || 0,
+                failedEntities: event.failedEntities || 0,
+                currentEntity: event.entityType || event.currentEntity || 'entities',
+                entitiesPerSecond: event.entitiesPerSecond || 0,
+                errorRate: event.errorRate || 0,
+                elapsedTime: event.elapsedTime || 0,
+                estimatedTimeRemaining: event.estimatedTimeRemaining || 0,
+                // Preserve existing nested structures or create minimal ones
+                currentProcessing: event.currentProcessing || {},
+                batchProgress: event.batchProgress || {},
+                remainingWork: event.remainingWork || {},
+                performance: event.performance || {}
+              };
+              
+              handleDetailedProgress(progressData);
+            }
+          }
+        });
         
         unsubscribeCallbacks.current = [
           unsubscribeProgress,
@@ -500,7 +538,8 @@ export const useDetailedMigrationProgress = (
           unsubscribeBatchProgress,
           unsubscribeEntityProgress,
           unsubscribeErrors,
-          unsubscribeConnectionState
+          unsubscribeConnectionState,
+          unsubscribeDetailedProgress
         ];
         
         // Update state to connected and not loading
@@ -616,6 +655,44 @@ export const useDetailedMigrationProgress = (
       const unsubscribeEntityProgress = signalRService.current.on('EntityProgressUpdated', handleEntityUpdate);
       const unsubscribeErrors = signalRService.current.on('ErrorOccurred', handleErrorEvent);
       const unsubscribeConnectionState = signalRService.current.on('connectionStateChanged', handleConnectionStateChange);
+
+      // 🎯 CENTRALIZED SIGNALR: Subscribe to DetailedProgress events from sub-batch operations
+      const unsubscribeDetailedProgress = signalRService.current.on('DetailedProgress', (event: any) => {
+        console.log('🎯 DEBUG: Received DetailedProgress event:', event);
+        
+        // Check if this event contains progress data that should update the overall progress
+        if (event && (event.MigrationId === migrationId || event.migrationId === migrationId)) {
+          // If the event has overall progress data, use it to update the progress state
+          if (event.overallProgressPercentage !== undefined || event.overallProgress !== undefined || 
+              event.processedEntities !== undefined || event.totalEntities !== undefined) {
+            
+            console.log('🎯 DEBUG: DetailedProgress contains progress data, updating state');
+            
+            // Create a progress object from the event data
+            const progressData = {
+              migrationId: event.migrationId || migrationId,
+              status: event.status || 'in_progress',
+              overallProgressPercentage: event.overallProgressPercentage || event.overallProgress || 0,
+              totalEntities: event.totalEntities || 0,
+              processedEntities: event.processedEntities || 0,
+              successfulEntities: event.successfulEntities || 0,
+              failedEntities: event.failedEntities || 0,
+              currentEntity: event.entityType || event.currentEntity || 'entities',
+              entitiesPerSecond: event.entitiesPerSecond || 0,
+              errorRate: event.errorRate || 0,
+              elapsedTime: event.elapsedTime || 0,
+              estimatedTimeRemaining: event.estimatedTimeRemaining || 0,
+              // Preserve existing nested structures or create minimal ones
+              currentProcessing: event.currentProcessing || {},
+              batchProgress: event.batchProgress || {},
+              remainingWork: event.remainingWork || {},
+              performance: event.performance || {}
+            };
+            
+            handleDetailedProgress(progressData);
+          }
+        }
+      });
       
       unsubscribeCallbacks.current = [
         unsubscribeProgress,
@@ -623,7 +700,8 @@ export const useDetailedMigrationProgress = (
         unsubscribeBatchProgress,
         unsubscribeEntityProgress,
         unsubscribeErrors,
-        unsubscribeConnectionState
+        unsubscribeConnectionState,
+        unsubscribeDetailedProgress
       ];
       
       // Update connection state to connected

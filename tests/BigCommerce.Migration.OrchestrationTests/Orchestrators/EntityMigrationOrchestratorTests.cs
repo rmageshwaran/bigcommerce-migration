@@ -5,6 +5,7 @@ using BigCommerce.Migration.Orchestration.Models;
 using BigCommerce.Migration.Orchestration.Orchestrators;
 using BigCommerce.Migration.Core.Models;
 using BigCommerce.Migration.Core.Interfaces;
+using BigCommerce.Migration.Core.Services;
 using BigCommerce.Migration.Orchestration.Services;
 
 namespace BigCommerce.Migration.OrchestrationTests.Orchestrators;
@@ -18,6 +19,7 @@ public class EntityMigrationOrchestratorTests
     private readonly Mock<IDurableOrchestrationContext> _contextMock;
     private readonly Mock<ILogger<EntityMigrationOrchestrator>> _loggerMock;
     private readonly Mock<IProgressEventPublisher> _mockProgressEventPublisher;
+    private readonly Mock<ISignalREventFactory> _mockSignalREventFactory;
     private readonly Mock<IParallelBatchProcessingPipeline> _mockParallelPipeline;
     private readonly EntityMigrationOrchestrator _orchestrator;
     private readonly EntityMigrationRequest _testRequest;
@@ -27,8 +29,9 @@ public class EntityMigrationOrchestratorTests
         _contextMock = new Mock<IDurableOrchestrationContext>();
         _loggerMock = new Mock<ILogger<EntityMigrationOrchestrator>>();
         _mockProgressEventPublisher = new Mock<IProgressEventPublisher>();
+        _mockSignalREventFactory = new Mock<ISignalREventFactory>();
         _mockParallelPipeline = new Mock<IParallelBatchProcessingPipeline>();
-        _orchestrator = new EntityMigrationOrchestrator(_loggerMock.Object, _mockProgressEventPublisher.Object, _mockParallelPipeline.Object);
+        _orchestrator = new EntityMigrationOrchestrator(_loggerMock.Object, _mockProgressEventPublisher.Object, _mockSignalREventFactory.Object, _mockParallelPipeline.Object);
         
         _testRequest = new EntityMigrationRequest
         {

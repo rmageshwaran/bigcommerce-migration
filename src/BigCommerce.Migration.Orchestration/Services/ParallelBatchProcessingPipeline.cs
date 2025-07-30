@@ -1,5 +1,6 @@
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
+using BigCommerce.Migration.Core.Services;
 using BigCommerce.Migration.Orchestration.Models;
 using Microsoft.Extensions.Logging;
 
@@ -29,6 +30,7 @@ public class ParallelBatchProcessingPipeline : IParallelBatchProcessingPipeline
 
     private readonly IEnhancedParallelProcessor _parallelProcessor;
     private readonly IProgressEventPublisher _progressEventPublisher;
+    private readonly ISignalREventFactory _signalREventFactory; // 🎯 CENTRALIZED SIGNALR: Factory for consistent event creation
     private readonly ILogger<ParallelBatchProcessingPipeline> _logger;
     private readonly IDateTimeProvider _dateTimeProvider;
 
@@ -42,11 +44,13 @@ public class ParallelBatchProcessingPipeline : IParallelBatchProcessingPipeline
     public ParallelBatchProcessingPipeline(
         IEnhancedParallelProcessor parallelProcessor,
         IProgressEventPublisher progressEventPublisher,
+        ISignalREventFactory signalREventFactory, // 🎯 CENTRALIZED SIGNALR: Factory for consistent event creation
         ILogger<ParallelBatchProcessingPipeline> logger,
         IDateTimeProvider dateTimeProvider)
     {
         _parallelProcessor = parallelProcessor ?? throw new ArgumentNullException(nameof(parallelProcessor));
         _progressEventPublisher = progressEventPublisher ?? throw new ArgumentNullException(nameof(progressEventPublisher));
+        _signalREventFactory = signalREventFactory ?? throw new ArgumentNullException(nameof(signalREventFactory)); // 🎯 CENTRALIZED SIGNALR: Store factory reference
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _dateTimeProvider = dateTimeProvider ?? throw new ArgumentNullException(nameof(dateTimeProvider));
     }
@@ -257,10 +261,9 @@ public class ParallelBatchProcessingPipeline : IParallelBatchProcessingPipeline
         {
             // 🚀 ENHANCED SIGNALR: Emit more frequent progress events to match original ProcessEntityBatch behavior
             
-            // 1. Publish batch progress event (existing pattern) - ✅ CORRECT
-            var batchProgressEvent = new BatchProgressEvent
+            // 1. Publish batch progress event (existing pattern) - ✅ CENTRALIZED SIGNALR: Using factory for consistent event creation
+            var batchProgressEvent = _signalREventFactory.CreateBatchProgress(request.MigrationId, new BatchProgressOptions
             {
-                MigrationId = request.MigrationId,
                 EntityType = request.EntityType,
                 BatchNumber = update.CompletedBatchNumber,
                 TotalBatches = update.TotalBatches,
@@ -269,7 +272,7 @@ public class ParallelBatchProcessingPipeline : IParallelBatchProcessingPipeline
                 FailedCount = update.BatchEntitiesFailed,
                 Status = update.BatchSuccess ? "completed" : "completed_with_errors",
                 ProcessingTime = update.BatchProcessingTime
-            };
+            });
 
             await _progressEventPublisher.PublishBatchProgressAsync(batchProgressEvent);
 
@@ -303,16 +306,16 @@ public class ParallelBatchProcessingPipeline : IParallelBatchProcessingPipeline
     {
         try
         {
-            var finalProgressEvent = new MigrationProgressEvent
+            // 🎯 CENTRALIZED SIGNALR: Using factory for consistent event creation
+            var finalProgressEvent = _signalREventFactory.CreateMigrationProgress(request.MigrationId, new MigrationProgressOptions
             {
-                MigrationId = request.MigrationId,
                 OverallProgress = 100.0, // 100% complete
                 Status = result.Errors.Count > 0 ? "completed_with_errors" : "completed",
                 TotalEntities = result.TotalEntities,
                 ProcessedEntities = result.ProcessedEntities,
                 FailedEntities = result.FailedEntities,
                 CurrentEntityType = request.EntityType
-            };
+            });
 
             await _progressEventPublisher.PublishMigrationProgressAsync(finalProgressEvent);
 

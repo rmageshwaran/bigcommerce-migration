@@ -38,7 +38,7 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
     private readonly object _progressStateLock = new();
     private readonly object _signalRRateLimitLock = new();
     private DateTime _lastSignalRUpdate = DateTime.MinValue;
-    private int _signalRUpdateIntervalMs = 250; // 🎯 SUB-BATCH OPTIMIZATION: Reduced to 250ms for granular sub-batch progress updates
+    private int _signalRUpdateIntervalMs = 100; // 🚨 CRITICAL FIX: Reduced to 100ms for real-time progress bar updates (10/second instead of 4/second)
     private bool _deterministicMode = false;
 
     // Aggregated counters (using Interlocked for thread safety)
@@ -838,11 +838,13 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
 
     /// <summary>
     /// Gets current progress percentage (0.0 to 1.0)
+    /// 🚨 CRITICAL FIX: Calculate based on processed entities, not completed batches
     /// </summary>
     private double GetCurrentProgressPercentage()
     {
-        var completedCount = _completedBatchCount;
-        return _totalBatches > 0 ? (double)completedCount / _totalBatches : 0.0;
+        var totalProcessed = Interlocked.Read(ref _totalEntitiesProcessed);
+        var totalExpected = GetEstimatedTotalEntities();
+        return totalExpected > 0 ? (double)totalProcessed / totalExpected : 0.0;
     }
 
     /// <summary>
@@ -892,7 +894,7 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
                 CurrentEntityType = _entityType,
                 OverallProgress = GetCurrentProgressPercentage() * 100, // Convert to percentage (0-100)
                 Status = "running",
-                TotalEntities = (int)Interlocked.Read(ref _totalEntitiesProcessed) + (int)Interlocked.Read(ref _totalEntitiesFailed),
+                TotalEntities = GetEstimatedTotalEntities(), // 🚨 CRITICAL FIX: Use fixed total (192) instead of dynamic ProcessedEntities + FailedEntities
                 ProcessedEntities = (int)Interlocked.Read(ref _totalEntitiesProcessed),
                 FailedEntities = (int)Interlocked.Read(ref _totalEntitiesFailed)
                 // ✅ Base properties (Timestamp, IsCancelled, HubMethod) auto-populated by factory

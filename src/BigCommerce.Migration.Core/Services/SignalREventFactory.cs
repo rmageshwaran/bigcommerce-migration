@@ -100,9 +100,24 @@ namespace BigCommerce.Migration.Core.Services
                 TotalEntities = options.TotalEntities,
                 ProcessedEntities = options.ProcessedEntities,
                 FailedEntities = options.FailedEntities,
+                SuccessfulEntities = options.SuccessfulEntities ?? Math.Max(0, options.ProcessedEntities - options.FailedEntities), // 🎯 AUTO-CALCULATE: Backend computes SuccessfulEntities to avoid frontend calculation
                 CurrentEntityType = options.CurrentEntityType,
-                EstimatedTimeRemaining = options.EstimatedTimeRemaining
+                
+                // 🎯 TIME TRACKING FIX: Auto-calculate time properties to fix "0m 0s" displays
+                StartTime = options.StartTime,
+                ElapsedTime = options.ElapsedTime ?? (options.StartTime.HasValue ? _dateTimeProvider.UtcNow - options.StartTime.Value : null),
+                
+                // 🎯 BATCH DETAILS FIX: Add real batch tracking for "Current Processing Status" section
+                CurrentBatchNumber = options.CurrentBatchNumber,
+                CurrentActivity = options.CurrentActivity,
+                CurrentBatch = options.CurrentBatch
             };
+            
+            // Calculate EntitiesPerSecond first so it's available for EstimatedTimeRemaining calculation
+            progressEvent.EntitiesPerSecond = options.EntitiesPerSecond ?? CalculateEntitiesPerSecond(options.ProcessedEntities, options.ElapsedTime, options.StartTime);
+            
+            // Calculate EstimatedTimeRemaining using the calculated EntitiesPerSecond
+            progressEvent.EstimatedTimeRemaining = options.EstimatedTimeRemaining ?? CalculateEstimatedTimeRemaining(options.TotalEntities, options.ProcessedEntities, progressEvent.EntitiesPerSecond);
 
             return progressEvent;
         }
@@ -354,6 +369,54 @@ namespace BigCommerce.Migration.Core.Services
         {
             if (options == null)
                 throw new ArgumentNullException(paramName);
+        }
+
+        /// <summary>
+        /// Calculates entities per second processing speed
+        /// Returns null if insufficient data for calculation
+        /// </summary>
+        private double? CalculateEntitiesPerSecond(int processedEntities, TimeSpan? elapsedTime, DateTime? startTime)
+        {
+            TimeSpan? actualElapsedTime = elapsedTime;
+            
+            // If no elapsed time provided but we have start time, calculate it
+            if (!actualElapsedTime.HasValue && startTime.HasValue)
+            {
+                actualElapsedTime = _dateTimeProvider.UtcNow - startTime.Value;
+            }
+            
+            // Need valid elapsed time and some processed entities
+            if (!actualElapsedTime.HasValue || actualElapsedTime.Value.TotalSeconds <= 0 || processedEntities <= 0)
+            {
+                return null;
+            }
+            
+            return processedEntities / actualElapsedTime.Value.TotalSeconds;
+        }
+
+        /// <summary>
+        /// Calculates estimated time remaining for migration completion
+        /// Returns null if insufficient data for calculation
+        /// </summary>
+        private TimeSpan? CalculateEstimatedTimeRemaining(int totalEntities, int processedEntities, double? entitiesPerSecond)
+        {
+            // Need valid processing speed to calculate time estimate
+            if (!entitiesPerSecond.HasValue || entitiesPerSecond.Value <= 0)
+            {
+                return null;
+            }
+            
+            var remainingEntities = totalEntities - processedEntities;
+            
+            // If no entities remain, time remaining is zero
+            if (remainingEntities <= 0)
+            {
+                return TimeSpan.Zero;
+            }
+            
+            // Calculate time remaining: remaining entities / entities per second
+            var estimatedSecondsRemaining = remainingEntities / entitiesPerSecond.Value;
+            return TimeSpan.FromSeconds(estimatedSecondsRemaining);
         }
 
         #endregion

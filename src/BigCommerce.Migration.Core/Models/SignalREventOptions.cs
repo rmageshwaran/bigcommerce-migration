@@ -73,14 +73,50 @@ namespace BigCommerce.Migration.Core.Models
         public int FailedEntities { get; set; }
 
         /// <summary>
+        /// Number of entities successfully processed (optional - will be auto-calculated if not provided)
+        /// If not set, will be calculated as ProcessedEntities - FailedEntities
+        /// </summary>
+        public int? SuccessfulEntities { get; set; }
+
+        /// <summary>
         /// Current entity type being processed
         /// </summary>
         public string? CurrentEntityType { get; set; }
 
         /// <summary>
+        /// When the migration started (optional - will be auto-set if not provided)
+        /// </summary>
+        public DateTime? StartTime { get; set; }
+
+        /// <summary>
+        /// How long the migration has been running (optional - will be auto-calculated if not provided)
+        /// </summary>
+        public TimeSpan? ElapsedTime { get; set; }
+
+        /// <summary>
+        /// Current processing speed in entities per second (optional - will be auto-calculated if not provided)
+        /// </summary>
+        public double? EntitiesPerSecond { get; set; }
+
+        /// <summary>
         /// Estimated time remaining (optional)
         /// </summary>
         public TimeSpan? EstimatedTimeRemaining { get; set; }
+
+        /// <summary>
+        /// Current batch number being processed (optional)
+        /// </summary>
+        public int? CurrentBatchNumber { get; set; }
+
+        /// <summary>
+        /// Current processing activity (optional)
+        /// </summary>
+        public string? CurrentActivity { get; set; }
+
+        /// <summary>
+        /// Detailed information about the current batch (optional)
+        /// </summary>
+        public CurrentBatchDetails? CurrentBatch { get; set; }
     }
 
     /// <summary>

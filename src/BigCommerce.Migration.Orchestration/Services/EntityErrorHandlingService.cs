@@ -306,12 +306,16 @@ public class EntityErrorHandlingService : IEntityErrorHandlingService
 
         try
         {
+            _logger.LogDebug("🔍 Extracting response payload from exception: {ExceptionType}, Data keys: {DataKeys}", 
+                exception.GetType().Name, string.Join(", ", exception.Data.Keys.Cast<object>()));
+
             // ✅ First check if response payload is stored in exception data (from enhanced exceptions)
             if (exception.Data.Contains("ResponsePayload"))
             {
                 var responsePayload = exception.Data["ResponsePayload"]?.ToString();
                 if (!string.IsNullOrEmpty(responsePayload))
                 {
+                    _logger.LogDebug("✅ Found response payload in exception.Data[\"ResponsePayload\"], length: {Length}", responsePayload.Length);
                     return responsePayload;
                 }
             }
@@ -385,6 +389,7 @@ public class EntityErrorHandlingService : IEntityErrorHandlingService
                 }
             }
 
+            _logger.LogDebug("❌ No response payload found in exception");
             return null;
         }
         catch (Exception ex)

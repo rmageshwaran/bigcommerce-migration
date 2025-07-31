@@ -322,7 +322,7 @@ public class ApiRequestHandler : IApiRequestHandler
     /// </summary>
     private HttpRequestException CreateHttpException(HttpStatusCode statusCode, string content, string url)
     {
-        return statusCode switch
+        HttpRequestException exception = statusCode switch
         {
             HttpStatusCode.Unauthorized => new HttpRequestException($"Authentication failed for {url}"),
             HttpStatusCode.Forbidden => new HttpRequestException($"Access forbidden for {url}"),
@@ -331,6 +331,17 @@ public class ApiRequestHandler : IApiRequestHandler
             HttpStatusCode.BadRequest => new HttpRequestException($"Bad request to {url}: {content}"),
             _ => new HttpRequestException($"API request failed with status {statusCode} for {url}: {content}")
         };
+
+        // ✅ FIX: Store response payload in exception data for later extraction by EntityErrorHandlingService
+        if (!string.IsNullOrEmpty(content))
+        {
+            exception.Data["ResponsePayload"] = content;
+            exception.Data["ResponseContent"] = content; // Also store as ResponseContent for compatibility
+            exception.Data["StatusCode"] = statusCode.ToString();
+            exception.Data["RequestUrl"] = url;
+        }
+
+        return exception;
     }
 
     /// <summary>

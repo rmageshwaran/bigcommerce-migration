@@ -386,9 +386,8 @@ export const useDetailedMigrationProgress = (
 
     addEvent('DetailedProgress', progress, `Detailed progress: ${(progress.overallProgressPercentage || 0).toFixed(1)}%`);
 
-    if (enableNotifications && progress.status === 'completed') {
-      notificationService.success('Migration Complete', `Migration ${migrationId} completed successfully!`);
-    }
+    // ✅ FIX: Don't show completion notification here - DashboardContext handles this centrally
+    // This prevents duplicate notifications when migration completes
   }, [migrationId, addEvent, enableNotifications]);
 
   // Handle processing context updates

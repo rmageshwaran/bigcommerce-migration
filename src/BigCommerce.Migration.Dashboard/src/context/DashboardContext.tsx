@@ -683,13 +683,8 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
         };
         dispatch({ type: 'UPDATE_MIGRATION_PROGRESS', payload: completedProgress });
         
-        // Show completion notification
-        const migrationName = `Migration ${migrationId}`;
-        notificationService.migrationCompleted(
-          migrationId,
-          migrationName,
-          entityData.ProcessingTime || 'just completed'
-        );
+        // ✅ FIX: Don't show completion notification here - MigrationStatus handler already does this
+        // This prevents duplicate notifications when migration completes
       } else if (migrationId) {
         // Update entity counts for other statuses
         dispatch({ 

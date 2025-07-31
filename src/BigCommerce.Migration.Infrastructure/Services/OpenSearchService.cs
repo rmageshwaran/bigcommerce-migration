@@ -301,8 +301,8 @@ public class OpenSearchService : IOpenSearchService
         {
             // Use specific error index pattern for error queries, broader pattern for others
             var indexPattern = !string.IsNullOrEmpty(queryRequest.Level) && queryRequest.Level.Equals("Error", StringComparison.OrdinalIgnoreCase)
-                ? "bigcommerce-migration-logs-errors-*"  // Specific error index for error queries
-                : "bigcommerce-migration-*";             // Broader index for other queries
+                ? $"{_configuration.DefaultIndex}-errors-*"  // ✅ FIX: Match actual error index pattern (remove extra "logs")
+                : $"{_configuration.DefaultIndex}-*";        // Broader index for other queries
             
             // Build the actual query using descriptor pattern
             var queryDescriptor = BuildStructuredQueryDescriptor(new QueryContainerDescriptor<object>(), queryRequest);
@@ -351,7 +351,7 @@ public class OpenSearchService : IOpenSearchService
         if (queryRequest != null && !string.IsNullOrEmpty(queryRequest.Level) && 
             queryRequest.Level.Equals("Error", StringComparison.OrdinalIgnoreCase))
         {
-            return $"{_configuration.DefaultIndex}-logs-errors-*";
+            return $"{_configuration.DefaultIndex}-errors-*"; // ✅ FIX: Match actual error index pattern (remove extra "logs")
         }
         
         // For compatibility with existing data, use wildcard pattern like legacy search

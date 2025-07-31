@@ -16,11 +16,13 @@ public class BrandCreationStrategy : IEntityCreationStrategy
 {
     private readonly IApiRequestHandler _apiRequestHandler;
     private readonly ILogger<BrandCreationStrategy> _logger;
+    private readonly IEntityErrorHandlingService _errorHandlingService;
 
-    public BrandCreationStrategy(IApiRequestHandler apiRequestHandler, ILogger<BrandCreationStrategy> logger)
+    public BrandCreationStrategy(IApiRequestHandler apiRequestHandler, ILogger<BrandCreationStrategy> logger, IEntityErrorHandlingService errorHandlingService)
     {
         _apiRequestHandler = apiRequestHandler ?? throw new ArgumentNullException(nameof(apiRequestHandler));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _errorHandlingService = errorHandlingService ?? throw new ArgumentNullException(nameof(errorHandlingService));
     }
 
     /// <summary>
@@ -123,7 +125,80 @@ public class BrandCreationStrategy : IEntityCreationStrategy
             _logger.LogError(ex, "🏪 [BRAND-{ExecutionId}] ❌ Failed to create {BrandCount} brands in migration {MigrationId}. {DetailedError}",
                 executionId, entities.Count, migrationId, detailedErrorMessage);
 
+            // 🚨 FIX: Log each failed brand to OpenSearch before returning empty list
+            // This ensures "already exists" and other brand errors appear in OpenSearch logs
+            // By logging here and NOT re-throwing, we prevent double logging from EntityCreateService
+            try
+            {
+                _logger.LogInformation("🏪 [BRAND-{ExecutionId}] 📦 OPENSEARCH LOGGING: Logging {BrandCount} brand entities with actual API error details to OpenSearch", 
+                    executionId, entities.Count);
+
+                foreach (var entity in entities)
+                {
+                    // ✅ FIX: Use original source entity ID instead of destination ID (which doesn't exist yet)
+                    var brandId = entity.TryGetValue("_original_entity_id", out var originalId) ? originalId?.ToString() :
+                                  entity.TryGetValue("id", out var id) ? id?.ToString() : "unknown";
+                    var brandName = entity.TryGetValue("name", out var name) ? name?.ToString() : "unknown";
+
+                    // 📦 Prepare request payload for OpenSearch
+                    var requestPayload = System.Text.Json.JsonSerializer.Serialize(entity, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+                    var responsePayload = ExtractResponsePayloadFromException(ex);
+
+                    // ✅ Extract simple error message for OpenSearch errorMessage field
+                    var simpleErrorMessage = ExtractSimpleErrorMessage(detailedErrorMessage);
+                    
+                    // ✅ Create enhanced exception with actual API error details (same as categories)
+                    var brandFailureException = new InvalidOperationException(
+                        $"API Error creating brand '{brandName}' (ID: {brandId}): {detailedErrorMessage}", ex);
+                    
+                    // Add response payload and other details to the exception data (same as categories)
+                    if (!string.IsNullOrEmpty(responsePayload))
+                    {
+                        brandFailureException.Data["ResponsePayload"] = responsePayload;
+                    }
+                    brandFailureException.Data["ApiErrorMessage"] = detailedErrorMessage;
+                    brandFailureException.Data["OriginalStackTrace"] = ex.StackTrace ?? string.Empty;
+                    brandFailureException.Data["EntityName"] = brandName;
+                    brandFailureException.Data["EntityId"] = brandId;
+
+                    // Create a minimal batch request for logging compatibility
+                    var logBatch = new Models.BatchProcessingRequest
+                    {
+                        MigrationId = migrationId,
+                        EntityType = "brands",
+                        BatchNumber = 1,
+                        SourceStore = destinationStore, // Best approximation for logging
+                        DestinationStore = destinationStore
+                    };
+
+                    // ✅ FIX: Check if there's an enhanced LogEntityErrorAsync that accepts request and response payloads
+                    // For now, use the standard method with responsePayload and simpleErrorMessage
+                    await _errorHandlingService.LogEntityErrorAsync(
+                        brandFailureException,
+                        entity,
+                        logBatch,
+                        brandId,
+                        responsePayload ?? "No response - batch failure",
+                        simpleErrorMessage,
+                        cancellationToken);
+
+                    _logger.LogDebug("🏪 [BRAND-{ExecutionId}] ✅ Logged brand '{BrandName}' (ID: {BrandId}) error to OpenSearch", 
+                        executionId, brandName, brandId);
+                }
+
+                _logger.LogInformation("🏪 [BRAND-{ExecutionId}] ✅ Successfully logged all {BrandCount} brands with actual API error details to OpenSearch", 
+                    executionId, entities.Count);
+            }
+            catch (Exception logEx)
+            {
+                _logger.LogError(logEx, "🏪 [BRAND-{ExecutionId}] ❌ CRITICAL: Failed to log brand errors to OpenSearch for migration {MigrationId}", 
+                    executionId, migrationId);
+                // Don't re-throw to avoid masking the original brand creation failure
+            }
+
             // Return empty list to avoid causing Durable Functions replay issues
+            // 🔑 KEY: By NOT re-throwing the exception, EntityCreateService won't store error details 
+            // in request.AdditionalData, preventing ProcessEntityBatchActivity from double-logging
             _logger.LogWarning("🏪 [BRAND-{ExecutionId}] Returning empty result to prevent replay in migration {MigrationId}", 
                 executionId, migrationId);
             
@@ -193,6 +268,50 @@ public class BrandCreationStrategy : IEntityCreationStrategy
         }
 
         return string.Empty;
+    }
+
+    /// <summary>
+    /// Extracts simple error message from API error response for OpenSearch errorMessage field
+    /// </summary>
+    /// <param name="detailedErrorMessage">The detailed error message containing API response</param>
+    /// <returns>Simple error message (e.g., "A duplicate brand with the name: X was found") or empty string</returns>
+    private static string ExtractSimpleErrorMessage(string detailedErrorMessage)
+    {
+        if (string.IsNullOrEmpty(detailedErrorMessage)) return string.Empty;
+
+        try
+        {
+            // Look for BigCommerce API error format: {"title":"A duplicate brand with the name: X was found",...}
+            var titleStart = detailedErrorMessage.IndexOf("\"title\":\"", StringComparison.OrdinalIgnoreCase);
+            if (titleStart >= 0)
+            {
+                titleStart += "\"title\":\"".Length;
+                var titleEnd = detailedErrorMessage.IndexOf("\"", titleStart);
+                if (titleEnd > titleStart)
+                {
+                    return detailedErrorMessage.Substring(titleStart, titleEnd - titleStart);
+                }
+            }
+
+            // Fallback: Look for common error patterns
+            if (detailedErrorMessage.Contains("duplicate", StringComparison.OrdinalIgnoreCase))
+            {
+                return detailedErrorMessage.Contains("brand", StringComparison.OrdinalIgnoreCase) 
+                    ? "Duplicate brand name found" 
+                    : "Duplicate entity found";
+            }
+
+            // If no specific pattern found, return first sentence or up to 100 chars
+            var firstSentence = detailedErrorMessage.Split('.', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim();
+            return string.IsNullOrEmpty(firstSentence) 
+                ? (detailedErrorMessage.Length > 100 ? detailedErrorMessage.Substring(0, 100) + "..." : detailedErrorMessage)
+                : firstSentence;
+        }
+        catch
+        {
+            // If parsing fails, return truncated version
+            return detailedErrorMessage.Length > 100 ? detailedErrorMessage.Substring(0, 100) + "..." : detailedErrorMessage;
+        }
     }
 
     /// <summary>

@@ -370,7 +370,7 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
                 OverallProgress = subBatchProgress, // Already in percentage (0-100)
                 Status = migrationStatus, // 🚨 STATUS FIX: Use dynamic status instead of hardcoded "running"
                 TotalEntities = totalEntities,
-                ProcessedEntities = (int)totalSubBatchEntitiesProcessed,
+                ProcessedEntities = totalProcessed, // 🚨 FIX: Send total processed (successful + failed) instead of just successful
                 FailedEntities = (int)totalSubBatchEntitiesFailed,
                 ElapsedTime = _dateTimeProvider.UtcNow - _startTime,
                 EstimatedTimeRemaining = CalculateEstimatedTimeRemaining()
@@ -381,8 +381,8 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
 
             await _progressEventPublisher.PublishMigrationProgressAsync(progressEvent, cancellationToken);
 
-            _logger.LogInformation("📡 [SUB-BATCH-PROGRESS] Sent progress update: {Progress:F1}%, {Status}, {ProcessedEntities}/{TotalEntities} entities", 
-                subBatchProgress, migrationStatus, totalSubBatchEntitiesProcessed, totalEntities);
+            _logger.LogInformation("📡 [SUB-BATCH-PROGRESS] Sent progress update: {Progress:F1}%, {Status}, {ProcessedEntities}/{TotalEntities} entities (Successful: {SuccessfulEntities}, Failed: {FailedEntities})", 
+                subBatchProgress, migrationStatus, totalProcessed, totalEntities, totalSubBatchEntitiesProcessed, totalSubBatchEntitiesFailed);
             
             // 🎯 STATUS TRACKING: Log when migration completes
             if (migrationStatus == "completed")
@@ -929,7 +929,7 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
                 OverallProgress = currentProgress, // Convert to percentage (0-100)
                 Status = migrationStatus, // 🚨 STATUS FIX: Use dynamic status instead of hardcoded "running"
                 TotalEntities = totalEntities, // 🚨 CRITICAL FIX: Use actual total entities (192) instead of estimated (200)
-                ProcessedEntities = processedEntities,
+                ProcessedEntities = totalProcessed, // 🚨 FIX: Send total processed (successful + failed) instead of just successful
                 FailedEntities = failedEntities
                 // ✅ Base properties (Timestamp, IsCancelled, HubMethod) auto-populated by factory
                 // ✅ Validation built-in
@@ -938,8 +938,8 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
 
             await _progressEventPublisher.PublishMigrationProgressAsync(progressEvent, cancellationToken);
             
-            _logger.LogInformation("📊 [SIGNALR-UPDATE] Sent progress: {ProcessedEntities}/{TotalEntities} ({Progress:F1}%), Status: {Status}", 
-                processedEntities, totalEntities, currentProgress, migrationStatus);
+            _logger.LogInformation("📊 [SIGNALR-UPDATE] Sent progress: {ProcessedEntities}/{TotalEntities} ({Progress:F1}%), Status: {Status} (Successful: {SuccessfulEntities}, Failed: {FailedEntities})", 
+                totalProcessed, totalEntities, currentProgress, migrationStatus, processedEntities, failedEntities);
                 
             // 🎯 STATUS TRACKING: Log when migration completes
             if (migrationStatus == "completed")

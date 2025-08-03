@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Moq;
 using BigCommerce.Migration.Core.Interfaces;
+using BigCommerce.Migration.Core.Services;
 using BigCommerce.Migration.Orchestration.Services;
 using Xunit;
 
@@ -13,6 +14,7 @@ public class ProgressTrackerTests
 {
     private readonly Mock<ILogger<ProgressTracker>> _mockLogger;
     private readonly Mock<IProgressEventPublisher> _mockProgressEventPublisher;
+    private readonly Mock<ISignalREventFactory> _mockSignalREventFactory;
     private readonly ProgressTracker _service;
     private readonly string _testMigrationId = "test-migration-123";
 
@@ -20,7 +22,8 @@ public class ProgressTrackerTests
     {
         _mockLogger = new Mock<ILogger<ProgressTracker>>();
         _mockProgressEventPublisher = new Mock<IProgressEventPublisher>();
-        _service = new ProgressTracker(_mockLogger.Object, _mockProgressEventPublisher.Object);
+        _mockSignalREventFactory = new Mock<ISignalREventFactory>();
+        _service = new ProgressTracker(_mockLogger.Object, _mockProgressEventPublisher.Object, _mockSignalREventFactory.Object);
     }
 
     [Fact]

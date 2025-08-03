@@ -44,6 +44,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BigCommerce.Migration.Integ
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "BigCommerce.Migration.CodeAnalysis", "src\BigCommerce.Migration.CodeAnalysis\BigCommerce.Migration.CodeAnalysis.csproj", "{8C5E7B2A-3F1E-4D2B-9A8F-7E6D5C4B3A9E}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BigCommerce.Migration.PerformanceTests", "tests\BigCommerce.Migration.PerformanceTests\BigCommerce.Migration.PerformanceTests.csproj", "{27371FD9-CE80-46DB-9830-A3DAF84BA7D5}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -82,6 +84,10 @@ Global
 		{8C5E7B2A-3F1E-4D2B-9A8F-7E6D5C4B3A9E}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{8C5E7B2A-3F1E-4D2B-9A8F-7E6D5C4B3A9E}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{8C5E7B2A-3F1E-4D2B-9A8F-7E6D5C4B3A9E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{27371FD9-CE80-46DB-9830-A3DAF84BA7D5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{27371FD9-CE80-46DB-9830-A3DAF84BA7D5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{27371FD9-CE80-46DB-9830-A3DAF84BA7D5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{27371FD9-CE80-46DB-9830-A3DAF84BA7D5}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -95,6 +101,7 @@ Global
 		{F59DC0CA-F4BC-4BD4-AD05-4B060350F808} = {ED8079DD-2B06-4030-9F0F-DC548F98929C}
 		{4BC7A6F0-E55D-46C8-9902-7AE42D869737} = {ED8079DD-2B06-4030-9F0F-DC548F98929C}
 		{8C5E7B2A-3F1E-4D2B-9A8F-7E6D5C4B3A9E} = {8BB2217D-0F2D-4BB1-8E4B-CDD04ADCF3DF}
+		{27371FD9-CE80-46DB-9830-A3DAF84BA7D5} = {ED8079DD-2B06-4030-9F0F-DC548F98929C}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {8F7A9E2C-4B1D-4E3A-9F5B-2C8E7A1B9D4F}

@@ -8,6 +8,7 @@ using Microsoft.Azure.Functions.Worker.Extensions.SignalRService;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
 using BigCommerce.Migration.Core.Models;
+using BigCommerce.Migration.Core.Services;
 
 namespace BigCommerce.Migration.Functions.Functions
 {
@@ -19,10 +20,14 @@ namespace BigCommerce.Migration.Functions.Functions
     public class SignalRProgressFunctions
     {
         private readonly ILogger<SignalRProgressFunctions> _logger;
+        private readonly ISignalRMessageConverter _signalRMessageConverter; // 🎯 CENTRALIZED SIGNALR: Frontend conversion
 
-        public SignalRProgressFunctions(ILogger<SignalRProgressFunctions> logger)
+        public SignalRProgressFunctions(
+            ILogger<SignalRProgressFunctions> logger,
+            ISignalRMessageConverter signalRMessageConverter) // 🎯 CENTRALIZED SIGNALR: Frontend conversion
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _signalRMessageConverter = signalRMessageConverter ?? throw new ArgumentNullException(nameof(signalRMessageConverter)); // 🎯 CENTRALIZED SIGNALR: Store converter reference
         }
 
         /// <summary>
@@ -193,6 +198,10 @@ namespace BigCommerce.Migration.Functions.Functions
                     "entity" => JsonSerializer.Deserialize<EntityProgressEvent>(queueMessage ?? string.Empty, options),
                     "error" => JsonSerializer.Deserialize<ErrorProgressEvent>(queueMessage ?? string.Empty, options),
                     "status" => JsonSerializer.Deserialize<StatusProgressEvent>(queueMessage ?? string.Empty, options),
+                    "subbatch-started" => JsonSerializer.Deserialize<SubBatchStartedEvent>(queueMessage ?? string.Empty, options),
+                    "subbatch-completed" => JsonSerializer.Deserialize<SubBatchCompletedEvent>(queueMessage ?? string.Empty, options),
+                    "subbatch-progress" => JsonSerializer.Deserialize<SubBatchMigrationProgressEvent>(queueMessage ?? string.Empty, options),
+                    "cancellation-progress" => JsonSerializer.Deserialize<CancellationProgressEvent>(queueMessage ?? string.Empty, options),
                     _ => null
                 };
 
@@ -228,19 +237,52 @@ namespace BigCommerce.Migration.Functions.Functions
                 _logger.LogInformation("🔨 [SIGNALR-CREATE] Target hub method: {HubMethod}", progressEvent.HubMethod);
                 _logger.LogInformation("🔨 [SIGNALR-CREATE] Message payload type: {PayloadType}", progressEvent.GetType().Name);
 
-                // Log the payload that will be sent to SignalR clients
+                // 📡 ENHANCED SIGNALR TRACING: Log detailed payload for debugging sync issues
                 try
                 {
                     var payloadJson = JsonSerializer.Serialize(progressEvent, new JsonSerializerOptions { WriteIndented = true });
                     _logger.LogInformation("🔨 [SIGNALR-CREATE] SignalR payload:\n{PayloadJson}", payloadJson);
+                    
+                    // 🎯 SPECIFIC LOGGING FOR SUB-BATCH EVENTS: Track entity counts and progress for sync debugging
+                    if (progressEvent is SubBatchCompletedEvent subBatchEvent)
+                    {
+                        _logger.LogInformation("📊 [SIGNALR-BROADCAST] SubBatchCompleted OUTBOUND: " +
+                            "ParentBatch={ParentBatch}, " +
+                            "SubBatch={SubBatch}/{TotalSubBatches}, " +
+                            "Cumulative={CumulativeSuccessful}/{CumulativeFailed} of {TotalMigration}, " +
+                            "Progress={Progress:F2}%, " +
+                            "Expected Frontend Display: '{ExpectedDisplay}', " +
+                            "Timestamp={Timestamp}",
+                            subBatchEvent.ParentBatchNumber,
+                            subBatchEvent.SubBatchNumber, subBatchEvent.TotalSubBatches,
+                            subBatchEvent.CumulativeSuccessfulEntities, subBatchEvent.CumulativeFailedEntities, subBatchEvent.TotalMigrationEntities,
+                            subBatchEvent.ProgressPercentage,
+                            $"{subBatchEvent.CumulativeSuccessfulEntities}/{subBatchEvent.TotalMigrationEntities} ({subBatchEvent.ProgressPercentage:F1}%)",
+                            subBatchEvent.Timestamp.ToString("HH:mm:ss.fff"));
+                    }
+                    else if (progressEvent is MigrationProgressEvent migrationEvent)
+                    {
+                        _logger.LogInformation("📊 [SIGNALR-BROADCAST] MigrationProgress OUTBOUND: " +
+                            "ProcessedEntities={ProcessedEntities}/{TotalEntities}, " +
+                            "OverallProgress={OverallProgress}%, " +
+                            "Status={Status}, " +
+                            "Expected Frontend Display: '{ExpectedDisplay}', " +
+                            "Timestamp={Timestamp}",
+                            migrationEvent.ProcessedEntities, migrationEvent.TotalEntities,
+                            migrationEvent.OverallProgress,
+                            migrationEvent.Status,
+                            $"{migrationEvent.ProcessedEntities}/{migrationEvent.TotalEntities} ({migrationEvent.OverallProgress:F1}%)",
+                            migrationEvent.Timestamp.ToString("HH:mm:ss.fff"));
+                    }
                 }
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, "⚠️ [SIGNALR-CREATE] Failed to serialize payload for logging");
                 }
 
-                // Create SignalR message with proper constructor
-                var signalRMessage = new SignalRMessageAction(progressEvent.HubMethod, new object[] { progressEvent });
+                // 🎯 CENTRALIZED SIGNALR: Convert to frontend format (PascalCase → camelCase) before sending
+                var frontendEvent = _signalRMessageConverter.ConvertToFrontendObject(progressEvent);
+                var signalRMessage = new SignalRMessageAction(progressEvent.HubMethod, new object[] { frontendEvent });
                 
                 _logger.LogInformation("✅ [SIGNALR-CREATE] Successfully created SignalR message action!");
                 return signalRMessage;

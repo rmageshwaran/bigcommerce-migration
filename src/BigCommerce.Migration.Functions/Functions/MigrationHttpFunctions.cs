@@ -24,6 +24,7 @@ public class MigrationHttpFunctions
     private readonly IQueueService _queueService;
     private readonly IBlobService _blobService;
     private readonly IProgressTracker _progressTracker;
+    private readonly ILiveCancellationManager _liveCancellationManager;
 
     /// <summary>
     /// Initializes a new instance of the MigrationHttpFunctions class
@@ -35,6 +36,8 @@ public class MigrationHttpFunctions
     /// <param name="migrationStorageService">Migration storage service</param>
     /// <param name="queueService">Queue service</param>
     /// <param name="blobService">Blob service</param>
+    /// <param name="progressTracker">Progress tracker</param>
+    /// <param name="liveCancellationManager">Live cancellation manager</param>
     public MigrationHttpFunctions(
         ILogger<MigrationHttpFunctions> logger,
         IBigCommerceApiClient bigCommerceApiClient,
@@ -43,7 +46,8 @@ public class MigrationHttpFunctions
         IMigrationStorageService migrationStorageService,
         IQueueService queueService,
         IBlobService blobService,
-        IProgressTracker progressTracker)
+        IProgressTracker progressTracker,
+        ILiveCancellationManager liveCancellationManager)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _bigCommerceApiClient = bigCommerceApiClient ?? throw new ArgumentNullException(nameof(bigCommerceApiClient));
@@ -53,6 +57,7 @@ public class MigrationHttpFunctions
         _queueService = queueService ?? throw new ArgumentNullException(nameof(queueService));
         _blobService = blobService ?? throw new ArgumentNullException(nameof(blobService));
         _progressTracker = progressTracker ?? throw new ArgumentNullException(nameof(progressTracker));
+        _liveCancellationManager = liveCancellationManager ?? throw new ArgumentNullException(nameof(liveCancellationManager));
     }
 
     /// <summary>
@@ -122,6 +127,8 @@ public class MigrationHttpFunctions
             {
                 return await CreateErrorResponse(req, HttpStatusCode.BadRequest, validationResult.ErrorMessage, migrationId);
             }
+
+
 
             // Create migration entry for Azure Storage
             var migrationEntry = new Core.Models.MigrationEntry
@@ -457,35 +464,74 @@ public class MigrationHttpFunctions
     }
 
     /// <summary>
-    /// Cancels a migration operation
+    /// Live cancellation with multi-level scope support (Task 7.6)
     /// </summary>
     /// <param name="req">HTTP request</param>
     /// <param name="migrationId">Migration ID</param>
     /// <param name="context">Function execution context</param>
-    /// <returns>HTTP response with cancellation status</returns>
-    [Function("CancelMigration")]
-    public async Task<HttpResponseData> CancelMigration(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "migrations/{migrationId}/cancel")] HttpRequestData req,
+    /// <returns>HTTP response with live cancellation status</returns>
+    [Function("LiveCancelMigration")]
+    [OpenApiOperation(operationId: "LiveCancelMigration", tags: new[] { "Migrations" },
+        Summary = "Live cancel migration with scope control",
+        Description = "Cancels a migration with real-time scope control (Migration, EntityType, Batch, Store levels).")]
+    [OpenApiRequestBody(contentType: "application/json", bodyType: typeof(LiveCancellationRequest),
+        Description = "Live cancellation request with scope and reason")]
+    [OpenApiResponseWithBody(statusCode: HttpStatusCode.OK, contentType: "application/json",
+        bodyType: typeof(LiveCancellationResponse), Description = "Live cancellation completed successfully")]
+    [OpenApiResponseWithBody(statusCode: HttpStatusCode.NotFound, contentType: "application/json",
+        bodyType: typeof(object), Description = "Migration not found")]
+    [OpenApiResponseWithBody(statusCode: HttpStatusCode.BadRequest, contentType: "application/json",
+        bodyType: typeof(object), Description = "Invalid cancellation request")]
+    public async Task<HttpResponseData> LiveCancelMigration(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "migrations/{migrationId}/live-cancel")] HttpRequestData req,
         string migrationId,
         FunctionContext context)
     {
         try
         {
-            _logger.LogInformation("Cancelling migration. MigrationId: {MigrationId}", migrationId);
+            _logger.LogInformation("Processing live cancellation request. MigrationId: {MigrationId}", migrationId);
 
             // Validate migration ID
             if (string.IsNullOrWhiteSpace(migrationId))
             {
-                _logger.LogWarning("Empty migration ID provided for cancellation");
+                _logger.LogWarning("Empty migration ID provided for live cancellation");
                 return await CreateErrorResponse(req, HttpStatusCode.BadRequest, "Migration ID is required", migrationId);
             }
 
-            // Get current migration status from storage
+            // Parse request body
+            string requestBody = await new StreamReader(req.Body).ReadToEndAsync();
+            if (string.IsNullOrWhiteSpace(requestBody))
+            {
+                _logger.LogWarning("Empty request body for live cancellation. MigrationId: {MigrationId}", migrationId);
+                return await CreateErrorResponse(req, HttpStatusCode.BadRequest, "Request body is required", migrationId);
+            }
+
+            LiveCancellationRequest? request;
+            try
+            {
+                request = JsonSerializer.Deserialize<LiveCancellationRequest>(requestBody, new JsonSerializerOptions
+                {
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+                });
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogWarning(ex, "Invalid JSON in live cancellation request. MigrationId: {MigrationId}", migrationId);
+                return await CreateErrorResponse(req, HttpStatusCode.BadRequest, "Invalid request format", migrationId);
+            }
+
+            // Validate request
+            if (request == null || string.IsNullOrWhiteSpace(request.Reason))
+            {
+                _logger.LogWarning("Invalid live cancellation request. MigrationId: {MigrationId}", migrationId);
+                return await CreateErrorResponse(req, HttpStatusCode.BadRequest, "Invalid cancellation request", migrationId);
+            }
+
+            // Check if migration exists
             var migrationEntry = await _migrationStorageService.GetMigrationAsync(migrationId);
-            
             if (migrationEntry == null)
             {
-                _logger.LogWarning("Migration not found for cancellation. MigrationId: {MigrationId}", migrationId);
+                _logger.LogWarning("Migration not found for live cancellation. MigrationId: {MigrationId}", migrationId);
                 return await CreateErrorResponse(req, HttpStatusCode.NotFound, "Migration not found", migrationId);
             }
 
@@ -502,27 +548,68 @@ public class MigrationHttpFunctions
                 return await CreateErrorResponse(req, HttpStatusCode.BadRequest, "Migration already cancelled", migrationId);
             }
 
-            // Update migration status to cancelled
-            migrationEntry.Status = Core.Models.MigrationStatus.Cancelled;
-            migrationEntry.UpdatedAt = DateTime.UtcNow;
-            await _migrationStorageService.UpdateMigrationAsync(migrationEntry);
-
-            // Create cancellation token for tracking
-            await _migrationStorageService.CreateCancellationTokenAsync(migrationId, "User requested cancellation");
-
-            // Send cancellation message to queue for processing
-            await _queueService.SendCancellationMessageAsync(migrationId, "User requested cancellation");
-            _logger.LogInformation("Migration cancellation message sent to queue. MigrationId: {MigrationId}", migrationId);
+            // Use ILiveCancellationManager for real-time cancellation [[memory:5019419]]
+            var cancellationScope = MapToCancellationScope(request.Scope);
             
+            _logger.LogInformation("Initiating live cancellation. MigrationId: {MigrationId}, Scope: {Scope}, Reason: {Reason}", 
+                migrationId, request.Scope, request.Reason);
+
+            // Trigger live cancellation through the cancellation manager
+            await _liveCancellationManager.CancelAsync(
+                migrationId,
+                cancellationScope,
+                request.Reason,
+                request.EntityType,
+                request.BatchId,
+                request.StoreId
+            );
+
+            // ✅ CRITICAL FIX: Also send queue message for persistent token creation
+            // This ensures cancellation tokens are persisted and processed by the queue system
+            await _queueService.SendCancellationMessageAsync(migrationId, request.Reason);
+            _logger.LogInformation("🚫 [LIVE-CANCEL-QUEUE] Cancellation message sent to queue for persistent token creation. MigrationId: {MigrationId}", migrationId);
+
+            // Update migration status if it's a full migration cancellation
+            if (request.Scope == "Migration")
+            {
+                migrationEntry.Status = Core.Models.MigrationStatus.Cancelled;
+                migrationEntry.UpdatedAt = DateTime.UtcNow;
+                await _migrationStorageService.UpdateMigrationAsync(migrationEntry);
+            }
+
+            // Log to OpenSearch with structured data [[memory:5036334]]
+            await _openSearchService.LogErrorAsync(
+                "LiveCancellationEndpoint", 
+                new Exception($"Live cancellation requested: {request.Scope} scope"),
+                new Dictionary<string, object>
+                {
+                    ["migrationId"] = migrationId,
+                    ["entityType"] = request.EntityType ?? "all",
+                    ["errorType"] = "LiveCancellation",
+                    ["severity"] = "Info",
+                    ["component"] = "LiveCancellationEndpoint",
+                    ["operationContext"] = $"LiveCancel-{request.Scope}",
+                    ["Category"] = "Internal", // Internal operation, not user-visible error [[memory:5036334]]
+                    ["scope"] = request.Scope,
+                    ["reason"] = request.Reason,
+                    ["requestedBy"] = "Dashboard User"
+                });
+
+            _logger.LogInformation("Live cancellation initiated successfully. MigrationId: {MigrationId}, Scope: {Scope}", 
+                migrationId, request.Scope);
+
+            // Create response
             var response = req.CreateResponse(HttpStatusCode.OK);
             response.Headers.Add("Content-Type", "application/json; charset=utf-8");
             
-            var responseData = new
+            var responseData = new LiveCancellationResponse
             {
-                migrationId = migrationId,
-                status = "cancelled",
-                message = "Migration cancelled successfully",
-                cancelledAt = DateTime.UtcNow
+                MigrationId = migrationId,
+                Scope = request.Scope,
+                Status = "cancelled",
+                Message = $"{request.Scope} cancellation initiated successfully",
+                CancelledAt = DateTime.UtcNow.ToString("O"),
+                AffectedComponents = GetAffectedComponents(request.Scope)
             };
 
             await response.WriteStringAsync(JsonSerializer.Serialize(responseData, new JsonSerializerOptions
@@ -534,9 +621,39 @@ public class MigrationHttpFunctions
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error cancelling migration. MigrationId: {MigrationId}", migrationId);
+            _logger.LogError(ex, "Error processing live cancellation request. MigrationId: {MigrationId}", migrationId);
             return await CreateErrorResponse(req, HttpStatusCode.InternalServerError, "Internal server error occurred", migrationId);
         }
+    }
+
+    /// <summary>
+    /// Maps string scope to CancellationScope enum
+    /// </summary>
+    private static Core.Models.CancellationScope MapToCancellationScope(string scope)
+    {
+        return scope switch
+        {
+            "Migration" => Core.Models.CancellationScope.Migration,
+            "EntityType" => Core.Models.CancellationScope.EntityType,
+            "Batch" => Core.Models.CancellationScope.Batch,
+            "Store" => Core.Models.CancellationScope.Store,
+            _ => Core.Models.CancellationScope.Migration
+        };
+    }
+
+    /// <summary>
+    /// Gets affected components based on cancellation scope
+    /// </summary>
+    private static string[] GetAffectedComponents(string scope)
+    {
+        return scope switch
+        {
+            "Migration" => new[] { "All entities", "All batches", "All stores", "All orchestrators" },
+            "EntityType" => new[] { "Current entity type", "Related batches", "Entity-specific activities" },
+            "Batch" => new[] { "Current batch", "Batch activities" },
+            "Store" => new[] { "Current store", "Store-specific processing" },
+            _ => new[] { "Unknown scope" }
+        };
     }
 
     /// <summary>
@@ -1064,11 +1181,13 @@ public class MigrationHttpFunctions
             
             // Convert OpenSearch results to proper format - handle JsonElement results
             var errorLogs = new List<Dictionary<string, object>>();
-            foreach (var result in searchResults)
+            if (searchResults != null)
+            {
+                foreach (var result in searchResults)
             {
                 if (result is JsonElement jsonElement)
                 {
-                    errorLogs.Add(ParseJsonElementToDictionary(jsonElement));
+                    errorLogs.Add(ParseJsonElementToDictionary(jsonElement)!);
                 }
                 else if (result is Dictionary<string, object> dict)
                 {
@@ -1078,6 +1197,7 @@ public class MigrationHttpFunctions
                 {
                     _logger.LogWarning("Unexpected result type from OpenSearch: {Type}", result?.GetType()?.Name ?? "null");
                 }
+            }
             }
             
             // If no results with structured query, try broader search without entity type filter
@@ -1748,15 +1868,26 @@ public class MigrationHttpFunctions
             var progress = await _progressTracker.GetProgressAsync(migrationId, CancellationToken.None);
             
             // If progress tracker has meaningful data, use it
-            if (progress != null && progress.TotalEntities > 0)
+            // ✅ CRITICAL FIX: Only use progress tracker if it has BOTH meaningful total AND processed counts
+            // This prevents zeros from progress tracker blocking the Azure Storage fallback
+            if (progress != null && progress.TotalEntities > 0 && progress.ProcessedEntities > 0)
             {
+                _logger.LogInformation("🔄 [PROGRESS-FIX] Using progress tracker data for migration {MigrationId}: Total={Total}, Processed={Processed}, Failed={Failed}", 
+                    migrationId, progress.TotalEntities, progress.ProcessedEntities, progress.FailedEntities);
                 return progress;
+            }
+            else if (progress != null)
+            {
+                _logger.LogInformation("🔄 [PROGRESS-FIX] Progress tracker returned incomplete data for migration {MigrationId}: Total={Total}, Processed={Processed}, Failed={Failed} - falling back to Azure Storage", 
+                    migrationId, progress.TotalEntities, progress.ProcessedEntities, progress.FailedEntities);
             }
             
             // Otherwise, reconstruct from storage
             var migrationEntry = await _migrationStorageService.GetMigrationAsync(migrationId);
             if (migrationEntry != null)
             {
+                _logger.LogInformation("🔄 [STORAGE-FIX] Reading from Azure Storage for migration {MigrationId}: Total={Total}, Processed={Processed}, Failed={Failed}, Status={Status}", 
+                    migrationId, migrationEntry.TotalEntities, migrationEntry.ProcessedEntities, migrationEntry.FailedEntities, migrationEntry.Status);
                 // Get entity-level progress from storage
                 var entityProgressEntries = await _migrationStorageService.GetEntityProgressAsync(migrationId);
                 var entityProgress = new Dictionary<string, EntityProgress>();

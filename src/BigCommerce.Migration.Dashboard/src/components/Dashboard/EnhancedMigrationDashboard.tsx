@@ -18,10 +18,7 @@ import {
   useTheme,
   alpha,
   Paper,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions
+
 } from '@mui/material';
 import {
   Refresh as RefreshIcon,
@@ -47,6 +44,9 @@ import { useNavigate } from 'react-router-dom';
 import { useDetailedMigrationProgress } from '../../hooks/useDetailedMigrationProgress';
 import type { DetailedMigrationProgress, ProcessingContext, BatchProgressSummary, RemainingWorkload, RealTimeMetrics } from '../../hooks/useDetailedMigrationProgress';
 import { apiService } from '../../services/apiService';
+import { LiveCancellationDialog } from './LiveCancellationDialog';
+import type { LiveCancellationRequest } from '../../types';
+import { CancellationScope } from '../../types';
 
 interface EnhancedMigrationDashboardProps {
   migrationId: string;
@@ -69,7 +69,7 @@ export const EnhancedMigrationDashboard: React.FC<EnhancedMigrationDashboardProp
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error' | 'warning' | 'info'>('info');
-  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [liveCancelDialogOpen, setLiveCancelDialogOpen] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
 
   // Use our enhanced detailed progress hook
@@ -101,9 +101,7 @@ export const EnhancedMigrationDashboard: React.FC<EnhancedMigrationDashboardProp
   useEffect(() => {
     if (progress?.status === 'completed' && onMigrationComplete) {
       onMigrationComplete(migrationId);
-      setSnackbarMessage('🎉 Migration completed successfully!');
-      setSnackbarSeverity('success');
-      setSnackbarOpen(true);
+      // ✅ FIX: Don't create duplicate notifications - DashboardContext already handles this via notificationService
     }
   }, [progress?.status, migrationId, onMigrationComplete]);
 
@@ -111,9 +109,7 @@ export const EnhancedMigrationDashboard: React.FC<EnhancedMigrationDashboardProp
   useEffect(() => {
     if (progress?.status === 'failed' && onMigrationError) {
       onMigrationError(migrationId, { status: 'failed' });
-      setSnackbarMessage('❌ Migration failed. Check error details.');
-      setSnackbarSeverity('error');
-      setSnackbarOpen(true);
+      // ✅ FIX: Don't create duplicate notifications - DashboardContext already handles this via notificationService
     }
   }, [progress?.status, migrationId, onMigrationError]);
 
@@ -132,16 +128,16 @@ export const EnhancedMigrationDashboard: React.FC<EnhancedMigrationDashboardProp
     setIsFullscreen(!isFullscreen);
   };
 
-  // Handle cancel migration
+  // Handle live cancellation (Task 7.6)
   const handleCancelClick = () => {
-    setCancelDialogOpen(true);
+    setLiveCancelDialogOpen(true);
   };
 
-  const handleCancelConfirm = async () => {
+  const handleLiveCancelConfirm = async (request: LiveCancellationRequest) => {
     setIsCancelling(true);
     try {
-      // Cancel the migration via API
-      await apiService.cancelMigration(migrationId);
+      // Use new live cancellation API
+      const cancelResponse = await apiService.liveCancelMigration(request);
       
       // Leave SignalR group to stop receiving real-time updates
       console.log('🚪 Leaving SignalR group for cancelled migration:', migrationId);
@@ -150,7 +146,7 @@ export const EnhancedMigrationDashboard: React.FC<EnhancedMigrationDashboardProp
       setSnackbarMessage('🛑 Migration cancelled successfully!');
       setSnackbarSeverity('warning');
       setSnackbarOpen(true);
-      setCancelDialogOpen(false);
+      setLiveCancelDialogOpen(false);
       
       // Navigate to history page to see the cancelled migration
       console.log('📄 Navigating to history page...');
@@ -165,9 +161,9 @@ export const EnhancedMigrationDashboard: React.FC<EnhancedMigrationDashboardProp
     }
   };
 
-  const handleCancelDialogClose = () => {
+  const handleLiveCancelDialogClose = () => {
     if (!isCancelling) {
-      setCancelDialogOpen(false);
+      setLiveCancelDialogOpen(false);
     }
   };
 
@@ -554,7 +550,21 @@ export const EnhancedMigrationDashboard: React.FC<EnhancedMigrationDashboardProp
                         At current speed ({displayValues.currentSpeed.toFixed(1)} entities/sec)
                       </Typography>
                       <Typography variant="caption" color="textSecondary">
-                        Expected completion: {format(new Date(Date.now() + displayValues.estimatedCompletion * 1000), 'PPpp')}
+                        Expected completion: {(() => {
+                          try {
+                            const estimatedMs = displayValues.estimatedCompletion * 1000;
+                            if (isNaN(estimatedMs) || estimatedMs < 0) {
+                              return 'Calculating...';
+                            }
+                            const completionDate = new Date(Date.now() + estimatedMs);
+                            if (isNaN(completionDate.getTime())) {
+                              return 'Calculating...';
+                            }
+                            return format(completionDate, 'PPpp');
+                          } catch {
+                            return 'Calculating...';
+                          }
+                        })()}
                       </Typography>
                     </Box>
                   </Stack>
@@ -698,54 +708,14 @@ export const EnhancedMigrationDashboard: React.FC<EnhancedMigrationDashboardProp
         </Box>
       )}
 
-      {/* Cancel Confirmation Dialog */}
-      <Dialog
-        open={cancelDialogOpen}
-        onClose={handleCancelDialogClose}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle>
-          <Box display="flex" alignItems="center" gap={1}>
-            <StopIcon color="error" />
-            Cancel Migration
-          </Box>
-        </DialogTitle>
-        <DialogContent>
-          <Typography gutterBottom>
-            Are you sure you want to cancel this migration?
-          </Typography>
-          <Typography variant="body2" color="textSecondary" gutterBottom>
-            <strong>Migration ID:</strong> {migrationId}
-          </Typography>
-          <Typography variant="body2" color="textSecondary" gutterBottom>
-            <strong>Current Progress:</strong> {displayValues?.overallProgress?.toFixed(1) || 0}% ({progress?.processedEntities || 0}/{progress?.totalEntities || 0} entities)
-          </Typography>
-          <Alert severity="warning" sx={{ mt: 2 }}>
-            <Typography variant="body2">
-              <strong>This action cannot be undone.</strong> The migration will stop gracefully after completing the current batch, 
-              but all progress will be lost and you'll need to restart the migration from the beginning.
-            </Typography>
-          </Alert>
-        </DialogContent>
-        <DialogActions>
-          <Button 
-            onClick={handleCancelDialogClose} 
-            disabled={isCancelling}
-          >
-            Keep Running
-          </Button>
-          <Button 
-            onClick={handleCancelConfirm} 
-            color="error" 
-            variant="contained"
-            disabled={isCancelling}
-            startIcon={isCancelling ? <CircularProgress size={16} /> : <StopIcon />}
-          >
-            {isCancelling ? 'Cancelling...' : 'Cancel Migration'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      {/* Live Cancellation Dialog (Task 7.6) */}
+      <LiveCancellationDialog
+        open={liveCancelDialogOpen}
+        migrationId={migrationId}
+        onClose={handleLiveCancelDialogClose}
+        onConfirm={handleLiveCancelConfirm}
+        isCancelling={isCancelling}
+      />
 
       {/* Snackbar for notifications */}
       <Snackbar 

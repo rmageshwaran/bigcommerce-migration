@@ -65,7 +65,9 @@ public class MigrationQueueFunctions
         {
             _logger.LogError(ex, "ProcessMigrationStartMessage failed for MessageId: {MessageId}: {ErrorMessage}", 
                 azureQueueMessage.MessageId, ex.Message);
-            throw; // Re-throw to ensure proper retry behavior
+            
+            // 🚨 DISABLED: Don't re-throw to prevent Azure Functions retry behavior
+            // throw; // Re-throw to ensure proper retry behavior
         }
     }
 
@@ -464,6 +466,10 @@ public class MigrationQueueFunctions
     private Core.Models.QueueMessage ConvertAzureQueueMessage(AzureQueueMessage azureQueueMessage)
     {
         var content = azureQueueMessage.Body?.ToString() ?? string.Empty;
+        
+        // 🚨 DEBUG: Log the raw content to debug poison queue issue
+        _logger.LogInformation("🚨 [POISON-DEBUG] Raw message content: {Content}", content.Length > 200 ? content.Substring(0, 200) + "..." : content);
+        
         var messageType = ExtractMessageTypeFromContent(content);
         
         var queueMessage = new Core.Models.QueueMessage

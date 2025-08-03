@@ -6,6 +6,7 @@
 - **Architecture-Documentation.md** - Complete system architecture overview
 - **Azure-Durable-Functions-Deterministic-Architecture.md** - Durable Functions implementation details
 - **Azure-Functions-Output-Binding-Configuration.md** - Output binding configuration
+- **Chunked-Migration-Architecture.md** - **🆕 CRITICAL: Chunked hierarchical category migration architecture**
 - **diagram-*.mmd** - Mermaid diagrams for visual architecture representation
 - **Data-Transformation-Strategy-Analysis.md** - Data transformation patterns
 - **Migration-Architecture-and-Execution-Flow.md** - Migration workflow details
@@ -16,6 +17,9 @@
 - **Phase-7A-Service-Implementation-Tracking.md** - Original implementation plan (now obsolete)
 - **E2E-Migration-Implementation-Roadmap.md** - **🆕 CRITICAL: Complete E2E migration functionality roadmap**
 - **E2E-Task-Summary.md** - **🆕 CRITICAL: Prioritized task list for E2E testing completion**
+- **Chunked-Migration-API-Reference.md** - **🆕 CRITICAL: Complete API reference for chunked category migration**
+- **Chunked-Migration-Configuration-Guide.md** - **🆕 CRITICAL: Configuration guide for chunked migration and feature flags**
+- **Chunked-Migration-Migration-Guide.md** - **🆕 CRITICAL: Step-by-step migration from legacy to chunked strategies**
 - **Phase-5-HTTP-API-Implementation-Plan.md** - HTTP API implementation roadmap
 - **Phase-6-Durable-Functions-Detailed-Implementation-Plan.md** - Durable Functions implementation
 - **Phase-7-Advanced-Features-Detailed-Implementation-Plan.md** - Advanced features roadmap
@@ -23,6 +27,7 @@
 
 ### 📊 **PROJECT TRACKING**
 - **Master-Task-Tracking-Implementation-Roadmap.md** - **🎯 MAIN ROADMAP: Updated with accelerated timeline**
+- **Task-7-Live-Cancellation-Integration-TRACKER.md** - **🆕 CRITICAL: Task #7 detailed breakdown and progress tracking**
 - **Real-time-Dashboard-Task-Breakdown.md** - Dashboard implementation tracking
 - **Queue-Integration-and-End-to-End-Testing.md** - Integration testing documentation
 

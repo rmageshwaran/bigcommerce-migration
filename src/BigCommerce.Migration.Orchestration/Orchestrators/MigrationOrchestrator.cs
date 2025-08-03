@@ -2,6 +2,7 @@ using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Logging;
 using BigCommerce.Migration.Core.Models;
 using BigCommerce.Migration.Core.Interfaces;
+using BigCommerce.Migration.Core.Services;
 using BigCommerce.Migration.Orchestration.Models;
 using System.Text.Json;
 
@@ -15,6 +16,7 @@ public class MigrationOrchestrator
 {
     private readonly ILogger<MigrationOrchestrator> _logger;
     private readonly IProgressEventPublisher _progressEventPublisher;
+    private readonly ISignalREventFactory _signalREventFactory; // 🎯 CENTRALIZED SIGNALR: Factory for consistent event creation
 
     // Entity processing order based on dependencies
     private static readonly string[] EntityProcessingOrder = new[]
@@ -27,10 +29,11 @@ public class MigrationOrchestrator
         "modifiers"      // Depends on categories and products
     };
 
-    public MigrationOrchestrator(ILogger<MigrationOrchestrator> logger, IProgressEventPublisher progressEventPublisher)
+    public MigrationOrchestrator(ILogger<MigrationOrchestrator> logger, IProgressEventPublisher progressEventPublisher, ISignalREventFactory signalREventFactory)
     {
         _logger = logger;
         _progressEventPublisher = progressEventPublisher;
+        _signalREventFactory = signalREventFactory ?? throw new ArgumentNullException(nameof(signalREventFactory)); // 🎯 CENTRALIZED SIGNALR: Store factory reference
     }
 
     /// <summary>
@@ -58,14 +61,31 @@ public class MigrationOrchestrator
 
         try
         {
-            // Step 0: Check for cancellation before starting
-            var isCancelled = await context.CallActivityAsync<bool>("CheckMigrationCancellation", request.MigrationId);
-            if (isCancelled)
+            // Step 0: Check for live cancellation before starting (Migration-level)
+            var migrationCancellationCheck = await context.CallActivityAsync<CancellationCheckResult>(
+                "CheckLiveCancellationActivity",
+                new CancellationCheckRequest
+                {
+                    MigrationId = request.MigrationId,
+                    Scope = CancellationScope.Migration
+                });
+
+            if (migrationCancellationCheck.IsCancelled)
             {
                 result.Status = MigrationStatus.Cancelled;
-                result.Errors.Add("Migration was cancelled before processing started");
+                result.Errors.Add($"Migration was cancelled before processing started. Reason: {migrationCancellationCheck.Reason}");
                 result.EndTime = context.CurrentUtcDateTime;
                 result.CalculateDuration();
+                
+                // Process cancellation through live cancellation system
+                await context.CallActivityAsync("ProcessCancellationActivity", 
+                    new CancellationProcessRequest 
+                    { 
+                        MigrationId = request.MigrationId, 
+                        Scope = CancellationScope.Migration,
+                        Reason = migrationCancellationCheck.Reason ?? "Migration cancelled before processing started"
+                    });
+                
                 return result;
             }
 
@@ -89,9 +109,9 @@ public class MigrationOrchestrator
             context.SetCustomStatus("Initializing migration");
             try
             {
-                var migrationProgressEvent = new MigrationProgressEvent
+                // ✅ CENTRALIZED SIGNALR: Use factory for consistent event creation with auto-populated base properties
+                var migrationProgressEvent = _signalREventFactory.CreateMigrationProgress(request.MigrationId, new MigrationProgressOptions
                 {
-                    MigrationId = request.MigrationId,
                     OverallProgress = 0,
                     Status = "initializing",
                     TotalEntities = 0,
@@ -99,18 +119,23 @@ public class MigrationOrchestrator
                     FailedEntities = 0,
                     CurrentEntityType = "",
                     EstimatedTimeRemaining = null
-                };
+                    // ✅ Base properties (Timestamp, IsCancelled, HubMethod) auto-populated by factory
+                    // ✅ Validation built-in
+                    // ✅ Consistent naming enforced
+                });
 
                 await _progressEventPublisher.PublishMigrationProgressAsync(migrationProgressEvent);
 
-                var statusEvent = new StatusProgressEvent
+                // ✅ CENTRALIZED SIGNALR: Use factory for consistent event creation with auto-populated base properties
+                var statusEvent = _signalREventFactory.CreateStatusProgress(request.MigrationId, new StatusProgressOptions
                 {
-                    MigrationId = request.MigrationId,
                     Status = "initializing",
                     Message = "Migration initialization started",
-                    Metadata = new { Entities = request.OriginalRequest.Entities },
-                    Timestamp = context.CurrentUtcDateTime
-                };
+                    Data = new { Entities = request.OriginalRequest.Entities }
+                    // ✅ Base properties (Timestamp, IsCancelled, HubMethod) auto-populated by factory
+                    // ✅ Validation built-in
+                    // ✅ Consistent naming enforced
+                });
 
                 await _progressEventPublisher.PublishStatusAsync(statusEvent);
             }
@@ -122,7 +147,7 @@ public class MigrationOrchestrator
 
             // Step 3: Validate stores and resolve dependencies
             context.SetCustomStatus("Validating stores");
-            var validationResult = await context.CallActivityAsync<ValidationResult>(
+            var validationResult = await context.CallActivityAsync<BigCommerce.Migration.Core.Interfaces.ValidationResult>(
                 "ValidateMigrationStores", new
                 {
                     MigrationId = request.MigrationId,
@@ -164,14 +189,32 @@ public class MigrationOrchestrator
 
             foreach (var entityType in entitiesToProcess)
             {
-                // Check for cancellation before processing each entity type
-                isCancelled = await context.CallActivityAsync<bool>("CheckMigrationCancellation", request.MigrationId);
-                if (isCancelled)
+                // Check for live cancellation before processing each entity type (Migration-level)
+                var entityTypeCancellationCheck = await context.CallActivityAsync<CancellationCheckResult>(
+                    "CheckLiveCancellationActivity",
+                    new CancellationCheckRequest
+                    {
+                        MigrationId = request.MigrationId,
+                        Scope = CancellationScope.Migration
+                    });
+
+                if (entityTypeCancellationCheck.IsCancelled)
                 {
                     result.Status = MigrationStatus.Cancelled;
-                    result.Errors.Add($"Migration was cancelled during {entityType} processing");
+                    result.Errors.Add($"Migration was cancelled during {entityType} processing. Reason: {entityTypeCancellationCheck.Reason}");
                     result.EndTime = context.CurrentUtcDateTime;
                     result.CalculateDuration();
+                    
+                    // Process cancellation through live cancellation system
+                    await context.CallActivityAsync("ProcessCancellationActivity", 
+                        new CancellationProcessRequest 
+                        { 
+                            MigrationId = request.MigrationId, 
+                            Scope = CancellationScope.Migration,
+                            EntityType = entityType,
+                            Reason = entityTypeCancellationCheck.Reason ?? $"Migration cancelled during {entityType} processing"
+                        });
+                    
                     return result;
                 }
 
@@ -266,9 +309,9 @@ public class MigrationOrchestrator
             {
                 var migrationSummary = result.GetStatisticsSummary();
                 
-                var migrationProgressEvent = new MigrationProgressEvent
+                // ✅ CENTRALIZED SIGNALR: Use factory for consistent event creation with auto-populated base properties
+                var migrationProgressEvent = _signalREventFactory.CreateMigrationProgress(request.MigrationId, new MigrationProgressOptions
                 {
-                    MigrationId = request.MigrationId,
                     OverallProgress = 100,
                     Status = result.Status.ToString().ToLowerInvariant(),
                     TotalEntities = migrationSummary.TotalEntities,
@@ -276,23 +319,28 @@ public class MigrationOrchestrator
                     FailedEntities = migrationSummary.FailedEntities,
                     CurrentEntityType = "",
                     EstimatedTimeRemaining = TimeSpan.Zero
-                };
+                    // ✅ Base properties (Timestamp, IsCancelled, HubMethod) auto-populated by factory
+                    // ✅ Validation built-in
+                    // ✅ Consistent naming enforced
+                });
 
                 await _progressEventPublisher.PublishMigrationProgressAsync(migrationProgressEvent);
 
-                var statusEvent = new StatusProgressEvent
+                // ✅ CENTRALIZED SIGNALR: Use factory for consistent event creation with auto-populated base properties
+                var statusEvent = _signalREventFactory.CreateStatusProgress(request.MigrationId, new StatusProgressOptions
                 {
-                    MigrationId = request.MigrationId,
                     Status = result.Status.ToString().ToLowerInvariant(),
                     Message = result.Errors.Any() ? "Migration completed with errors" : "Migration completed successfully",
-                    Metadata = new { 
+                    Data = new { 
                         TotalEntities = migrationSummary.TotalEntities,
                         SuccessfulEntities = migrationSummary.SuccessfulEntities,
                         FailedEntities = migrationSummary.FailedEntities,
                         SuccessRate = migrationSummary.SuccessRate
-                    },
-                    Timestamp = context.CurrentUtcDateTime
-                };
+                    }
+                    // ✅ Base properties (Timestamp, IsCancelled, HubMethod) auto-populated by factory
+                    // ✅ Validation built-in
+                    // ✅ Consistent naming enforced
+                });
 
                 await _progressEventPublisher.PublishStatusAsync(statusEvent);
             }

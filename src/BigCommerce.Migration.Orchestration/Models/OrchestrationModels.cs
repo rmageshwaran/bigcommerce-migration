@@ -735,3 +735,333 @@ public class StartEntityProcessingRequest
     /// </summary>
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
 } 
+
+/// <summary>
+/// 🎯 SUB-BATCH OPTIMIZATION: Request model for processing entities within a sub-batch
+/// Part of the sub-batch optimization that splits 50-entity pages into 10 sub-batches of 5 parallel entities
+/// </summary>
+public class SubBatchRequest
+{
+    /// <summary>
+    /// Sub-batch number within the parent batch (1-10 for each page)
+    /// </summary>
+    public int SubBatchNumber { get; set; }
+    
+    /// <summary>
+    /// Original page/batch number (1-4 for 192 brands)
+    /// </summary>
+    public int ParentBatchNumber { get; set; }
+    
+    /// <summary>
+    /// Entities to process in this sub-batch (5 entities max for optimal parallelism)
+    /// </summary>
+    public List<Dictionary<string, object>> Entities { get; set; } = new();
+    
+    /// <summary>
+    /// Maximum number of concurrent entities to process within this sub-batch
+    /// </summary>
+    public int MaxConcurrency { get; set; } = 5;
+    
+    /// <summary>
+    /// Migration identifier
+    /// </summary>
+    public string MigrationId { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// Type of entity being processed (e.g., "brands")
+    /// </summary>
+    public string EntityType { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// Source store configuration
+    /// </summary>
+    public StoreConfiguration SourceStore { get; set; } = new();
+    
+    /// <summary>
+    /// Destination store configuration
+    /// </summary>
+    public StoreConfiguration DestinationStore { get; set; } = new();
+}
+
+/// <summary>
+/// 🎯 SUB-BATCH OPTIMIZATION: Result model for sub-batch processing completion
+/// Tracks success/failure statistics and timing for each sub-batch within a page
+/// </summary>
+public class SubBatchResult
+{
+    /// <summary>
+/// Migration identifier for this sub-batch
+/// </summary>
+public string? MigrationId { get; set; }
+
+/// <summary>
+/// Sub-batch number that was processed (1-10)
+/// </summary>
+public int SubBatchNumber { get; set; }
+
+/// <summary>
+/// Parent batch/page number (1-4)
+/// </summary>
+public int ParentBatchNumber { get; set; }
+    
+    /// <summary>
+    /// Total number of entities in this sub-batch
+    /// </summary>
+    public int TotalEntities { get; set; }
+    
+    /// <summary>
+    /// Number of entities successfully processed
+    /// </summary>
+    public int SuccessfulEntities { get; set; }
+    
+    /// <summary>
+    /// Number of entities that failed processing
+    /// </summary>
+    public int FailedEntities { get; set; }
+    
+    /// <summary>
+    /// List of error messages from failed entity processing
+    /// </summary>
+    public List<string> Errors { get; set; } = new();
+    
+    /// <summary>
+    /// Time taken to process this sub-batch
+    /// </summary>
+    public TimeSpan ProcessingTime { get; set; }
+    
+    /// <summary>
+    /// When this sub-batch was completed
+    /// </summary>
+    public DateTime CompletedAt { get; set; }
+}
+
+/// <summary>
+/// Request model for processing multiple batches in parallel using 17.0x optimizations
+/// </summary>
+public class ProcessParallelBatchesRequest
+{
+    public string MigrationId { get; set; } = string.Empty;
+    public string EntityType { get; set; } = string.Empty;
+    public int TotalBatches { get; set; }
+    public int BatchSize { get; set; }
+    public List<string> EntityIds { get; set; } = new();
+    public StoreConfiguration SourceStore { get; set; } = new();
+    public StoreConfiguration DestinationStore { get; set; } = new();
+    public CategoryTreeContext CategoryTreeContext { get; set; } = new();
+    public Dictionary<string, object>? PaginationMetadata { get; set; }
+    public bool UseDirectPagination { get; set; }
+    public bool IsCancelled { get; set; }
+    public string CancellationReason { get; set; } = string.Empty;
+    public DateTime? CancelledAt { get; set; }
+}
+
+/// <summary>
+/// Request model for chunked category migration orchestrator
+/// Task 4.1: Orchestrator input for level-by-level category processing
+/// </summary>
+public class ChunkedCategoryMigrationRequest
+{
+    /// <summary>
+    /// Migration identifier
+    /// </summary>
+    public string MigrationId { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// Source store configuration
+    /// </summary>
+    public StoreConfiguration SourceStore { get; set; } = new();
+    
+    /// <summary>
+    /// Destination store configuration
+    /// </summary>
+    public StoreConfiguration DestinationStore { get; set; } = new();
+    
+    /// <summary>
+    /// Category tree context for channel-specific operations
+    /// </summary>
+    public CategoryTreeContext CategoryTreeContext { get; set; } = new();
+    
+    /// <summary>
+    /// Chunked hierarchy configuration for processing limits and batch sizes
+    /// </summary>
+    public ChunkedHierarchyConfiguration ChunkedHierarchyConfig { get; set; } = new();
+    
+    /// <summary>
+    /// Maximum number of levels to process (safety limit)
+    /// </summary>
+    public int MaxLevelsToProcess { get; set; } = 10;
+    
+    /// <summary>
+    /// Whether to enable real-time progress updates via SignalR
+    /// </summary>
+    public bool EnableProgressUpdates { get; set; } = true;
+}
+
+/// <summary>
+/// Result model for chunked category migration orchestrator
+/// Task 4.1: Comprehensive orchestrator result with level-by-level tracking
+/// </summary>
+public class ChunkedCategoryMigrationResult
+{
+    /// <summary>
+    /// Migration identifier
+    /// </summary>
+    public string MigrationId { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// Overall migration success status
+    /// </summary>
+    public bool Success { get; set; }
+    
+    /// <summary>
+    /// Migration status
+    /// </summary>
+    public string Status { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// Migration start time
+    /// </summary>
+    public DateTime StartTime { get; set; }
+    
+    /// <summary>
+    /// Migration end time
+    /// </summary>
+    public DateTime? EndTime { get; set; }
+    
+    /// <summary>
+    /// Total number of hierarchy levels processed
+    /// </summary>
+    public int TotalLevelsProcessed { get; set; }
+    
+    /// <summary>
+    /// Number of levels processed successfully
+    /// </summary>
+    public int ProcessedLevels { get; set; }
+    
+    /// <summary>
+    /// Number of levels that failed processing
+    /// </summary>
+    public int FailedLevels { get; set; }
+    
+    /// <summary>
+    /// Total categories processed across all levels
+    /// </summary>
+    public int TotalCategoriesProcessed { get; set; }
+    
+    /// <summary>
+    /// Total categories created successfully
+    /// </summary>
+    public int TotalCategoriesCreated { get; set; }
+    
+    /// <summary>
+    /// Total categories that failed creation
+    /// </summary>
+    public int TotalCategoriesFailed { get; set; }
+    
+    /// <summary>
+    /// Overall performance improvement achieved
+    /// </summary>
+    public double PerformanceImprovement { get; set; }
+    
+    /// <summary>
+    /// Total processing time across all levels
+    /// </summary>
+    public double TotalProcessingTimeMinutes { get; set; }
+    
+    /// <summary>
+    /// Peak memory usage during migration
+    /// </summary>
+    public double PeakMemoryUsageMB { get; set; }
+    
+    /// <summary>
+    /// Level-by-level processing results
+    /// </summary>
+    public Dictionary<int, ChunkedLevelResult> LevelResults { get; set; } = new();
+    
+    /// <summary>
+    /// Error messages from failed operations
+    /// </summary>
+    public List<string> ErrorMessages { get; set; } = new();
+    
+    /// <summary>
+    /// Cancellation reason if migration was cancelled
+    /// </summary>
+    public string? CancellationReason { get; set; }
+    
+    /// <summary>
+    /// Success rate percentage across all levels
+    /// </summary>
+    public double SuccessRatePercent => TotalLevelsProcessed > 0 
+        ? (ProcessedLevels / (double)TotalLevelsProcessed) * 100.0 
+        : 0.0;
+    
+    /// <summary>
+    /// Category creation success rate percentage
+    /// </summary>
+    public double CategorySuccessRatePercent => TotalCategoriesProcessed > 0 
+        ? (TotalCategoriesCreated / (double)TotalCategoriesProcessed) * 100.0 
+        : 0.0;
+    
+    /// <summary>
+    /// Overall throughput in categories per minute
+    /// </summary>
+    public double ThroughputCategoriesPerMinute => TotalProcessingTimeMinutes > 0 
+        ? TotalCategoriesCreated / TotalProcessingTimeMinutes 
+        : 0.0;
+}
+
+/// <summary>
+/// Processing result for a single hierarchy level in chunked migration
+/// </summary>
+public class ChunkedLevelResult
+{
+    /// <summary>
+    /// Hierarchy level (0 = roots, 1 = first level children, etc.)
+    /// </summary>
+    public int Level { get; set; }
+    
+    /// <summary>
+    /// Whether this level was processed successfully
+    /// </summary>
+    public bool Success { get; set; }
+    
+    /// <summary>
+    /// Number of categories fetched for this level
+    /// </summary>
+    public int CategoriesFetched { get; set; }
+    
+    /// <summary>
+    /// Number of categories processed successfully
+    /// </summary>
+    public int CategoriesProcessed { get; set; }
+    
+    /// <summary>
+    /// Number of categories created successfully
+    /// </summary>
+    public int CategoriesCreated { get; set; }
+    
+    /// <summary>
+    /// Number of categories that failed processing/creation
+    /// </summary>
+    public int CategoriesFailed { get; set; }
+    
+    /// <summary>
+    /// Processing time for this level
+    /// </summary>
+    public double ProcessingTimeMinutes { get; set; }
+    
+    /// <summary>
+    /// Memory usage during this level processing
+    /// </summary>
+    public double MemoryUsageMB { get; set; }
+    
+    /// <summary>
+    /// Performance improvement for this level
+    /// </summary>
+    public double PerformanceImprovement { get; set; }
+    
+    /// <summary>
+    /// Error messages specific to this level
+    /// </summary>
+    public List<string> ErrorMessages { get; set; } = new();
+} 

@@ -33,6 +33,10 @@ namespace BigCommerce.Migration.UnitTests.Integration
             services.AddSingleton(_mockStorageService.Object);
             services.AddSingleton(_mockLogger.Object);
             
+            // Add missing ILiveCancellationManager mock for CheckExternalCancellationActivity
+            var mockLiveCancellationManager = new Mock<ILiveCancellationManager>();
+            services.AddSingleton(mockLiveCancellationManager.Object);
+            
             // Add real activity for testing
             services.AddScoped<CheckExternalCancellationActivity>();
             

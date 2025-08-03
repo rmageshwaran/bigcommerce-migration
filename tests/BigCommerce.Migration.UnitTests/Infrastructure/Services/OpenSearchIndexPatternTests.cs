@@ -492,11 +492,11 @@ public class OpenSearchIndexPatternTests
         singleDayPattern.Should().Contain(",");
         singleDayPattern.Should().NotContain("*");
 
-        // Week: 7 daily indices + 1 error index (more specific than wildcard)
+        // Week: 7 daily indices + error indices per month (more specific than wildcard)
         if (weekPattern.Contains(","))
         {
             var weekIndices = weekPattern.Split(',');
-            weekIndices.Should().HaveCountLessOrEqualTo(8); // 7 daily + 1 error index
+            weekIndices.Should().HaveCountLessOrEqualTo(10); // 7 daily + up to 2 error indices if spanning months
         }
 
         // Month: Wildcard (less specific but more efficient for large ranges)

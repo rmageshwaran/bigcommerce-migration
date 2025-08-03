@@ -5,11 +5,111 @@ namespace BigCommerce.Migration.Core.Interfaces;
 /// <summary>
 /// Interface for BigCommerce API client operations
 /// Now supports request-based store credentials instead of hardcoded configuration
-/// Follows Interface Segregation Principle by inheriting from focused interfaces
 /// </summary>
-public interface IBigCommerceApiClient : ICategoryApiClient, IProductApiClient, IPaginationApiClient, IApiHealthClient
+public interface IBigCommerceApiClient
 {
-    // Additional methods unique to the composite interface
+    /// <summary>
+    /// Gets category trees for a specific store and channel using correct BigCommerce API syntax
+    /// </summary>
+    /// <param name="storeConfig">Store configuration with credentials</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>List of category tree data dictionaries</returns>
+    Task<List<Dictionary<string, object>>> GetCategoryTreesAsync(StoreConfiguration storeConfig, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets categories for a specific category tree
+    /// </summary>
+    /// <param name="storeConfig">Store configuration with credentials</param>
+    /// <param name="categoryTreeId">Category tree ID</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>List of category data dictionaries</returns>
+    Task<List<Dictionary<string, object>>> GetCategoriesAsync(StoreConfiguration storeConfig, string categoryTreeId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Creates categories in bulk for a specific category tree
+    /// </summary>
+    /// <param name="storeConfig">Store configuration with credentials</param>
+    /// <param name="categoryTreeId">Category tree ID</param>
+    /// <param name="categories">Categories to create</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>List of created category data dictionaries</returns>
+    Task<List<Dictionary<string, object>>> CreateCategoriesAsync(StoreConfiguration storeConfig, string categoryTreeId, List<Dictionary<string, object>> categories, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets products from the store
+    /// </summary>
+    /// <param name="storeConfig">Store configuration with credentials</param>
+    /// <param name="page">Page number</param>
+    /// <param name="limit">Items per page</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>List of product data dictionaries</returns>
+    Task<List<Dictionary<string, object>>> GetProductsAsync(StoreConfiguration storeConfig, int page = 1, int limit = 50, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Creates products in bulk
+    /// </summary>
+    /// <param name="storeConfig">Store configuration with credentials</param>
+    /// <param name="products">Products to create</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>List of created product data dictionaries</returns>
+    Task<List<Dictionary<string, object>>> CreateProductsAsync(StoreConfiguration storeConfig, List<Dictionary<string, object>> products, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Checks if the BigCommerce API is healthy for a store
+    /// </summary>
+    /// <param name="storeConfig">Store configuration with credentials</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>True if healthy, false otherwise</returns>
+    Task<bool> IsHealthyAsync(StoreConfiguration storeConfig, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets product variants for a specific product
+    /// </summary>
+    /// <param name="storeConfig">Store configuration with credentials</param>
+    /// <param name="productId">Product ID</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>List of product variant summaries</returns>
+    Task<List<ProductVariantSummary>> GetProductVariantsAsync(StoreConfiguration storeConfig, int productId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Gets product images for a specific product
+    /// </summary>
+    /// <param name="storeConfig">Store configuration with credentials</param>
+    /// <param name="productId">Product ID</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>List of product image summaries</returns>
+    Task<List<ProductImageSummary>> GetProductImagesAsync(StoreConfiguration storeConfig, int productId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Gets product modifiers for a specific product
+    /// </summary>
+    /// <param name="storeConfig">Store configuration with credentials</param>
+    /// <param name="productId">Product ID</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>List of product modifier summaries</returns>
+    Task<List<ProductModifierSummary>> GetProductModifiersAsync(StoreConfiguration storeConfig, int productId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Detects the BigCommerce API version for a store
+    /// </summary>
+    /// <param name="storeConfig">Store configuration with credentials</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>Detected API version</returns>
+    Task<BigCommerceApiVersion> DetectApiVersionAsync(StoreConfiguration storeConfig, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Gets paginated entities from BigCommerce API
+    /// </summary>
+    /// <param name="storeConfig">Store configuration with credentials</param>
+    /// <param name="entityType">Type of entity to fetch</param>
+    /// <param name="paginationRequest">Pagination parameters</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>Paginated response with entity data</returns>
+    Task<BigCommercePaginatedResponse<Dictionary<string, object>>> GetPaginatedEntitiesAsync(
+        StoreConfiguration storeConfig,
+        string entityType,
+        BigCommercePaginationRequest paginationRequest,
+        CancellationToken cancellationToken);
     
     /// <summary>
     /// Gets a specific page of products with pagination metadata

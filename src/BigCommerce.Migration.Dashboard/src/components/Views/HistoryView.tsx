@@ -45,6 +45,9 @@ import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
 import { apiService } from '../../services/apiService';
 import { getSignalRService } from '../../services/signalRService';
+import { LiveCancellationDialog } from '../Dashboard/LiveCancellationDialog';
+import type { LiveCancellationRequest } from '../../types';
+import { CancellationScope } from '../../types';
 import type { MigrationStatus, MigrationHistoryResponse } from '../../types';
 
 interface MigrationHistoryItem {
@@ -115,8 +118,8 @@ export const HistoryView: React.FC = () => {
     pageSize: 50,
   });
   
-  // Cancel migration state
-  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  // Live cancellation state
+  const [liveCancelDialogOpen, setLiveCancelDialogOpen] = useState(false);
   const [selectedMigrationForCancel, setSelectedMigrationForCancel] = useState<MigrationHistoryItem | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
   
@@ -228,24 +231,24 @@ export const HistoryView: React.FC = () => {
     }
   };
 
-  // Cancel migration handlers
+  // Live cancellation handlers
   const handleCancelClick = (migration: MigrationHistoryItem) => {
     setSelectedMigrationForCancel(migration);
-    setCancelDialogOpen(true);
+    setLiveCancelDialogOpen(true);
   };
 
-  const handleCancelCancel = () => {
-    setCancelDialogOpen(false);
+  const handleLiveCancelDialogClose = () => {
+    setLiveCancelDialogOpen(false);
     setSelectedMigrationForCancel(null);
   };
 
-  const handleCancelConfirm = async () => {
+  const handleLiveCancelConfirm = async (request: LiveCancellationRequest) => {
     if (!selectedMigrationForCancel) return;
     
     setIsCancelling(true);
     try {
-      // Cancel the migration via API
-      await apiService.cancelMigration(selectedMigrationForCancel.migrationId);
+      // Use new live cancellation API
+      await apiService.liveCancelMigration(request);
       
       // Leave SignalR group to stop receiving real-time updates for this migration
       console.log('🚪 Leaving SignalR group for cancelled migration:', selectedMigrationForCancel.migrationId);
@@ -271,7 +274,7 @@ export const HistoryView: React.FC = () => {
       setError(err instanceof Error ? err.message : 'Failed to cancel migration');
     } finally {
       setIsCancelling(false);
-      setCancelDialogOpen(false);
+      setLiveCancelDialogOpen(false);
       setSelectedMigrationForCancel(null);
     }
   };
@@ -618,58 +621,14 @@ export const HistoryView: React.FC = () => {
         </CardContent>
       </Card>
 
-      {/* Cancel Confirmation Dialog */}
-      <Dialog
-        open={cancelDialogOpen}
-        onClose={handleCancelCancel}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle>Cancel Migration</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            Are you sure you want to cancel the migration for:
-          </DialogContentText>
-          {selectedMigrationForCancel && (
-            <Box sx={{ mt: 2, p: 2, bgcolor: 'background.default', borderRadius: 1 }}>
-              <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
-                <strong>Migration ID:</strong> {selectedMigrationForCancel.migrationId}
-              </Typography>
-              <Typography variant="body2">
-                <strong>Source Store:</strong> {selectedMigrationForCancel.sourceStore}
-              </Typography>
-              <Typography variant="body2">
-                <strong>Destination Store:</strong> {selectedMigrationForCancel.destinationStore}
-              </Typography>
-              <Typography variant="body2">
-                <strong>Progress:</strong> {selectedMigrationForCancel.percentageCompleted.toFixed(1)}% 
-                ({selectedMigrationForCancel.processedEntities} / {selectedMigrationForCancel.totalEntities} entities)
-              </Typography>
-            </Box>
-          )}
-          <DialogContentText sx={{ mt: 2 }}>
-            <strong>Warning:</strong> This action cannot be undone. The migration will be stopped and any 
-            partial progress may be lost. You will need to restart the migration from the beginning.
-          </DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button 
-            onClick={handleCancelCancel}
-            disabled={isCancelling}
-          >
-            Keep Running
-          </Button>
-          <Button 
-            onClick={handleCancelConfirm}
-            color="error"
-            variant="contained"
-            disabled={isCancelling}
-            startIcon={isCancelling ? <CircularProgress size={16} /> : <StopIcon />}
-          >
-            {isCancelling ? 'Cancelling...' : 'Cancel Migration'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      {/* Live Cancellation Dialog (Task 7.6) */}
+      <LiveCancellationDialog
+        open={liveCancelDialogOpen}
+        migrationId={selectedMigrationForCancel?.migrationId || ''}
+        onClose={handleLiveCancelDialogClose}
+        onConfirm={handleLiveCancelConfirm}
+        isCancelling={isCancelling}
+      />
 
       {/* Success/Error Notification */}
       <Snackbar 

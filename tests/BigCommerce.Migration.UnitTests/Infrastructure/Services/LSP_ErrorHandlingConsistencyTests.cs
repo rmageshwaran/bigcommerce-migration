@@ -1,3 +1,4 @@
+#pragma warning disable CS0618 // Type or member is obsolete - Required for testing deprecated CategoryFetchStrategy
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
@@ -16,7 +17,7 @@ namespace BigCommerce.Migration.UnitTests.Infrastructure.Services;
 /// </summary>
 public class LSP_ErrorHandlingConsistencyTests
 {
-    private readonly Mock<ILogger<CategoryFetchStrategy>> _mockCategoryLogger;
+    // Note: CategoryFetchStrategy removed - dead code cleanup
     private readonly Mock<ILogger<ProductFetchStrategy>> _mockProductLogger;
     private readonly Mock<ILogger<BrandFetchStrategy>> _mockBrandLogger;
     private readonly Mock<ILogger<VariantFetchStrategy>> _mockVariantLogger;

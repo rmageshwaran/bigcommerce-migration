@@ -7,6 +7,7 @@ using BigCommerce.Migration.Orchestration.Models;
 using BigCommerce.Migration.Orchestration.Orchestrators;
 using BigCommerce.Migration.Core.Models;
 using BigCommerce.Migration.Core.Interfaces;
+using BigCommerce.Migration.Core.Services;
 
 namespace BigCommerce.Migration.OrchestrationTests.Orchestrators;
 
@@ -19,6 +20,7 @@ public class MigrationOrchestratorTests
     private readonly Mock<IDurableOrchestrationContext> _contextMock;
     private readonly Mock<ILogger<MigrationOrchestrator>> _loggerMock;
     private readonly Mock<IProgressEventPublisher> _mockProgressEventPublisher;
+    private readonly Mock<ISignalREventFactory> _mockSignalREventFactory;
     private readonly MigrationOrchestrator _orchestrator;
     private readonly MigrationOrchestrationRequest _testRequest;
 
@@ -27,7 +29,8 @@ public class MigrationOrchestratorTests
         _contextMock = new Mock<IDurableOrchestrationContext>();
         _loggerMock = new Mock<ILogger<MigrationOrchestrator>>();
         _mockProgressEventPublisher = new Mock<IProgressEventPublisher>();
-        _orchestrator = new MigrationOrchestrator(_loggerMock.Object, _mockProgressEventPublisher.Object);
+        _mockSignalREventFactory = new Mock<ISignalREventFactory>();
+        _orchestrator = new MigrationOrchestrator(_loggerMock.Object, _mockProgressEventPublisher.Object, _mockSignalREventFactory.Object);
         
         _testRequest = new MigrationOrchestrationRequest
         {
@@ -202,8 +205,8 @@ public class MigrationOrchestratorTests
                    .Returns(Task.CompletedTask)
                    .Callback(() => callOrder.Add("InitializeMigration"));
 
-        _contextMock.Setup(x => x.CallActivityAsync<ValidationResult>("ValidateMigrationStores", It.IsAny<object>()))
-                   .ReturnsAsync(new ValidationResult { IsValid = true })
+        _contextMock.Setup(x => x.CallActivityAsync<Core.Interfaces.ValidationResult>("ValidateMigrationStores", It.IsAny<object>()))
+                   .ReturnsAsync(new Core.Interfaces.ValidationResult { IsValid = true })
                    .Callback(() => callOrder.Add("ValidateMigrationStores"));
 
         _contextMock.Setup(x => x.CallSubOrchestratorAsync<EntityMigrationResult>("EntityMigrationOrchestrator", It.IsAny<EntityMigrationRequest>()))
@@ -298,7 +301,7 @@ public class MigrationOrchestratorTests
                    .Returns(DateTime.UtcNow);
 
         // Setup store validation to fail (replaced InitializeMigration with queue-based events)
-        _contextMock.Setup(x => x.CallActivityAsync<ValidationResult>("ValidateMigrationStores", It.IsAny<object>()))
+        _contextMock.Setup(x => x.CallActivityAsync<Core.Interfaces.ValidationResult>("ValidateMigrationStores", It.IsAny<object>()))
                    .ThrowsAsync(new Exception("Store validation failed"));
 
         // Act
@@ -323,8 +326,8 @@ public class MigrationOrchestratorTests
                    .Returns(Task.CompletedTask);
 
         // Setup validation to fail
-        _contextMock.Setup(x => x.CallActivityAsync<ValidationResult>("ValidateMigrationStores", It.IsAny<object>()))
-                   .ReturnsAsync(new ValidationResult 
+        _contextMock.Setup(x => x.CallActivityAsync<Core.Interfaces.ValidationResult>("ValidateMigrationStores", It.IsAny<object>()))
+                   .ReturnsAsync(new Core.Interfaces.ValidationResult 
                    { 
                        IsValid = false, 
                        ErrorMessage = "Source store validation failed" 
@@ -351,8 +354,8 @@ public class MigrationOrchestratorTests
         _contextMock.Setup(x => x.CallActivityAsync("InitializeMigration", It.IsAny<object>()))
                    .Returns(Task.CompletedTask);
 
-        _contextMock.Setup(x => x.CallActivityAsync<ValidationResult>("ValidateMigrationStores", It.IsAny<object>()))
-                   .ReturnsAsync(new ValidationResult { IsValid = true });
+        _contextMock.Setup(x => x.CallActivityAsync<Core.Interfaces.ValidationResult>("ValidateMigrationStores", It.IsAny<object>()))
+                   .ReturnsAsync(new Core.Interfaces.ValidationResult { IsValid = true });
 
         // Setup entity migration to fail
         _contextMock.Setup(x => x.CallSubOrchestratorAsync<EntityMigrationResult>("EntityMigrationOrchestrator", It.IsAny<EntityMigrationRequest>()))
@@ -455,7 +458,7 @@ public class MigrationOrchestratorTests
         Assert.Contains("brands", result.EntityResults.Keys);
         
         // Verify essential activities were called (queue-based progress events replaced InitializeMigration/CompleteMigration)
-        _contextMock.Verify(x => x.CallActivityAsync<ValidationResult>("ValidateMigrationStores", It.IsAny<object>()), Times.Once);
+        _contextMock.Verify(x => x.CallActivityAsync<Core.Interfaces.ValidationResult>("ValidateMigrationStores", It.IsAny<object>()), Times.Once);
         
         // Verify progress events were published to queue (via IProgressEventPublisher)
         _mockProgressEventPublisher.Verify(x => x.PublishMigrationProgressAsync(It.IsAny<Core.Models.MigrationProgressEvent>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
@@ -492,8 +495,8 @@ public class MigrationOrchestratorTests
         _contextMock.Setup(x => x.CallActivityAsync("InitializeMigration", It.IsAny<object>()))
                    .Returns(Task.CompletedTask);
 
-        _contextMock.Setup(x => x.CallActivityAsync<ValidationResult>("ValidateMigrationStores", It.IsAny<object>()))
-                   .ReturnsAsync(new ValidationResult { IsValid = true });
+        _contextMock.Setup(x => x.CallActivityAsync<Core.Interfaces.ValidationResult>("ValidateMigrationStores", It.IsAny<object>()))
+                   .ReturnsAsync(new Core.Interfaces.ValidationResult { IsValid = true });
 
         _contextMock.Setup(x => x.CallSubOrchestratorAsync<EntityMigrationResult>("EntityMigrationOrchestrator", It.IsAny<EntityMigrationRequest>()))
                    .Returns<string, EntityMigrationRequest>((name, request) =>
@@ -514,8 +517,8 @@ public class MigrationOrchestratorTests
         _contextMock.Setup(x => x.CallActivityAsync("InitializeMigration", It.IsAny<object>()))
                    .Returns(Task.CompletedTask);
 
-        _contextMock.Setup(x => x.CallActivityAsync<ValidationResult>("ValidateMigrationStores", It.IsAny<object>()))
-                   .ReturnsAsync(new ValidationResult { IsValid = true });
+        _contextMock.Setup(x => x.CallActivityAsync<Core.Interfaces.ValidationResult>("ValidateMigrationStores", It.IsAny<object>()))
+                   .ReturnsAsync(new Core.Interfaces.ValidationResult { IsValid = true });
 
         _contextMock.Setup(x => x.CallSubOrchestratorAsync<EntityMigrationResult>("EntityMigrationOrchestrator", It.IsAny<EntityMigrationRequest>()))
                    .Returns<string, EntityMigrationRequest>((name, request) =>

@@ -1,11 +1,14 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using BigCommerce.Migration.Core.Interfaces;
+using BigCommerce.Migration.Core.Models;
 using BigCommerce.Migration.Infrastructure.Services;
 using BigCommerce.Migration.Orchestration.Services;
-using BigCommerce.Migration.Orchestration.Services.EntityCreation;
 using BigCommerce.Migration.Orchestration.Strategies;
+using BigCommerce.Migration.Orchestration.Services.EntityCreation;
+using BigCommerce.Migration.Orchestration.Orchestrators;
 using System.Net.Http;
 
 namespace BigCommerce.Migration.Orchestration.Extensions;
@@ -19,8 +22,9 @@ public static class ServiceCollectionExtensions
     /// Adds orchestration services to the service collection
     /// </summary>
     /// <param name="services">Service collection</param>
+    /// <param name="configuration">Configuration instance for service setup</param>
     /// <returns>Service collection for chaining</returns>
-    public static IServiceCollection AddOrchestrationServices(this IServiceCollection services)
+    public static IServiceCollection AddOrchestrationServices(this IServiceCollection services, IConfiguration? configuration = null)
     {
         // Add logging services (required by many services)
         services.AddLogging();
@@ -29,148 +33,111 @@ public static class ServiceCollectionExtensions
         services.AddCoreServices();
         
         // Add orchestration-specific services
-        services.AddOrchestrationSpecificServices();
+        services.AddOrchestrationSpecificServices(configuration);
         
         return services;
     }
     
     /// <summary>
     /// Adds core business services with proper lifetimes
+    /// ARCHITECTURAL CHANGE: Core services moved to Functions project to ensure optimizations are applied
+    /// This method now only registers orchestration infrastructure dependencies
     /// </summary>
     private static IServiceCollection AddCoreServices(this IServiceCollection services)
     {
-        // Register HttpClient for API calls
-        services.TryAddSingleton<HttpClient>();
+        // 🏗️ ARCHITECTURAL CHANGE: Moved all core business services to Functions project
+        // This ensures that the Functions project's optimized services (Dynamic Rate Limiting, 
+        // Enhanced Parallel Processing) are the ones that get registered, not overridden
         
-        // Register configuration for BigCommerceApiClient
-        services.TryAddSingleton<BigCommerce.Migration.Core.Models.BigCommerceConfiguration>(provider =>
-        {
-            var configuration = provider.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>();
-            return new BigCommerce.Migration.Core.Models.BigCommerceConfiguration
-            {
-                BaseUrl = configuration["BigCommerce:BaseUrl"] ?? "https://api.bigcommerce.com",
-                RequestTimeout = TimeSpan.FromSeconds(double.Parse(configuration["BigCommerce:RequestTimeoutSeconds"] ?? "30")),
-                MaxRetries = int.Parse(configuration["BigCommerce:MaxRetries"] ?? "0"), // ✅ Disable retry logic per user preference
-                RateLimitRequestsPerSecond = int.Parse(configuration["BigCommerce:RateLimitRequestsPerSecond"] ?? "12"),
-                EnableDebugLogging = bool.Parse(configuration["BigCommerce:EnableDebugLogging"] ?? "false"),
-                UserAgent = configuration["BigCommerce:UserAgent"] ?? "BigCommerce-Migration-System/1.0"
-            };
-        });
-        
-        // Register configuration for OpenSearchService
-        services.TryAddSingleton<BigCommerce.Migration.Core.Models.OpenSearchConfiguration>(provider =>
-        {
-            var configuration = provider.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>();
-            return new BigCommerce.Migration.Core.Models.OpenSearchConfiguration
-            {
-                Endpoint = configuration["OpenSearch:Endpoint"] ?? "https://localhost:9200",
-                Username = configuration["OpenSearch:Username"],
-                Password = configuration["OpenSearch:Password"],
-                DefaultIndex = configuration["OpenSearch:DefaultIndex"] ?? "bigcommerce-migration",
-                ConnectionTimeout = TimeSpan.FromSeconds(double.Parse(configuration["OpenSearch:ConnectionTimeoutSeconds"] ?? "30")),
-                RequestTimeout = TimeSpan.FromSeconds(double.Parse(configuration["OpenSearch:RequestTimeoutSeconds"] ?? "60")),
-                MaxRetries = int.Parse(configuration["OpenSearch:MaxRetries"] ?? "3"),
-                EnableDebugMode = bool.Parse(configuration["OpenSearch:EnableDebugMode"] ?? "false")
-            };
-        });
-        
-        // Register services as singleton for better performance and test consistency
-        services.TryAddSingleton<ICategoryTreeResolver, CategoryTreeResolver>();
-        // Note: IOpenSearchService is registered in the Functions project with conditional logic
-        // Don't register it here to avoid conflicts
-        
-        // Register API request handler for HTTP concerns (required by BigCommerceApiClient)
-        services.TryAddSingleton<IApiRequestHandler, ApiRequestHandler>();
-        services.TryAddSingleton<IBigCommerceApiClient, BigCommerceApiClient>();
-        services.TryAddSingleton<IBatchApiClient, BatchApiClient>();
-        
-        // Register segregated API client interfaces (Interface Segregation Principle)
-        services.TryAddSingleton<ICategoryApiClient, CategoryApiService>();
-        services.TryAddSingleton<IProductApiClient, ProductApiService>();
-        services.TryAddSingleton<IPaginationApiClient, PaginationApiService>();
-        services.TryAddSingleton<IApiHealthClient, HealthApiService>();
-        
-        // Register Azure Storage services
-        services.TryAddSingleton<IBlobService, BlobService>();
-        services.TryAddSingleton<IQueueService, QueueService>();
-        services.TryAddScoped<IMigrationStorageService, MigrationStorageService>();
-        
-        // Phase 3.1: Register distributed lock service for orchestrator collision detection
-        services.TryAddSingleton<IDistributedLockService, AzureTableDistributedLockService>();
-        // Phase 3.2: Register distributed lock heartbeat service for phantom orchestrator prevention
-        services.TryAddSingleton<IDistributedLockHeartbeatService, AzureTableDistributedLockHeartbeatService>();
-        
-        // NOTE: QueueServiceClient registration removed - ProgressEventPublisher now creates client directly like QueueService
+        // Only register absolute infrastructure dependencies that Orchestration needs
+        // All business logic services are now registered in Functions project AddCoreServices
         
         return services;
     }
     
     /// <summary>
-    /// Adds orchestration-specific services
+    /// Adds orchestration-specific services ONLY
+    /// ARCHITECTURAL CHANGE: Removed all core business services to prevent duplicates with Functions project
     /// </summary>
-    private static IServiceCollection AddOrchestrationSpecificServices(this IServiceCollection services)
+    private static IServiceCollection AddOrchestrationSpecificServices(this IServiceCollection services, IConfiguration? configuration)
     {
-        // Register orchestration services as singleton
-        services.TryAddSingleton<IRateLimitService, RateLimitService>();
-        services.TryAddSingleton<IBatchSizeCalculator, BatchSizeCalculator>();
+        // 🏗️ ARCHITECTURAL CHANGE: Removed all duplicate core services
+        // Core business services (IApiRequestHandler, IBigCommerceApiClient, etc.) are now 
+        // exclusively registered in Functions project to ensure optimizations are applied
         
-        // Register progress event publisher for queue-based SignalR integration
-        services.TryAddSingleton<IProgressEventPublisher, ProgressEventPublisher>();
-        services.TryAddSingleton<IProgressTracker, ProgressTracker>();
+        // ✅ **ORCHESTRATION-SPECIFIC SERVICES ONLY** - No duplicates with Functions project
         
-        // Register entity processing services (newly created during refactoring)
-        services.TryAddSingleton<IEntityFetchService, EntityFetchService>();
-        services.TryAddSingleton<IEntityTransformService, EntityTransformService>();
-        services.TryAddSingleton<IEntityCreateService, EntityCreateService>();
-        services.TryAddSingleton<IEntityMappingService, EntityMappingService>();
-        services.TryAddSingleton<IEntityErrorHandlingService, EntityErrorHandlingService>();
+        // Phase 3.1: Register distributed lock service for orchestrator collision detection
+        services.AddSingleton<IDistributedLockService, AzureTableDistributedLockService>();
+        
+        // Phase 3.2: Register distributed lock heartbeat service for phantom orchestrator prevention  
+        services.AddSingleton<IDistributedLockHeartbeatService, AzureTableDistributedLockHeartbeatService>();
         
         // Phase 3.1: Register orchestrator collision detection service (Phase 3.2: Enhanced with heartbeat)
-        services.TryAddSingleton<OrchestratorCollisionDetectionService>();
+        services.AddSingleton<OrchestratorCollisionDetectionService>();
+        
         // Phase 3.3: Register orchestrator cleanup service for administrative operations
-        services.TryAddSingleton<IOrchestratorCleanupService, OrchestratorCleanupService>();
+        services.AddSingleton<IOrchestratorCleanupService, OrchestratorCleanupService>();
         
         // Phase 4.3: Register progress state validation service for cancellation consistency checks
-        services.TryAddScoped<IProgressStateValidator, ProgressStateValidator>();
+        services.AddScoped<IProgressStateValidator, ProgressStateValidator>();
         
         // ✅ Register error message formatter (SOLID: Single Responsibility)
-        services.TryAddSingleton<IErrorMessageFormatter, ErrorMessageFormatter>();
+        services.AddSingleton<IErrorMessageFormatter, ErrorMessageFormatter>();
         
         // Register entity discovery strategy pattern implementations (Task 2.3.3 - COMPLETED)
-        services.TryAddSingleton<IEntityDiscoveryStrategyFactory, EntityDiscoveryStrategyFactory>();
-        services.TryAddSingleton<V2DirectPaginationStrategy>();
-        services.TryAddSingleton<V3EfficientPaginationStrategy>();
-        services.TryAddSingleton<V3HierarchicalStrategy>();
+        services.AddSingleton<IEntityDiscoveryStrategyFactory, EntityDiscoveryStrategyFactory>();
+        services.AddSingleton<V2DirectPaginationStrategy>();
+        services.AddSingleton<V3EfficientPaginationStrategy>();
+
+        
+        // 🚀 Register chunked hierarchical discovery strategy (Task 5.2.2 - NEW)
+        // Memory-safe chunked processing for large category hierarchies
+        services.AddScoped<IChunkedHierarchicalDiscoveryStrategy, ChunkedHierarchicalDiscoveryStrategy>();
+        
+        // Register chunked strategy factory for EntityDiscoveryStrategyFactory integration
+        services.AddSingleton<Func<IChunkedHierarchicalDiscoveryStrategy>>(serviceProvider => 
+            () => serviceProvider.GetRequiredService<IChunkedHierarchicalDiscoveryStrategy>());
+        
+        // Register chunked hierarchy configuration (if provided)
+        if (configuration != null)
+        {
+            services.Configure<ChunkedHierarchyConfiguration>(configuration.GetSection("ChunkedHierarchy"));
+        }
+        
+        // 📦 Register bulk processing services (Task 3.2 - COMPLETED) for chunked strategy support
+        services.AddScoped<BulkCategoryTransformService>();
+        services.AddScoped<BulkCategoryCreationService>();
+        
+        // 🚨 Register chunked error handling services (Task 5.3 - NEW)
+        // CRITICAL: Specialized error handling for bulk category migration operations
+        services.AddScoped<ChunkedErrorHandlingService>();
+        services.AddScoped<ChunkedErrorRecoveryService>();
         
         // 🎯 Register entity creation strategy pattern implementations (Task 3.1 - COMPLETED)
         // Strategy Pattern for Open/Closed Principle compliance
-        services.TryAddScoped<IEntityCreationStrategyFactory, EntityCreationStrategyFactory>();
-        services.AddScoped<IEntityCreationStrategy, CategoryCreationStrategy>();
+        services.AddScoped<IEntityCreationStrategyFactory, EntityCreationStrategyFactory>();
+
         services.AddScoped<IEntityCreationStrategy, ProductCreationStrategy>();
         services.AddScoped<IEntityCreationStrategy, BrandCreationStrategy>();
         services.AddScoped<IEntityCreationStrategy, VariantCreationStrategy>();
         services.AddScoped<IEntityCreationStrategy, ImageCreationStrategy>();
-        services.AddScoped<IEntityCreationStrategy, ModifierCreationStrategy>();
         
-        // 🎯 Register entity transform strategy pattern implementations (Task 3.2.2 - COMPLETED)
-        // Strategy Pattern for Open/Closed Principle compliance
-        services.TryAddScoped<IEntityTransformStrategyFactory, EntityTransformStrategyFactory>();
+        // 🔄 Register entity transform strategy pattern implementations (Task 3.2 - COMPLETED)
+        services.AddScoped<IEntityTransformStrategyFactory, EntityTransformStrategyFactory>();
         services.AddScoped<IEntityTransformStrategy, CategoryTransformStrategy>();
         services.AddScoped<IEntityTransformStrategy, ProductTransformStrategy>();
         services.AddScoped<IEntityTransformStrategy, BrandTransformStrategy>();
         services.AddScoped<IEntityTransformStrategy, VariantTransformStrategy>();
-        services.AddScoped<IEntityTransformStrategy, ImageTransformStrategy>();
-        services.AddScoped<IEntityTransformStrategy, ModifierTransformStrategy>();
         
-        // 🎯 Register entity fetch strategy pattern implementations (Task 3.3.2 - NEW)
-        // Strategy Pattern for Open/Closed Principle compliance
-        services.TryAddScoped<IEntityFetchStrategyFactory, EntityFetchStrategyFactory>();
-        services.AddScoped<IEntityFetchStrategy, CategoryFetchStrategy>();
+        // 🔽 Register entity fetch strategy pattern implementations (Task 3.3 - COMPLETED)
+        services.AddScoped<IEntityFetchStrategyFactory, EntityFetchStrategyFactory>();
+
         services.AddScoped<IEntityFetchStrategy, ProductFetchStrategy>();
         services.AddScoped<IEntityFetchStrategy, BrandFetchStrategy>();
-        services.AddScoped<IEntityFetchStrategy, VariantFetchStrategy>();
-        services.AddScoped<IEntityFetchStrategy, ImageFetchStrategy>();
-        services.AddScoped<IEntityFetchStrategy, ModifierFetchStrategy>();
+        
+        // Register the main orchestrator (class-based) - Required for dependency injection into Functions project
+        services.AddSingleton<EntityMigrationOrchestrator>();
         
         return services;
     }

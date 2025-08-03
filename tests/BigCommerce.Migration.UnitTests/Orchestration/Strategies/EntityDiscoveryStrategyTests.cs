@@ -1,3 +1,4 @@
+  
 using FluentAssertions;
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
@@ -137,47 +138,6 @@ public class EntityDiscoveryStrategyTests
 
     #endregion
 
-    #region V3HierarchicalStrategy Tests
-
-    [Fact]
-    public async Task V3HierarchicalStrategy_ShouldFetch_AllCategoriesAndSort()
-    {
-        // Arrange
-        var strategy = CreateV3HierarchicalStrategy();
-        var request = CreateTestDiscoveryRequest("categories");
-        var mockCategories = TestDataFactory.CreateMockCategories(5);
-
-        SetupApiClientForPaginatedResponse(mockCategories);
-
-        // Act
-        var result = await strategy.DiscoverEntitiesAsync(request, CancellationToken.None);
-
-        // Assert
-        result.Should().NotBeNull();
-        result.EntityType.Should().Be("categories");
-        result.ApiVersion.Should().Be(BigCommerceApiVersion.V3);
-        result.SkipDiscovery.Should().BeFalse();
-        result.EntityIds.Should().NotBeEmpty();
-        result.EntityData.Should().NotBeEmpty();
-        result.PaginationMetadata.Should().ContainKey("HierarchicallySorted");
-        result.PaginationMetadata["HierarchicallySorted"].Should().Be(true);
-    }
-
-    [Fact]
-    public void V3HierarchicalStrategy_ShouldOnly_SupportCategories()
-    {
-        // Arrange
-        var strategy = CreateV3HierarchicalStrategy();
-        
-        // V3HierarchicalStrategy should only support hierarchical entities
-        strategy.SupportedApiVersion.Should().Be(BigCommerceApiVersion.V3);
-        
-        // This strategy should be designed specifically for categories
-        // The factory will ensure it's only used for hierarchical entity types
-    }
-
-    #endregion
-
     #region V3EfficientPaginationStrategy Tests
 
     [Fact]
@@ -250,23 +210,6 @@ public class EntityDiscoveryStrategyTests
         // Assert
         strategy.Should().NotBeNull();
         strategy.SupportedApiVersion.Should().Be(BigCommerceApiVersion.V2);
-    }
-
-    [Fact]
-    public async Task EntityDiscoveryStrategyFactory_ShouldReturn_V3HierarchicalStrategy_ForCategories()
-    {
-        // Arrange
-        var factory = CreateStrategyFactory();
-        _apiClientMock.Setup(x => x.DetectApiVersionAsync(_testStoreConfig, It.IsAny<CancellationToken>()))
-                     .ReturnsAsync(BigCommerceApiVersion.V3);
-
-        // Act
-        var strategy = await factory.GetStrategyAsync(_testStoreConfig, "categories", CancellationToken.None);
-
-        // Assert
-        strategy.Should().NotBeNull();
-        strategy.SupportedApiVersion.Should().Be(BigCommerceApiVersion.V3);
-        // Additional validation that it's the hierarchical strategy would be done in implementation
     }
 
     [Fact]
@@ -364,12 +307,6 @@ public class EntityDiscoveryStrategyTests
         return new BigCommerce.Migration.Orchestration.Strategies.V2DirectPaginationStrategy(v2Logger.Object);
     }
 
-    private IEntityDiscoveryStrategy CreateV3HierarchicalStrategy()
-    {
-        var v3HierarchicalLogger = new Mock<ILogger<BigCommerce.Migration.Orchestration.Strategies.V3HierarchicalStrategy>>();
-        return new BigCommerce.Migration.Orchestration.Strategies.V3HierarchicalStrategy(_apiClientMock.Object, v3HierarchicalLogger.Object);
-    }
-
     private IEntityDiscoveryStrategy CreateV3EfficientPaginationStrategy()
     {
         var v3EfficientLogger = new Mock<ILogger<BigCommerce.Migration.Orchestration.Strategies.V3EfficientPaginationStrategy>>();
@@ -381,14 +318,12 @@ public class EntityDiscoveryStrategyTests
         var factoryLogger = new Mock<ILogger<BigCommerce.Migration.Orchestration.Strategies.EntityDiscoveryStrategyFactory>>();
         var v2Logger = new Mock<ILogger<BigCommerce.Migration.Orchestration.Strategies.V2DirectPaginationStrategy>>();
         var v3EfficientLogger = new Mock<ILogger<BigCommerce.Migration.Orchestration.Strategies.V3EfficientPaginationStrategy>>();
-        var v3HierarchicalLogger = new Mock<ILogger<BigCommerce.Migration.Orchestration.Strategies.V3HierarchicalStrategy>>();
         
         return new BigCommerce.Migration.Orchestration.Strategies.EntityDiscoveryStrategyFactory(
             _apiClientMock.Object,
             factoryLogger.Object,
             v2Logger.Object,
-            v3EfficientLogger.Object,
-            v3HierarchicalLogger.Object);
+            v3EfficientLogger.Object);
     }
 
     #endregion

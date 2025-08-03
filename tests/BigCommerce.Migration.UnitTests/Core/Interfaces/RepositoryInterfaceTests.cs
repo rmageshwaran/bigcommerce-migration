@@ -116,16 +116,21 @@ public class RepositoryInterfaceTests
             m.Name.Contains("Async"))
             .Should().BeTrue("All methods should be cancellation token-related");
         
-        // Should have exactly 4 cancellation token methods
-        cancellationMethods.Length.Should().Be(4, 
-            "Should have CreateAsync, GetAsync, UpdateAsync, DeleteAsync");
+        // Should have core cancellation token methods (updated for live cancellation features)
+        cancellationMethods.Length.Should().BeGreaterOrEqualTo(4, 
+            "Should have at least CreateAsync, GetAsync, UpdateAsync, DeleteAsync and enhanced live cancellation methods");
         
-        // Verify specific method signatures exist
+        // Verify specific core method signatures exist
         var methodNames = cancellationMethods.Select(m => m.Name).ToList();
         methodNames.Should().Contain("CreateAsync");
         methodNames.Should().Contain("GetAsync");
         methodNames.Should().Contain("UpdateAsync");
         methodNames.Should().Contain("DeleteAsync");
+        
+        // Verify enhanced methods for live cancellation exist
+        methodNames.Should().Contain("CreateScopedAsync", "Enhanced scoped cancellation support");
+        methodNames.Should().Contain("PropagateToAllInstancesAsync", "Multi-instance propagation support");
+        methodNames.Should().Contain("IsFastCancellationAsync", "Fast cancellation check support");
     }
 
     [Fact]

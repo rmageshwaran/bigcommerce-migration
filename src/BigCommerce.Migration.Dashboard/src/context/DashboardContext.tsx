@@ -45,6 +45,10 @@ interface DashboardState {
   isPollingEnabled: boolean;
   pollingInterval: number;
   lastPollingUpdate: Date | null;
+  
+  // Live cancellation
+  lastCancellationEvent?: any;
+  lastCancellationTimestamp?: Date;
 }
 
 /**
@@ -64,6 +68,7 @@ type DashboardAction =
   | { type: 'SET_SIGNALR_CONNECTION'; payload: SignalRConnection }
   | { type: 'SET_API_CONNECTED'; payload: boolean }
   | { type: 'UPDATE_MIGRATION_PROGRESS'; payload: MigrationProgress }
+  | { type: 'UPDATE_MIGRATION_STATUS'; payload: { migrationId: string; status: string; timestamp: Date; data?: any } }
   | { type: 'REMOVE_MIGRATION'; payload: string }
   | { type: 'ADD_CANCELLED_MIGRATION'; payload: string }
   | { type: 'REMOVE_CANCELLED_MIGRATION'; payload: string }
@@ -76,6 +81,7 @@ type DashboardAction =
   | { type: 'SET_POLLING_ENABLED'; payload: boolean }
   | { type: 'SET_POLLING_INTERVAL'; payload: number }
   | { type: 'UPDATE_LAST_POLLING'; payload: Date }
+  | { type: 'CANCELLATION_PROGRESS_UPDATE'; payload: any }
   | { type: 'RESET_STATE' };
 
 // Initial State
@@ -97,7 +103,11 @@ const initialState: DashboardState = {
   // Polling fallback
   isPollingEnabled: false,
   pollingInterval: 10000, // 10 seconds for polling fallback
-  lastPollingUpdate: null
+  lastPollingUpdate: null,
+  
+  // Live cancellation
+  lastCancellationEvent: undefined,
+  lastCancellationTimestamp: undefined
 };
 
 // Reducer
@@ -121,6 +131,23 @@ function dashboardReducer(state: DashboardState, action: DashboardAction): Dashb
       const newMigrations = new Map(state.activeMigrations);
       newMigrations.set(action.payload.migrationId, action.payload);
       return { ...state, activeMigrations: newMigrations };
+      
+    case 'UPDATE_MIGRATION_STATUS':
+      // Update migration status (used for cancellation and other status changes)
+      console.log('📊 Reducer: Updating migration status:', action.payload);
+      if (action.payload.status === 'cancelled') {
+        // Remove from active migrations and add to cancelled list
+        const updatedMigrations = new Map(state.activeMigrations);
+        updatedMigrations.delete(action.payload.migrationId);
+        const updatedCancelled = new Set(state.cancelledMigrations);
+        updatedCancelled.add(action.payload.migrationId);
+        return { 
+          ...state, 
+          activeMigrations: updatedMigrations,
+          cancelledMigrations: updatedCancelled
+        };
+      }
+      return state;
       
     case 'REMOVE_MIGRATION':
       const filteredMigrations = new Map(state.activeMigrations);
@@ -172,6 +199,15 @@ function dashboardReducer(state: DashboardState, action: DashboardAction): Dashb
       
     case 'RESET_STATE':
       return { ...initialState };
+      
+    case 'CANCELLATION_PROGRESS_UPDATE':
+      // Store cancellation events for components that need granular cancellation info
+      console.log('🛑 Reducer: Processing cancellation progress update:', action.payload);
+      return { 
+        ...state, 
+        lastCancellationEvent: action.payload,
+        lastCancellationTimestamp: new Date()
+      };
       
     default:
       return state;
@@ -544,9 +580,17 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
       console.log('🎯 DashboardContext received MigrationStatus:', statusData);
       // Handle different types of migration status updates
       if (statusData.status === 'completed') {
+        console.log('🎉 [DASHBOARD-CONTEXT] Migration completion detected:', statusData);
+        
         // Calculate duration if possible (fallback to "just now" if no duration data)
-        const duration = statusData.data?.duration || 'just now';
-        const migrationName = statusData.data?.name || `Migration ${statusData.migrationId}`;
+        const duration = statusData.data?.duration || statusData.data?.processingTime || 'just now';
+        const migrationName = statusData.data?.name || `Migration ${statusData.migrationId?.slice(-8) || 'Unknown'}`;
+        
+        console.log('🔔 [DASHBOARD-CONTEXT] Triggering completion notification:', {
+          migrationId: statusData.migrationId?.slice(-8),
+          migrationName,
+          duration
+        });
         
         notificationService.migrationCompleted(
           statusData.migrationId,
@@ -600,6 +644,88 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
       }
     });
 
+    // 🛑 LIVE CANCELLATION: Handle cancellation progress events
+    const cancellationUnsubscribe = signalRService.on('cancellationProgress', (cancellationEvent: any) => {
+      console.log('🛑 DashboardContext received cancellationProgress:', cancellationEvent);
+      
+      // Update migration status if this is a migration-level cancellation
+      if (cancellationEvent.scope === 'Migration') {
+        const migrationName = `Migration ${cancellationEvent.migrationId?.slice(-8) || 'Unknown'}`;
+        
+        // 🚪 AUTOMATIC GROUP LEAVING: Leave SignalR group to stop receiving updates for cancelled migration
+        console.log('🚪 Auto-leaving SignalR group for cancelled migration (via cancellation event):', cancellationEvent.migrationId);
+        signalRService.leaveMigrationGroup(cancellationEvent.migrationId).catch(error => {
+          console.warn('⚠️ Failed to auto-leave migration group:', error);
+        });
+        
+        // Trigger cancellation notification
+        notificationService.migrationCancelled(
+          cancellationEvent.migrationId,
+          migrationName
+        );
+        
+        // Update migration progress to reflect cancellation
+        dispatch({
+          type: 'UPDATE_MIGRATION_STATUS',
+          payload: {
+            migrationId: cancellationEvent.migrationId,
+            status: 'cancelled',
+            timestamp: new Date(),
+            data: cancellationEvent
+          }
+        });
+      }
+      
+      // Dispatch cancellation-specific event for components that need granular cancellation info
+      dispatch({
+        type: 'CANCELLATION_PROGRESS_UPDATE',
+        payload: cancellationEvent
+      });
+    });
+
+    // Sub-batch completion progress updates (real-time progress from sub-batch optimization)
+    const subBatchCompletedUnsubscribe = signalRService.on('subBatchCompleted', (subBatchData: any) => {
+      console.log('🎯 DashboardContext received subBatchCompleted:', subBatchData);
+      
+      const migrationId = subBatchData.migrationId || subBatchData.MigrationId;
+      if (!migrationId) return;
+      
+      // Don't update cancelled migrations
+      if (state.cancelledMigrations.has(migrationId)) {
+        console.log('🚫 Skipping sub-batch update for cancelled migration:', migrationId);
+        return;
+      }
+      
+      // Get current migration to preserve other data
+      const currentMigration = state.activeMigrations.get(migrationId);
+      if (!currentMigration) return;
+      
+      // Create updated progress using cumulative data from sub-batch
+      const updatedProgress: MigrationProgress = {
+        ...currentMigration,
+        migrationId: migrationId,
+        totalEntities: subBatchData.totalMigrationEntities || currentMigration.totalEntities,
+        processedEntities: subBatchData.cumulativeSuccessfulEntities + (subBatchData.cumulativeFailedEntities || 0),
+        successfulEntities: subBatchData.cumulativeSuccessfulEntities || currentMigration.successfulEntities,
+        failedEntities: subBatchData.cumulativeFailedEntities || currentMigration.failedEntities,
+        overallProgressPercentage: subBatchData.progressPercentage || currentMigration.overallProgressPercentage,
+        currentEntity: subBatchData.entityType || currentMigration.currentEntity,
+        lastUpdated: new Date(),
+        status: subBatchData.progressPercentage >= 100 ? 'completed' : 'in_progress',
+        currentPhase: subBatchData.progressPercentage >= 100 ? 'Completed' : 'Processing'
+      };
+      
+      console.log('📊 DashboardContext updating progress from sub-batch:', {
+        migrationId,
+        totalEntities: updatedProgress.totalEntities,
+        processedEntities: updatedProgress.processedEntities,
+        successfulEntities: updatedProgress.successfulEntities,
+        progressPercentage: updatedProgress.overallProgressPercentage
+      });
+      
+      dispatch({ type: 'UPDATE_MIGRATION_PROGRESS', payload: updatedProgress });
+    });
+
     // Entity progress updates (when individual entities complete)
     const entityProgressUnsubscribe = signalRService.on('EntityProgressUpdated', (entityData: any) => {
       console.log('🔄 DashboardContext received EntityProgressUpdated:', entityData);
@@ -632,13 +758,8 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
         };
         dispatch({ type: 'UPDATE_MIGRATION_PROGRESS', payload: completedProgress });
         
-        // Show completion notification
-        const migrationName = `Migration ${migrationId}`;
-        notificationService.migrationCompleted(
-          migrationId,
-          migrationName,
-          entityData.ProcessingTime || 'just completed'
-        );
+        // ✅ FIX: Don't show completion notification here - MigrationStatus handler already does this
+        // This prevents duplicate notifications when migration completes
       } else if (migrationId) {
         // Update entity counts for other statuses
         dispatch({ 
@@ -679,6 +800,8 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
       connectionUnsubscribe();
       progressUnsubscribe();
       statusUnsubscribe();
+      cancellationUnsubscribe();
+      subBatchCompletedUnsubscribe();
       entityProgressUnsubscribe();
       healthUnsubscribe();
       errorUnsubscribe();

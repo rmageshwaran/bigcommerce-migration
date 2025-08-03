@@ -97,17 +97,37 @@ public static class MigrationDurableOrchestrator
             // Update the input context with resolved tree IDs
             input.CategoryTreeContext = resolvedCategoryTreeContext;
 
-            // Step 4: Check for cancellation before starting entity processing using deterministic pattern
-            var cancellationState = context.GetOrInitializeCancellationState(migrationId);
-            cancellationState = await context.CheckExternalCancellationOnceAsync(cancellationState);
+            // Step 4: Check for live cancellation before starting entity processing
+            var migrationCancellationCheck = await context.CallActivityAsync<CancellationCheckResult>(
+                "CheckLiveCancellationActivity",
+                new CancellationCheckRequest
+                {
+                    MigrationId = migrationId,
+                    Scope = CancellationScope.Migration
+                });
 
-            if (cancellationState.IsCancelled)
+            if (migrationCancellationCheck.IsCancelled)
             {
                 logger.LogInformation("Migration {MigrationId} was cancelled before entity processing began. Reason: {Reason}", 
-                    migrationId, cancellationState.CancellationReason);
+                    migrationId, migrationCancellationCheck.Reason);
                 
-                return (MigrationOrchestrationResult)CancelledResultFactory.CreateCancelledMigrationResult(
-                    cancellationState, context.CurrentUtcDateTime);
+                // Process cancellation through live cancellation system
+                await context.CallActivityAsync("ProcessCancellationActivity", 
+                    new CancellationProcessRequest 
+                    { 
+                        MigrationId = migrationId, 
+                        Scope = CancellationScope.Migration,
+                        Reason = migrationCancellationCheck.Reason ?? "Migration cancelled"
+                    });
+                
+                result.Status = "Cancelled";
+                result.ErrorMessage = migrationCancellationCheck.Reason ?? "Migration was cancelled";
+                result.EndTime = context.CurrentUtcDateTime;
+                
+                // ✅ CRITICAL FIX: Complete migration to persist statistics - ensures cancelled migrations show proper stats in UI
+                await CompleteMigrationAsync(context, migrationId, result, MigrationStatus.Cancelled, result.ErrorMessage);
+                
+                return result;
             }
 
             // Step 4.5: Phase 3.1 - Orchestrator collision detection
@@ -142,13 +162,8 @@ public static class MigrationDurableOrchestrator
             logger.LogInformation("Successfully acquired orchestrator lock for migration: {MigrationId}, instance: {InstanceId}", 
                 migrationId, instanceId);
 
-            // Create cancellation token source for this execution based on external cancellation state
-            // This allows activities to use fast token checks instead of external storage calls
-            var cancellationTokenSource = new CancellationTokenSource();
-            if (cancellationState.IsCancelled)
-            {
-                cancellationTokenSource.Cancel();
-            }
+            // Initialize live cancellation tracking
+            var lastCancellationCheck = migrationCancellationCheck;
 
             try
             {
@@ -162,53 +177,104 @@ public static class MigrationDurableOrchestrator
                 logger.LogInformation("Processing entity type: {EntityType} for MigrationId: {MigrationId}", 
                     entityType, migrationId);
 
-                // Fast cancellation check using token (microseconds vs milliseconds for external storage)
-                if (cancellationTokenSource.Token.IsCancellationRequested)
-                {
-                    logger.LogInformation("Migration {MigrationId} was cancelled during {EntityType} processing via fast token check", 
-                        migrationId, entityType);
-                    
-                    return (MigrationOrchestrationResult)CancelledResultFactory.CreateCancelledMigrationResult(
-                        cancellationState, context.CurrentUtcDateTime);
-                }
-
-                // Periodically refresh cancellation state from external storage for long-running migrations
-                // Only check external storage every few entities to balance performance with responsiveness
-                if (entityOrder.IndexOf(entityType) % 3 == 0) // Check every 3rd entity
-                {
-                    var refreshedState = await context.CheckExternalCancellationOnceAsync(cancellationState);
-                    if (refreshedState.IsCancelled && !cancellationState.IsCancelled)
+                // Check for live cancellation before processing each entity type
+                var entityCancellationCheck = await context.CallActivityAsync<CancellationCheckResult>(
+                    "CheckLiveCancellationActivity",
+                    new CancellationCheckRequest
                     {
-                        cancellationState = refreshedState;
-                        cancellationTokenSource.Cancel();
-                        logger.LogInformation("Migration {MigrationId} cancellation detected via periodic refresh during {EntityType} processing", 
-                            migrationId, entityType);
-                        
-                        return (MigrationOrchestrationResult)CancelledResultFactory.CreateCancelledMigrationResult(
-                            cancellationState, context.CurrentUtcDateTime);
-                    }
+                        MigrationId = migrationId,
+                        Scope = CancellationScope.Migration
+                    });
+
+                if (entityCancellationCheck.IsCancelled)
+                {
+                    logger.LogInformation("Migration {MigrationId} was cancelled during {EntityType} processing. Reason: {Reason}", 
+                        migrationId, entityType, entityCancellationCheck.Reason);
+                    
+                    // Process cancellation through live cancellation system
+                    await context.CallActivityAsync("ProcessCancellationActivity", 
+                        new CancellationProcessRequest 
+                        { 
+                            MigrationId = migrationId, 
+                            Scope = CancellationScope.Migration,
+                            Reason = entityCancellationCheck.Reason ?? "Migration cancelled during entity processing"
+                        });
+                    
+                    result.Status = "Cancelled";
+                    result.ErrorMessage = entityCancellationCheck.Reason ?? "Migration was cancelled";
+                    result.EndTime = context.CurrentUtcDateTime;
+                    
+                    // ✅ CRITICAL FIX: Complete migration to persist current statistics - ensures cancelled migrations show progress achieved before cancellation
+                    await CompleteMigrationAsync(context, migrationId, result, MigrationStatus.Cancelled, result.ErrorMessage);
+                    
+                    return result;
                 }
 
-                // Process the entity type using the entity-specific orchestrator
-                var entityRequest = new EntityMigrationRequest
-                {
-                    MigrationId = migrationId,
-                    EntityType = entityType,
-                    SourceStore = input.MigrationRequest?.SourceStore ?? new StoreConfiguration(),
-                    DestinationStore = input.MigrationRequest?.DestinationStore ?? new StoreConfiguration(),
-                    CategoryTreeContext = input.CategoryTreeContext ?? new CategoryTreeContext(),
-                    Settings = input.MigrationRequest?.Settings,
-                    // Pass cancellation state for fast token-based checking in sub-orchestrator and activities
-                    IsCancelled = cancellationState.IsCancelled,
-                    CancellationReason = cancellationState.CancellationReason,
-                    CancelledAt = cancellationState.CancelledAt
-                };
-
+                // Process the entity type using the appropriate orchestrator
                 try
                 {
-                    var entityResult = await context.CallSubOrchestratorAsync<EntityMigrationResult>(
-                        "EntityMigrationDurableOrchestrator",
-                        entityRequest);
+                    EntityMigrationResult entityResult;
+                    
+                    // ✅ CRITICAL FIX: Route categories to ChunkedCategoryMigrationOrchestrator
+                    if (entityType.Equals("categories", StringComparison.OrdinalIgnoreCase))
+                    {
+                        logger.LogInformation("🚀 Routing {EntityType} to ChunkedCategoryMigrationOrchestrator for MigrationId: {MigrationId}", 
+                            entityType, migrationId);
+                            
+                        // Use chunked category migration orchestrator for optimized processing
+                        var chunkedRequest = new ChunkedCategoryMigrationRequest
+                        {
+                            MigrationId = migrationId,
+                            SourceStore = input.MigrationRequest?.SourceStore ?? new StoreConfiguration(),
+                            DestinationStore = input.MigrationRequest?.DestinationStore ?? new StoreConfiguration(),
+                            CategoryTreeContext = input.CategoryTreeContext ?? new CategoryTreeContext(),
+                            ChunkedHierarchyConfig = new ChunkedHierarchyConfiguration(), // Use default config
+                            EnableProgressUpdates = true
+                        };
+                        
+                        var chunkedResult = await context.CallSubOrchestratorAsync<ChunkedCategoryMigrationResult>(
+                            "ChunkedCategoryMigrationOrchestrator",
+                            chunkedRequest);
+                            
+                        // Convert ChunkedCategoryMigrationResult to EntityMigrationResult for compatibility
+                        entityResult = new EntityMigrationResult
+                        {
+                            EntityType = entityType,
+                            IsSuccess = chunkedResult.Status == "Completed",
+                            ErrorMessage = chunkedResult.CancellationReason ?? (chunkedResult.ErrorMessages.Any() ? string.Join("; ", chunkedResult.ErrorMessages) : null),
+                            StartTime = chunkedResult.StartTime,
+                            EndTime = chunkedResult.EndTime ?? context.CurrentUtcDateTime,
+                            Duration = (chunkedResult.EndTime ?? context.CurrentUtcDateTime) - chunkedResult.StartTime,
+                            TotalEntities = chunkedResult.TotalCategoriesProcessed,
+                            ProcessedEntities = chunkedResult.TotalCategoriesProcessed,
+                            SuccessfulEntities = chunkedResult.TotalCategoriesCreated,
+                            FailedEntities = chunkedResult.TotalCategoriesFailed,
+                            BatchResults = new List<BatchProcessingResult>(),
+                            Mappings = new List<EntityMapping>(),
+                            Errors = chunkedResult.ErrorMessages,
+                            ProcessingTime = (chunkedResult.EndTime ?? context.CurrentUtcDateTime) - chunkedResult.StartTime
+                        };
+                    }
+                    else
+                    {
+                        logger.LogInformation("📄 Routing {EntityType} to EntityMigrationDurableOrchestrator for MigrationId: {MigrationId}", 
+                            entityType, migrationId);
+                            
+                        // Use standard entity migration orchestrator for other entity types
+                        var entityRequest = new EntityMigrationRequest
+                        {
+                            MigrationId = migrationId,
+                            EntityType = entityType,
+                            SourceStore = input.MigrationRequest?.SourceStore ?? new StoreConfiguration(),
+                            DestinationStore = input.MigrationRequest?.DestinationStore ?? new StoreConfiguration(),
+                            CategoryTreeContext = input.CategoryTreeContext ?? new CategoryTreeContext(),
+                            Settings = input.MigrationRequest?.Settings
+                        };
+
+                        entityResult = await context.CallSubOrchestratorAsync<EntityMigrationResult>(
+                            "EntityMigrationDurableOrchestrator",
+                            entityRequest);
+                    }
 
                     result.EntityResults[entityType] = entityResult;
 
@@ -259,7 +325,31 @@ public static class MigrationDurableOrchestrator
             result.EndTime = context.CurrentUtcDateTime;
             result.Duration = result.EndTime.Value - result.StartTime;
 
-            // ✅ CANCELLATION DETECTION: Check if any entity migration was cancelled
+            // ✅ CRITICAL FIX: Check for live cancellation tokens directly instead of relying on error messages
+            try 
+            {
+                var cancellationTokenEntry = await context.CallActivityAsync<CancellationTokenEntry?>("GetCancellationTokenActivity", migrationId);
+                if (cancellationTokenEntry != null)
+                {
+                    result.Status = "Cancelled";
+                    result.ErrorMessage = $"Migration was cancelled: {cancellationTokenEntry.Reason}";
+                    
+                    logger.LogWarning("🚫 [LIVE-CANCEL-DETECTED] Migration was cancelled for MigrationId: {MigrationId}. " +
+                                    "Reason: {Reason}, Processed: {ProcessedCount}, Successful: {SuccessfulCount}", 
+                        migrationId, cancellationTokenEntry.Reason, totalProcessed, totalSuccessful);
+                    
+                    // Complete migration as cancelled - update storage service for HTTP API
+                    await CompleteMigrationAsync(context, migrationId, result, MigrationStatus.Cancelled, result.ErrorMessage);
+                    
+                    return result;
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "⚠️ [CANCELLATION-CHECK] Error checking cancellation token for migration {MigrationId}, continuing with normal status determination", migrationId);
+            }
+
+            // ✅ FALLBACK: Check if any entity migration was cancelled (legacy detection)
             var cancelledEntities = result.EntityResults.Values
                 .Where(r => !r.IsSuccess && (r.ErrorMessage?.Contains("cancelled", StringComparison.OrdinalIgnoreCase) == true ||
                                            r.Errors.Any(e => e.Contains("cancelled", StringComparison.OrdinalIgnoreCase))))
@@ -432,7 +522,11 @@ public static class MigrationDurableOrchestrator
                     FailedApiCalls = 0,
                     AverageResponseTimeMs = 0,
                     PeakApiCallsPerMinute = 0,
-                    TotalBytesTransferred = 0
+                    TotalBytesTransferred = 0,
+                    // ✅ CRITICAL FIX: Populate entity statistics for UI display
+                    TotalEntitiesProcessed = result.TotalEntitiesProcessed,
+                    TotalEntitiesSuccessful = result.TotalEntitiesSuccessful,
+                    TotalEntitiesFailed = result.TotalEntitiesFailed
                 }
             }
         });

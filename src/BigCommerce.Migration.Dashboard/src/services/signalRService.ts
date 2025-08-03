@@ -316,6 +316,58 @@ export class SignalRService {
       });
     });
 
+    // 🛑 LIVE CANCELLATION: Handle cancellation progress events
+    this.connection.on('CancellationProgressUpdated', (cancellationEvent: any) => {
+      console.log('🛑 DEBUG: Received CancellationProgressUpdated:', cancellationEvent);
+      
+      // Notify listeners about cancellation progress
+      this.notifyListeners('cancellationProgress', {
+        migrationId: cancellationEvent.migrationId || cancellationEvent.MigrationId,
+        scope: cancellationEvent.scope || cancellationEvent.Scope,
+        status: cancellationEvent.status || cancellationEvent.Status,
+        reason: cancellationEvent.reason || cancellationEvent.Reason,
+        entityType: cancellationEvent.entityType || cancellationEvent.EntityType,
+        batchId: cancellationEvent.batchId || cancellationEvent.BatchId,
+        storeId: cancellationEvent.storeId || cancellationEvent.StoreId,
+        estimatedTimeToComplete: cancellationEvent.estimatedTimeToComplete || cancellationEvent.EstimatedTimeToComplete,
+        propagatedAt: cancellationEvent.propagatedAt || cancellationEvent.PropagatedAt,
+        requestedBy: cancellationEvent.requestedBy || cancellationEvent.RequestedBy,
+        timestamp: cancellationEvent.timestamp || cancellationEvent.Timestamp || new Date()
+      });
+      
+      // Also trigger a migration status update if this is a migration-level cancellation
+      if ((cancellationEvent.scope || cancellationEvent.Scope) === 'Migration') {
+        console.log('🛑 STATUS-UPDATE: Migration-level cancellation detected, updating migration status');
+        this.notifyListeners('MigrationStatus', {
+          migrationId: cancellationEvent.migrationId || cancellationEvent.MigrationId,
+          status: 'cancelled',
+          data: cancellationEvent
+        });
+      }
+    });
+
+    // 🛑 MIGRATION CANCELLED: Handle the alternative cancellation message format
+    this.connection.on('migrationCancelled', (cancellationData: any) => {
+      console.log('🛑 DEBUG: Received migrationCancelled:', cancellationData);
+      
+      // Convert to standard cancellation format and notify listeners
+      this.notifyListeners('cancellationProgress', {
+        migrationId: cancellationData.migrationId,
+        scope: 'Migration', // This type of message is always migration-level
+        status: 'cancelled',
+        reason: cancellationData.reason || 'Migration cancelled',
+        timestamp: cancellationData.timestamp || cancellationData.cancelledAt || new Date()
+      });
+      
+      // Also trigger migration status update
+      console.log('🛑 STATUS-UPDATE: Migration cancelled message received, updating migration status');
+      this.notifyListeners('MigrationStatus', {
+        migrationId: cancellationData.migrationId,
+        status: 'cancelled',
+        data: cancellationData
+      });
+    });
+
     // 🚨 GLOBAL COORDINATION: Sub-batch events now handled by global aggregator
     // Individual sub-batch events are reported to ParallelProgressAggregator which sends coordinated MigrationProgress events
     // This eliminates the 50→192 jump issue by ensuring proper cross-batch coordination

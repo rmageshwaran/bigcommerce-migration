@@ -139,6 +139,33 @@ public static class ServiceCollectionExtensions
         // Also register as singleton for backward compatibility
         services.AddSingleton(openSearchConfig);
 
+        // 🎯 CHUNKED HIERARCHY CONFIG: Bind ChunkedHierarchyConfiguration using Options pattern
+        services.Configure<ChunkedHierarchyConfiguration>(configuration.GetSection("ChunkedHierarchy"));
+        
+        // Validate ChunkedHierarchy configuration
+        var chunkedHierarchyConfig = new ChunkedHierarchyConfiguration();
+        configuration.GetSection("ChunkedHierarchy").Bind(chunkedHierarchyConfig);
+        
+        // Validate configuration for production readiness
+        var validationResult = chunkedHierarchyConfig.Validate();
+        if (!validationResult.IsValid)
+        {
+            throw new ArgumentException($"Invalid ChunkedHierarchy configuration. Issues found:\n{string.Join("\n", validationResult.ValidationErrors)}");
+        }
+        
+        // Log warnings if any (continue-on-error policy)
+        if (validationResult.ValidationWarnings.Count > 0)
+        {
+            // Use a simple console warning since we're in the configuration phase
+            foreach (var warning in validationResult.ValidationWarnings)
+            {
+                Console.WriteLine($"WARNING: ChunkedHierarchy Configuration: {warning}");
+            }
+        }
+        
+        // Also register as singleton for backward compatibility
+        services.AddSingleton(chunkedHierarchyConfig);
+
         // Azure SignalR configured via connection string in appsettings.json
 
         return services;
@@ -450,6 +477,10 @@ public static class ServiceCollectionExtensions
 
         // Register BigCommerce API client using delegation pattern
         services.AddSingleton<IBigCommerceApiClient, BigCommerceApiClient>();
+        
+        // Register Batch API client for high-performance batch operations
+        services.AddSingleton<IBatchApiClient, BatchApiClient>();
+
 
         // Register dynamic rate limiting configuration
         services.Configure<DynamicRateLimitingConfiguration>(
@@ -511,6 +542,24 @@ public static class ServiceCollectionExtensions
         // Single source of truth for all SignalR event creation and messaging
         services.AddSingleton<ISignalREventFactory, SignalREventFactory>();
         services.AddSingleton<ISignalRMessageConverter, SignalRMessageConverter>();
+
+        // 🔄 **TASK 7.1-7.3: LIVE CANCELLATION SYSTEM** (Multi-Instance Coordination)
+        // Enhanced cancellation models, services, and distributed storage with 4-layer hybrid architecture
+        
+        // Core Live Cancellation Manager (Task 7.1 & 7.2)
+        services.AddSingleton<ILiveCancellationManager, LiveCancellationManager>();
+        
+        // 🔄 **TASK 7.3: HYBRID CANCELLATION STORAGE** (Multi-Instance Coordination)
+        // 4-Layer Architecture: Table Storage + Queue + SignalR + In-Memory Cache
+        // Cost: ~$0.40/month vs $50+/month for Service Bus (125x cheaper!)
+        services.AddSingleton<HybridCancellationRepository>();
+        
+        // Register as both interfaces for compatibility and feature parity
+        services.AddSingleton<ICancellationTokenRepository>(provider => 
+            provider.GetRequiredService<HybridCancellationRepository>());
+        
+        // Register legacy repository for backward compatibility (if needed)
+        services.AddSingleton<CancellationTokenRepository>();
 
         // ✅ **P2.5: Phase 2 Enhanced Parallel Processing Pipeline** (Required for 17.0x throughput)
         // These services were moved from Orchestration project to ensure proper DI resolution

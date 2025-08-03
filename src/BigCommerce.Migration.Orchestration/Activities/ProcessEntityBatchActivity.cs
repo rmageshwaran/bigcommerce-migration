@@ -31,6 +31,7 @@ public class ProcessEntityBatchActivity
     private readonly IRateLimitService _rateLimitService;
     private readonly IOpenSearchService _openSearchService;
     private readonly IMigrationStorageService _migrationStorageService;
+    private readonly ILiveCancellationManager _liveCancellationManager;
     // TODO: Replace with queue-based progress broadcasting
     // Removed IMigrationSignalRService dependency
     private readonly IErrorMessageFormatter _errorMessageFormatter;
@@ -45,6 +46,7 @@ public class ProcessEntityBatchActivity
         IRateLimitService rateLimitService,
         IOpenSearchService openSearchService,
         IMigrationStorageService migrationStorageService,
+        ILiveCancellationManager liveCancellationManager,
         IErrorMessageFormatter errorMessageFormatter)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -56,6 +58,7 @@ public class ProcessEntityBatchActivity
         _rateLimitService = rateLimitService ?? throw new ArgumentNullException(nameof(rateLimitService));
         _openSearchService = openSearchService ?? throw new ArgumentNullException(nameof(openSearchService));
         _migrationStorageService = migrationStorageService ?? throw new ArgumentNullException(nameof(migrationStorageService));
+        _liveCancellationManager = liveCancellationManager ?? throw new ArgumentNullException(nameof(liveCancellationManager));
         _errorMessageFormatter = errorMessageFormatter ?? throw new ArgumentNullException(nameof(errorMessageFormatter));
     }
 
@@ -105,7 +108,24 @@ public class ProcessEntityBatchActivity
                 return CompleteBatch(result, stopwatch);
             }
 
-            // Step 3: Fast cancellation check using passed state (microseconds vs milliseconds for external storage)
+            // Step 3A: 🛑 LIVE CANCELLATION: Check for real-time cancellation before processing
+            var isCancelled = await _liveCancellationManager.IsCancelledAsync(
+                request.MigrationId,
+                CancellationScope.Batch,
+                request.EntityType,
+                $"batch-{request.BatchNumber}",
+                null);
+
+            if (isCancelled)
+            {
+                _logger.LogInformation("🚫 [LIVE-CANCEL] Batch {BatchNumber} processing was cancelled for Migration {MigrationId}, EntityType: {EntityType}", 
+                    request.BatchNumber, request.MigrationId, request.EntityType);
+                
+                result.Errors.Add($"Batch {request.BatchNumber} processing was cancelled");
+                return CompleteBatch(result, stopwatch);
+            }
+
+            // Step 3B: Fast cancellation check using passed state (microseconds vs milliseconds for external storage)
             if (request.IsCancelled)
             {
                 _logger.LogInformation("Migration {MigrationId} was cancelled before batch {BatchNumber} processing. Reason: {Reason}",
@@ -278,6 +298,23 @@ public class ProcessEntityBatchActivity
                     ? $"Migration was cancelled during batch processing at entity {i + 1}/{sourceEntities.Count}"
                     : $"Migration was cancelled during batch processing at entity {i + 1}/{sourceEntities.Count}: {request.CancellationReason}";
                 result.Errors.Add(cancellationMessage);
+                return;
+            }
+
+            // 🛑 LIVE CANCELLATION: Check for real-time cancellation during entity processing
+            var isLiveCancelled = await _liveCancellationManager.IsCancelledAsync(
+                request.MigrationId,
+                CancellationScope.Migration,
+                request.EntityType,
+                $"batch-{request.BatchNumber}",
+                null);
+
+            if (isLiveCancelled)
+            {
+                _logger.LogInformation("🚫 [LIVE-CANCEL] Entity processing was cancelled for Migration {MigrationId} at entity {EntityIndex}/{TotalEntities}, EntityType: {EntityType}", 
+                    request.MigrationId, i + 1, sourceEntities.Count, request.EntityType);
+                
+                result.Errors.Add($"Entity processing was cancelled at entity {i + 1}/{sourceEntities.Count}");
                 return;
             }
 

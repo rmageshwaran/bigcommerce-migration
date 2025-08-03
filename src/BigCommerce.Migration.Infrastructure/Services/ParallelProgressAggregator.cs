@@ -416,6 +416,23 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
     }
 
     /// <summary>
+    /// ✅ CRITICAL CANCELLATION FIX: Gets the actual number of entities processed (successful + failed)
+    /// This is essential for accurate statistics when cancellation occurs mid-migration
+    /// </summary>
+    /// <returns>The actual processed entity count</returns>
+    public int GetActualProcessedCount()
+    {
+        var processed = Interlocked.Read(ref _totalSubBatchEntitiesProcessed);
+        var failed = Interlocked.Read(ref _totalSubBatchEntitiesFailed);
+        var actualProcessed = (int)(processed + failed);
+        
+        _logger.LogInformation("🚨 [CANCELLATION-FIX] GetActualProcessedCount: Processed={Processed}, Failed={Failed}, Total={ActualProcessed}", 
+            processed, failed, actualProcessed);
+            
+        return actualProcessed;
+    }
+
+    /// <summary>
     /// Calculates current processing rate (entities per second)
     /// </summary>
     private double CalculateCurrentProcessingRate()

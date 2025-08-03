@@ -57,6 +57,12 @@ namespace BigCommerce.Migration.Core.Services
         /// Creates a SubBatchMigrationProgressEvent with consistent properties and validation
         /// </summary>
         SubBatchMigrationProgressEvent CreateSubBatchProgress(string migrationId, SubBatchProgressOptions options);
+
+        /// <summary>
+        /// Creates a CancellationProgressEvent with consistent properties and validation
+        /// Task 7.1 Live Cancellation Integration
+        /// </summary>
+        CancellationProgressEvent CreateCancellationProgress(string migrationId, CancellationProgressOptions options);
     }
 
     /// <summary>
@@ -420,5 +426,40 @@ namespace BigCommerce.Migration.Core.Services
         }
 
         #endregion
+
+        /// <summary>
+        /// Creates a CancellationProgressEvent with auto-populated base properties
+        /// Task 7.1 Live Cancellation Integration
+        /// </summary>
+        public CancellationProgressEvent CreateCancellationProgress(string migrationId, CancellationProgressOptions options)
+        {
+            ValidateMigrationId(migrationId);
+            ValidateRequired(options, nameof(options));
+
+            var cancellationEvent = new CancellationProgressEvent
+            {
+                // Base properties (auto-populated) - DO NOT set base class cancellation properties to avoid conflicts
+                MigrationId = migrationId,
+                Timestamp = _dateTimeProvider.UtcNow,
+                ConnectionId = options.ConnectionId,
+                GroupName = options.GroupName,
+                
+                // Specific cancellation properties (CancellationProgressEvent has its own cancellation handling)
+                Scope = options.Scope,
+                Status = options.Status ?? "requested",
+                Reason = options.Reason ?? throw new ArgumentException("Reason is required for cancellation events", nameof(options)),
+                EntityType = options.EntityType,
+                BatchId = options.BatchId,
+                StoreId = options.StoreId,
+                EstimatedTimeToComplete = options.EstimatedTimeToComplete,
+                PropagatedAt = options.PropagatedAt,
+                RequestedBy = options.RequestedBy,
+                TotalInstances = options.TotalInstances,
+                AcknowledgedInstances = options.AcknowledgedInstances,
+                AdditionalContext = options.AdditionalContext ?? new Dictionary<string, object>()
+            };
+
+            return cancellationEvent;
+        }
     }
 } 

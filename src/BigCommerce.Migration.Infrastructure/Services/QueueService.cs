@@ -17,6 +17,7 @@ public class QueueService : IQueueService
     private readonly QueueServiceClient _queueServiceClient;
     private readonly ILogger<QueueService> _logger;
     private readonly string _connectionString;
+    private readonly ICancellationTokenRepository _cancellationRepository;
 
     // Queue names (configurable via environment variables)
     private const string MigrationStartQueueName = "migration-start";
@@ -30,9 +31,11 @@ public class QueueService : IQueueService
     /// </summary>
     /// <param name="configuration">Configuration service</param>
     /// <param name="logger">Logger instance</param>
-    public QueueService(IConfiguration configuration, ILogger<QueueService> logger)
+    /// <param name="cancellationRepository">Cancellation token repository for processing cancellations</param>
+    public QueueService(IConfiguration configuration, ILogger<QueueService> logger, ICancellationTokenRepository cancellationRepository)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _cancellationRepository = cancellationRepository ?? throw new ArgumentNullException(nameof(cancellationRepository));
         if (configuration == null)
             throw new ArgumentNullException(nameof(configuration));
         
@@ -151,6 +154,7 @@ public class QueueService : IQueueService
                 MigrationId = migrationId,
                 Reason = reason,
                 RequestedBy = "System", // Could be enhanced to track actual user
+                Scope = "Migration", // ✅ CRITICAL FIX: Add missing Scope property for CancellationMessage deserialization
                 CreatedAt = DateTime.UtcNow,
                 Version = "1.0"
             };
@@ -404,8 +408,39 @@ public class QueueService : IQueueService
                 };
             }
 
-            // TODO: Implement actual cancellation processing logic
-            await Task.Delay(500);
+            // ✅ CRITICAL FIX: Implement actual cancellation processing logic
+            var cancellationData = JsonSerializer.Deserialize<CancellationMessage>(queueMessage.Content, new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                PropertyNameCaseInsensitive = true // ✅ CRITICAL FIX: Match migration start message deserialization pattern
+            });
+            if (cancellationData == null)
+            {
+                return new MessageProcessingResult
+                {
+                    IsSuccess = false,
+                    ErrorDetails = "Failed to deserialize cancellation message body",
+                    ShouldRetry = false,
+                    ProcessedAt = DateTime.UtcNow
+                };
+            }
+
+            _logger.LogInformation("🚫 [CANCELLATION-PROCESSING] Processing cancellation for Migration: {MigrationId}, Scope: {Scope}, Reason: {Reason}", 
+                cancellationData.MigrationId, cancellationData.Scope, cancellationData.Reason);
+
+            // ✅ CRITICAL FIX: Create scoped cancellation token to mark as processed
+            var scope = Enum.TryParse<CancellationScope>(cancellationData.Scope, out var parsedScope) 
+                ? parsedScope 
+                : CancellationScope.Migration;
+            
+            await _cancellationRepository.CreateScopedAsync(
+                cancellationData.MigrationId,
+                scope,
+                cancellationData.Reason ?? "Migration cancelled",
+                cancellationData.RequestedBy ?? "system");
+
+            _logger.LogInformation("✅ [CANCELLATION-PROCESSING] Successfully set cancellation state for Migration: {MigrationId}", 
+                cancellationData.MigrationId);
 
             _logger.LogInformation("Successfully processed cancellation message: {MessageId}", queueMessage.MessageId);
             
@@ -504,12 +539,19 @@ public class QueueService : IQueueService
                 return null;
             }
 
+            // 🚨 DEBUG: Log the content being parsed to debug poison queue issue
+            _logger.LogInformation("🚨 [PARSE-DEBUG] Parsing content for type {Type}: {Content}", 
+                typeof(T).Name, 
+                queueMessage.Content.Length > 300 ? queueMessage.Content.Substring(0, 300) + "..." : queueMessage.Content);
+
             var parsedContent = JsonSerializer.Deserialize<T>(queueMessage.Content, new JsonSerializerOptions
             {
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
                 PropertyNameCaseInsensitive = true
             });
 
+            _logger.LogInformation("🚨 [PARSE-SUCCESS] Successfully parsed {Type} for message {MessageId}", typeof(T).Name, queueMessage.MessageId);
+            
             return parsedContent;
         }
         catch (JsonException ex)

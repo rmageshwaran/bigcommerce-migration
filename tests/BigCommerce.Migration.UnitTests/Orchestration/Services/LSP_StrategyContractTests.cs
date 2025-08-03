@@ -17,7 +17,7 @@ namespace BigCommerce.Migration.UnitTests.Orchestration.Services;
 public class LSP_StrategyContractTests
 {
     private readonly Mock<IBigCommerceApiClient> _mockApiClient;
-    private readonly Mock<ILogger<CategoryFetchStrategy>> _mockCategoryLogger;
+    // private readonly Mock<ILogger<CategoryFetchStrategy>> _mockCategoryLogger; // Removed - deprecated strategy
     private readonly Mock<ILogger<ProductFetchStrategy>> _mockProductLogger;
     private readonly Mock<ILogger<BrandFetchStrategy>> _mockBrandLogger;
     private readonly Mock<ILogger<VariantFetchStrategy>> _mockVariantLogger;
@@ -31,7 +31,7 @@ public class LSP_StrategyContractTests
     public LSP_StrategyContractTests()
     {
         _mockApiClient = new Mock<IBigCommerceApiClient>();
-        _mockCategoryLogger = new Mock<ILogger<CategoryFetchStrategy>>();
+        // _mockCategoryLogger = new Mock<ILogger<CategoryFetchStrategy>>(); // Removed - deprecated strategy
         _mockProductLogger = new Mock<ILogger<ProductFetchStrategy>>();
         _mockBrandLogger = new Mock<ILogger<BrandFetchStrategy>>();
         _mockVariantLogger = new Mock<ILogger<VariantFetchStrategy>>();
@@ -57,7 +57,7 @@ public class LSP_StrategyContractTests
     {
         return new List<IEntityFetchStrategy>
         {
-            new CategoryFetchStrategy(_mockApiClient.Object, _mockCategoryLogger.Object),
+            // CategoryFetchStrategy removed - deprecated in favor of ChunkedHierarchicalDiscoveryStrategy
             new ProductFetchStrategy(_mockApiClient.Object, _mockProductLogger.Object),
             new BrandFetchStrategy(_mockApiClient.Object, _mockBrandLogger.Object),
             new VariantFetchStrategy(_mockApiClient.Object, _mockVariantLogger.Object),
@@ -386,7 +386,7 @@ public class LSP_StrategyContractTests
         // Arrange
         var strategyTypes = new[]
         {
-            typeof(CategoryFetchStrategy),
+            // typeof(CategoryFetchStrategy), // Removed - deprecated in favor of ChunkedHierarchicalDiscoveryStrategy
             typeof(ProductFetchStrategy),
             typeof(BrandFetchStrategy),
             typeof(VariantFetchStrategy),
@@ -463,9 +463,10 @@ public class LSP_StrategyContractTests
         entityTypes.Should().OnlyHaveUniqueItems("All strategies must have unique EntityType values");
         
         // Validate expected entity types
-        var expectedEntityTypes = new[] { "categories", "products", "brands", "variants", "images", "modifiers" };
+        // Note: Categories are handled by ChunkedHierarchicalDiscoveryStrategy (IEntityDiscoveryStrategy), not IEntityFetchStrategy
+        var expectedEntityTypes = new[] { "products", "brands", "variants", "images", "modifiers" };
         entityTypes.Should().BeEquivalentTo(expectedEntityTypes, 
-            "All expected entity types should be implemented");
+            "All expected entity types should be implemented (categories handled by ChunkedHierarchicalDiscoveryStrategy)");
     }
 
     #endregion

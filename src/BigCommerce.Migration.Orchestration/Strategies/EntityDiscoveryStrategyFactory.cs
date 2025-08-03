@@ -1,6 +1,7 @@
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace BigCommerce.Migration.Orchestration.Strategies;
 
@@ -15,28 +16,49 @@ public class EntityDiscoveryStrategyFactory : IEntityDiscoveryStrategyFactory
     private readonly ILogger<EntityDiscoveryStrategyFactory> _logger;
     private readonly ILogger<V2DirectPaginationStrategy> _v2Logger;
     private readonly ILogger<V3EfficientPaginationStrategy> _v3EfficientLogger;
-    private readonly ILogger<V3HierarchicalStrategy> _v3HierarchicalLogger;
+
+    private readonly IOptions<ChunkedHierarchyConfiguration>? _chunkedConfig;
+    private readonly Func<IChunkedHierarchicalDiscoveryStrategy>? _chunkedStrategyFactory;
 
     /// <summary>
-    /// Initializes a new instance of EntityDiscoveryStrategyFactory
+    /// Initializes a new instance of EntityDiscoveryStrategyFactory (backward compatibility constructor)
     /// </summary>
     /// <param name="apiClient">BigCommerce API client for version detection</param>
     /// <param name="logger">Logger for the factory</param>
     /// <param name="v2Logger">Logger for V2 strategy</param>
     /// <param name="v3EfficientLogger">Logger for V3 efficient strategy</param>
-    /// <param name="v3HierarchicalLogger">Logger for V3 hierarchical strategy</param>
+    public EntityDiscoveryStrategyFactory(
+        IBigCommerceApiClient apiClient,
+        ILogger<EntityDiscoveryStrategyFactory> logger,
+        ILogger<V2DirectPaginationStrategy> v2Logger,
+        ILogger<V3EfficientPaginationStrategy> v3EfficientLogger)
+        : this(apiClient, logger, v2Logger, v3EfficientLogger, null, null)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of EntityDiscoveryStrategyFactory with chunked strategy support
+    /// </summary>
+    /// <param name="apiClient">BigCommerce API client for version detection</param>
+    /// <param name="logger">Logger for the factory</param>
+    /// <param name="v2Logger">Logger for V2 strategy</param>
+    /// <param name="v3EfficientLogger">Logger for V3 efficient strategy</param>
+    /// <param name="chunkedConfig">Configuration for chunked hierarchy processing (optional)</param>
+    /// <param name="chunkedStrategyFactory">Factory for creating chunked strategy instances (optional)</param>
     public EntityDiscoveryStrategyFactory(
         IBigCommerceApiClient apiClient,
         ILogger<EntityDiscoveryStrategyFactory> logger,
         ILogger<V2DirectPaginationStrategy> v2Logger,
         ILogger<V3EfficientPaginationStrategy> v3EfficientLogger,
-        ILogger<V3HierarchicalStrategy> v3HierarchicalLogger)
+        IOptions<ChunkedHierarchyConfiguration>? chunkedConfig,
+        Func<IChunkedHierarchicalDiscoveryStrategy>? chunkedStrategyFactory)
     {
         _apiClient = apiClient ?? throw new ArgumentNullException(nameof(apiClient));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _v2Logger = v2Logger ?? throw new ArgumentNullException(nameof(v2Logger));
         _v3EfficientLogger = v3EfficientLogger ?? throw new ArgumentNullException(nameof(v3EfficientLogger));
-        _v3HierarchicalLogger = v3HierarchicalLogger ?? throw new ArgumentNullException(nameof(v3HierarchicalLogger));
+        _chunkedConfig = chunkedConfig;
+        _chunkedStrategyFactory = chunkedStrategyFactory;
     }
 
     /// <summary>
@@ -85,7 +107,7 @@ public class EntityDiscoveryStrategyFactory : IEntityDiscoveryStrategyFactory
     }
 
     /// <summary>
-    /// Creates appropriate V3 strategy based on entity type characteristics
+    /// Creates appropriate V3 strategy based on entity type characteristics and configuration
     /// </summary>
     /// <param name="entityType">Type of entity</param>
     /// <returns>V3 strategy instance</returns>
@@ -94,8 +116,9 @@ public class EntityDiscoveryStrategyFactory : IEntityDiscoveryStrategyFactory
         // 🎯 EXPLICIT STRATEGY SELECTION: Ensure correct processing approach
         if (IsHierarchicalEntity(entityType))
         {
-            _logger.LogInformation("📋 Creating V3 hierarchical strategy for {EntityType} - will use ID-based batching with full data caching", entityType);
-            return new V3HierarchicalStrategy(_apiClient, _v3HierarchicalLogger);
+            // Categories now ALWAYS use chunked strategy (V3HierarchicalStrategy is deprecated)
+            _logger.LogInformation("🚀 Creating chunked hierarchical strategy for {EntityType} - using modern memory-safe chunked processing with bulk creation", entityType);
+            return CreateChunkedStrategy();
         }
         else
         {
@@ -116,5 +139,26 @@ public class EntityDiscoveryStrategyFactory : IEntityDiscoveryStrategyFactory
         var isHierarchical = entityType.Equals("categories", StringComparison.OrdinalIgnoreCase);
         
         return isHierarchical;
+    }
+
+    /// <summary>
+    /// Creates a chunked hierarchical discovery strategy instance
+    /// </summary>
+    /// <returns>Chunked strategy instance</returns>
+    /// <exception cref="InvalidOperationException">Thrown when chunked strategy factory is not available</exception>
+    private IEntityDiscoveryStrategy CreateChunkedStrategy()
+    {
+        if (_chunkedStrategyFactory == null)
+        {
+            throw new InvalidOperationException(
+                "Chunked strategy factory is not configured. " +
+                "Categories require ChunkedHierarchicalDiscoveryStrategy. " +
+                "Ensure IChunkedHierarchicalDiscoveryStrategy is registered in DI container.");
+        }
+
+        var chunkedStrategy = _chunkedStrategyFactory();
+        
+        _logger.LogDebug("Successfully created chunked hierarchical discovery strategy");
+        return chunkedStrategy;
     }
 } 

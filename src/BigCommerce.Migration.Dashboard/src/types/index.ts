@@ -35,6 +35,32 @@ export interface EntityProgress {
   processingTime: number; // in seconds
 }
 
+// Live Cancellation Types (Task 7.6)
+export enum CancellationScope {
+  Migration = 'Migration',
+  EntityType = 'EntityType', 
+  Batch = 'Batch',
+  Store = 'Store'
+}
+
+export interface LiveCancellationRequest {
+  migrationId: string;
+  scope: CancellationScope;
+  reason: string;
+  entityType?: string;
+  batchId?: string;
+  storeId?: string;
+}
+
+export interface LiveCancellationResponse {
+  migrationId: string;
+  scope: CancellationScope;
+  status: string;
+  message: string;
+  cancelledAt: string;
+  affectedComponents?: string[];
+}
+
 export interface MigrationCancellationResponse {
   migrationId: string;
   status: string;

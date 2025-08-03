@@ -89,12 +89,35 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IEntityDiscoveryStrategyFactory, EntityDiscoveryStrategyFactory>();
         services.AddSingleton<V2DirectPaginationStrategy>();
         services.AddSingleton<V3EfficientPaginationStrategy>();
-        services.AddSingleton<V3HierarchicalStrategy>();
+
+        
+        // 🚀 Register chunked hierarchical discovery strategy (Task 5.2.2 - NEW)
+        // Memory-safe chunked processing for large category hierarchies
+        services.AddScoped<IChunkedHierarchicalDiscoveryStrategy, ChunkedHierarchicalDiscoveryStrategy>();
+        
+        // Register chunked strategy factory for EntityDiscoveryStrategyFactory integration
+        services.AddSingleton<Func<IChunkedHierarchicalDiscoveryStrategy>>(serviceProvider => 
+            () => serviceProvider.GetRequiredService<IChunkedHierarchicalDiscoveryStrategy>());
+        
+        // Register chunked hierarchy configuration (if provided)
+        if (configuration != null)
+        {
+            services.Configure<ChunkedHierarchyConfiguration>(configuration.GetSection("ChunkedHierarchy"));
+        }
+        
+        // 📦 Register bulk processing services (Task 3.2 - COMPLETED) for chunked strategy support
+        services.AddScoped<BulkCategoryTransformService>();
+        services.AddScoped<BulkCategoryCreationService>();
+        
+        // 🚨 Register chunked error handling services (Task 5.3 - NEW)
+        // CRITICAL: Specialized error handling for bulk category migration operations
+        services.AddScoped<ChunkedErrorHandlingService>();
+        services.AddScoped<ChunkedErrorRecoveryService>();
         
         // 🎯 Register entity creation strategy pattern implementations (Task 3.1 - COMPLETED)
         // Strategy Pattern for Open/Closed Principle compliance
         services.AddScoped<IEntityCreationStrategyFactory, EntityCreationStrategyFactory>();
-        services.AddScoped<IEntityCreationStrategy, CategoryCreationStrategy>();
+
         services.AddScoped<IEntityCreationStrategy, ProductCreationStrategy>();
         services.AddScoped<IEntityCreationStrategy, BrandCreationStrategy>();
         services.AddScoped<IEntityCreationStrategy, VariantCreationStrategy>();
@@ -109,7 +132,7 @@ public static class ServiceCollectionExtensions
         
         // 🔽 Register entity fetch strategy pattern implementations (Task 3.3 - COMPLETED)
         services.AddScoped<IEntityFetchStrategyFactory, EntityFetchStrategyFactory>();
-        services.AddScoped<IEntityFetchStrategy, CategoryFetchStrategy>();
+
         services.AddScoped<IEntityFetchStrategy, ProductFetchStrategy>();
         services.AddScoped<IEntityFetchStrategy, BrandFetchStrategy>();
         

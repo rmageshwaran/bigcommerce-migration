@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.DependencyInjection;
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
+using BigCommerce.Migration.Core.Services;
 using BigCommerce.Migration.Infrastructure.Services;
 using BigCommerce.Migration.Functions.Functions;
 using System.Text.Json;
@@ -39,6 +40,7 @@ namespace BigCommerce.Migration.UnitTests.Integration
             
             // Add real services for integration testing
             services.AddScoped<IProgressStateValidator, ProgressStateValidator>();
+            services.AddSingleton<ISignalRMessageConverter, SignalRMessageConverter>();
             services.AddScoped<SignalRProgressFunctions>();
             
             _serviceProvider = services.BuildServiceProvider();

@@ -1,6 +1,7 @@
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Logging;
 using BigCommerce.Migration.Core.Interfaces;
+using BigCommerce.Migration.Core.Models;
 using BigCommerce.Migration.Orchestration.Models;
 using System;
 using System.Threading;
@@ -12,17 +13,21 @@ namespace BigCommerce.Migration.Orchestration.Activities;
 /// Activity function for checking external cancellation state exactly once per orchestrator execution.
 /// This maintains Durable Functions determinism by ensuring external state is only checked once
 /// and the result is stored in the orchestrator context for subsequent use.
+/// Now enhanced with LiveCancellationManager for multi-scope cancellation support.
 /// </summary>
 public class CheckExternalCancellationActivity
 {
     private readonly IMigrationStorageService _storageService;
+    private readonly ILiveCancellationManager _liveCancellationManager;
     private readonly ILogger<CheckExternalCancellationActivity> _logger;
 
     public CheckExternalCancellationActivity(
         IMigrationStorageService storageService,
+        ILiveCancellationManager liveCancellationManager,
         ILogger<CheckExternalCancellationActivity> logger)
     {
         _storageService = storageService ?? throw new ArgumentNullException(nameof(storageService));
+        _liveCancellationManager = liveCancellationManager ?? throw new ArgumentNullException(nameof(liveCancellationManager));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -116,6 +121,177 @@ public class CheckExternalCancellationActivity
                 IsCancelled = false,
                 IsProcessed = false,
                 CancellationReason = $"Error checking cancellation: {ex.Message}"
+            };
+        }
+    }
+
+    /// <summary>
+    /// Enhanced external cancellation check using LiveCancellationManager.
+    /// Provides multi-scope cancellation checking with faster response times.
+    /// Maintains determinism by storing results in orchestrator context.
+    /// </summary>
+    /// <param name="request">Enhanced cancellation check request with scope and context</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>Enhanced cancellation response with comprehensive status</returns>
+    [Function("CheckExternalCancellationEnhanced")]
+    public async Task<EnhancedCheckExternalCancellationResponse> CheckExternalCancellationEnhancedAsync(
+        [ActivityTrigger] EnhancedCheckExternalCancellationRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (request == null)
+            throw new ArgumentNullException(nameof(request));
+
+        if (string.IsNullOrWhiteSpace(request.MigrationId))
+            throw new ArgumentException("Migration ID is required", nameof(request));
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            _logger.LogInformation("⚡ ENHANCED DETERMINISTIC CHECK: Starting enhanced external cancellation check for migration {MigrationId}, scope {Scope}",
+                request.MigrationId, request.Scope);
+
+            // Use LiveCancellationManager for fast multi-scope checking
+            var isCancelled = await _liveCancellationManager.IsCancelledAsync(request.MigrationId, request.Scope);
+
+            // Get comprehensive cancellation status
+            var cancellationStatus = await _liveCancellationManager.GetCancellationStatusAsync(request.MigrationId);
+
+            stopwatch.Stop();
+
+            var response = new EnhancedCheckExternalCancellationResponse
+            {
+                MigrationId = request.MigrationId,
+                Scope = request.Scope,
+                IsCancelled = isCancelled,
+                CancellationStatus = cancellationStatus,
+                CheckedAt = DateTime.UtcNow,
+                ResponseTimeMs = (int)stopwatch.ElapsedMilliseconds,
+                Success = true,
+                ErrorMessage = null,
+                // Legacy compatibility
+                CancellationReason = cancellationStatus?.ActiveCancellations.FirstOrDefault()?.Reason ?? "Unknown reason",
+                CancelledAt = cancellationStatus?.LastCancellationAt,
+                IsProcessed = !isCancelled // If not cancelled, then any previous cancellation was processed
+            };
+
+            if (isCancelled)
+            {
+                _logger.LogWarning("🚨 ENHANCED EXTERNAL CANCELLATION: Migration {MigrationId} cancelled at scope {Scope}. Active scopes: {ActiveScopes}, Total requests: {TotalRequests}",
+                    request.MigrationId, request.Scope, 
+                    string.Join(", ", cancellationStatus?.ActiveScopes ?? new List<CancellationScope>()),
+                    cancellationStatus?.TotalCancellationRequests ?? 0);
+            }
+            else
+            {
+                _logger.LogInformation("✅ ENHANCED NO EXTERNAL CANCELLATION: Migration {MigrationId} active for scope {Scope} (response time: {ResponseTimeMs}ms)",
+                    request.MigrationId, request.Scope, response.ResponseTimeMs);
+            }
+
+            // Performance monitoring
+            if (response.ResponseTimeMs > 1000)
+            {
+                _logger.LogWarning("⚠️ ENHANCED SLOW EXTERNAL CHECK: External cancellation check took {ResponseTimeMs}ms (target: <1000ms) for migration {MigrationId}",
+                    response.ResponseTimeMs, request.MigrationId);
+            }
+
+            _logger.LogInformation("🎯 ENHANCED DETERMINISTIC RESULT: Migration {MigrationId} enhanced external check complete - " +
+                                  "IsCancelled={IsCancelled}, Scope={Scope}, ResponseTime={ResponseTimeMs}ms",
+                request.MigrationId, response.IsCancelled, response.Scope, response.ResponseTimeMs);
+
+            return response;
+        }
+        catch (OperationCanceledException)
+        {
+            stopwatch.Stop();
+            _logger.LogInformation("🛑 ENHANCED EXTERNAL CHECK CANCELLED: Enhanced external cancellation check was cancelled for migration {MigrationId}",
+                request.MigrationId);
+
+            return new EnhancedCheckExternalCancellationResponse
+            {
+                MigrationId = request.MigrationId,
+                Scope = request.Scope,
+                IsCancelled = true, // Assume cancelled if operation was cancelled
+                CancellationStatus = null,
+                CheckedAt = DateTime.UtcNow,
+                ResponseTimeMs = (int)stopwatch.ElapsedMilliseconds,
+                Success = false,
+                ErrorMessage = "Enhanced external check operation was cancelled",
+                CancellationReason = "Operation cancelled",
+                CancelledAt = DateTime.UtcNow,
+                IsProcessed = false
+            };
+        }
+        catch (Exception ex)
+        {
+            stopwatch.Stop();
+            _logger.LogError(ex, "❌ ENHANCED EXTERNAL CHECK FAILED: Error during enhanced external cancellation check for migration {MigrationId}, scope {Scope}",
+                request.MigrationId, request.Scope);
+
+            return new EnhancedCheckExternalCancellationResponse
+            {
+                MigrationId = request.MigrationId,
+                Scope = request.Scope,
+                IsCancelled = false, // On error, assume not cancelled to allow processing to continue
+                CancellationStatus = null,
+                CheckedAt = DateTime.UtcNow,
+                ResponseTimeMs = (int)stopwatch.ElapsedMilliseconds,
+                Success = false,
+                ErrorMessage = ex.Message,
+                CancellationReason = "Check failed",
+                CancelledAt = null,
+                IsProcessed = false
+            };
+        }
+    }
+
+    /// <summary>
+    /// Backward compatible wrapper that uses enhanced external cancellation checking internally.
+    /// Returns traditional CheckExternalCancellationResponse for legacy compatibility.
+    /// </summary>
+    /// <param name="request">Traditional external cancellation request</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>Traditional external cancellation response</returns>
+    [Function("CheckExternalCancellationCompat")]
+    public async Task<CheckExternalCancellationResponse> CheckExternalCancellationCompatAsync(
+        [ActivityTrigger] CheckExternalCancellationRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var enhancedRequest = new EnhancedCheckExternalCancellationRequest
+            {
+                MigrationId = request.MigrationId,
+                Scope = CancellationScope.Migration, // Default to migration-level scope for legacy compatibility
+                CurrentState = request.CurrentState
+            };
+
+            var enhancedResponse = await CheckExternalCancellationEnhancedAsync(enhancedRequest, cancellationToken);
+
+            _logger.LogInformation("🔄 EXTERNAL COMPAT MODE: Enhanced external check for migration {MigrationId} returned {IsCancelled} (response time: {ResponseTimeMs}ms)",
+                request.MigrationId, enhancedResponse.IsCancelled, enhancedResponse.ResponseTimeMs);
+
+            // Convert enhanced response to legacy format
+            return new CheckExternalCancellationResponse
+            {
+                IsCancelled = enhancedResponse.IsCancelled,
+                CancellationReason = enhancedResponse.CancellationReason,
+                CancelledAt = enhancedResponse.CancelledAt,
+                IsProcessed = enhancedResponse.IsProcessed
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ EXTERNAL COMPAT CHECK FAILED: Error in compatibility external check for migration {MigrationId}", request.MigrationId);
+            
+            return new CheckExternalCancellationResponse
+            {
+                IsCancelled = false, // On error, assume not cancelled to allow migration to continue
+                CancellationReason = "Check failed",
+                CancelledAt = null,
+                IsProcessed = false
             };
         }
     }

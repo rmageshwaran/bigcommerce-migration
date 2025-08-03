@@ -71,6 +71,7 @@ public class BatchApiClient : IBatchApiClient
             }
             catch (Exception ex)
             {
+                // ApiRequestHandler already logs to OpenSearch - just add context and re-throw
                 _logger.LogError(ex, "Failed to create product batch {BatchNumber} for store {StoreId}", 
                     batchNumber, storeConfig.StoreId);
                 throw;
@@ -116,6 +117,7 @@ public class BatchApiClient : IBatchApiClient
             }
             catch (Exception ex)
             {
+                // ApiRequestHandler already logs to OpenSearch - just add context and re-throw
                 _logger.LogError(ex, "Failed to update product batch {BatchNumber} for store {StoreId}", 
                     batchNumber, storeConfig.StoreId);
                 throw;
@@ -161,6 +163,7 @@ public class BatchApiClient : IBatchApiClient
             }
             catch (Exception ex)
             {
+                // ApiRequestHandler already logs to OpenSearch - just add context and re-throw
                 _logger.LogError(ex, "Failed to create category batch {BatchNumber} for store {StoreId}", 
                     batchNumber, storeConfig.StoreId);
                 throw;
@@ -208,6 +211,7 @@ public class BatchApiClient : IBatchApiClient
             }
             catch (Exception ex)
             {
+                // ApiRequestHandler already logs to OpenSearch - just add context and re-throw
                 _logger.LogError(ex, "Failed to create variant batch {BatchNumber} for product {ProductId}", 
                     batchNumber, productId);
                 throw;
@@ -255,6 +259,7 @@ public class BatchApiClient : IBatchApiClient
             }
             catch (Exception ex)
             {
+                // ApiRequestHandler already logs to OpenSearch - just add context and re-throw
                 _logger.LogError(ex, "Failed to update variant batch {BatchNumber} for product {ProductId}", 
                     batchNumber, productId);
                 throw;
@@ -320,6 +325,7 @@ public class BatchApiClient : IBatchApiClient
         }
         catch (Exception ex)
         {
+            // Performance metrics errors are internal operations - no OpenSearch needed
             _logger.LogError(ex, "Failed to retrieve batch performance metrics for store {StoreId}", 
                 storeConfig.StoreId);
             throw;

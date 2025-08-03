@@ -20,6 +20,7 @@ namespace BigCommerce.Migration.UnitTests.Orchestration.Integration;
 public class DeterministicCancellationIntegrationTests
 {
     private readonly Mock<IMigrationStorageService> _mockStorageService;
+    private readonly Mock<ILiveCancellationManager> _mockLiveCancellationManager;
     private readonly Mock<ILogger<CheckExternalCancellationActivity>> _mockLogger;
     private readonly CheckExternalCancellationActivity _externalActivity;
     private const string TestMigrationId = "integration-test-migration";
@@ -27,8 +28,9 @@ public class DeterministicCancellationIntegrationTests
     public DeterministicCancellationIntegrationTests()
     {
         _mockStorageService = new Mock<IMigrationStorageService>();
+        _mockLiveCancellationManager = new Mock<ILiveCancellationManager>();
         _mockLogger = new Mock<ILogger<CheckExternalCancellationActivity>>();
-        _externalActivity = new CheckExternalCancellationActivity(_mockStorageService.Object, _mockLogger.Object);
+        _externalActivity = new CheckExternalCancellationActivity(_mockStorageService.Object, _mockLiveCancellationManager.Object, _mockLogger.Object);
     }
 
     [Fact]

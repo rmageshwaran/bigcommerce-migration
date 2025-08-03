@@ -1,3 +1,4 @@
+using BigCommerce.Migration.Core.Extensions;
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Functions.Middleware;
 using Microsoft.Extensions.Logging;
@@ -14,13 +15,16 @@ public class ApiKeyService : IApiKeyService
 {
     private readonly ILogger<ApiKeyService> _logger;
     private readonly IMigrationStorageService _storageService;
+    private readonly IOpenSearchService _openSearchService;
 
     public ApiKeyService(
         ILogger<ApiKeyService> logger,
-        IMigrationStorageService storageService)
+        IMigrationStorageService storageService,
+        IOpenSearchService openSearchService)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _storageService = storageService ?? throw new ArgumentNullException(nameof(storageService));
+        _openSearchService = openSearchService ?? throw new ArgumentNullException(nameof(openSearchService));
     }
 
     /// <summary>
@@ -92,7 +96,15 @@ public class ApiKeyService : IApiKeyService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error validating API key");
+            // Use standardized error logging with OpenSearch integration
+            await _openSearchService.LogStructuredErrorAsync(
+                _logger,
+                ex,
+                component: nameof(ApiKeyService),
+                operationContext: "ValidateApiKey",
+                entityId: apiKey?.Substring(0, Math.Min(8, apiKey?.Length ?? 0)) + "***" // Partial key for tracking
+            );
+            
             return new ApiKeyValidationResult
             {
                 IsValid = false,
@@ -146,7 +158,16 @@ public class ApiKeyService : IApiKeyService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error creating API key for user {UserId}", userId);
+            // Use standardized error logging with OpenSearch integration
+            await _openSearchService.LogStructuredErrorAsync(
+                _logger,
+                ex,
+                component: nameof(ApiKeyService),
+                operationContext: "CreateApiKey",
+                entityId: userId
+            );
+            
+            // Infrastructure exception - should throw to stop the operation
             throw;
         }
     }
@@ -173,7 +194,15 @@ public class ApiKeyService : IApiKeyService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error revoking API key: {ApiKeyId}", apiKeyId);
+            // Use standardized error logging with OpenSearch integration
+            await _openSearchService.LogStructuredErrorAsync(
+                _logger,
+                ex,
+                component: nameof(ApiKeyService),
+                operationContext: "RevokeApiKey",
+                entityId: apiKeyId
+            );
+            
             return false;
         }
     }
@@ -204,7 +233,16 @@ public class ApiKeyService : IApiKeyService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error getting API keys for user {UserId}", userId);
+            // Use standardized error logging with OpenSearch integration
+            await _openSearchService.LogStructuredErrorAsync(
+                _logger,
+                ex,
+                component: nameof(ApiKeyService),
+                operationContext: "GetApiKeysForUser",
+                entityId: userId
+            );
+            
+            // Infrastructure exception - should throw to stop the operation
             throw;
         }
     }

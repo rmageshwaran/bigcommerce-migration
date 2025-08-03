@@ -609,6 +609,47 @@ public class QueueMessage
 }
 
 /// <summary>
+/// Cancellation message for processing migration cancellations
+/// </summary>
+public class CancellationMessage
+{
+    /// <summary>
+    /// Message type identifier
+    /// </summary>
+    public string MessageType { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Migration ID to cancel
+    /// </summary>
+    public string MigrationId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Cancellation reason
+    /// </summary>
+    public string Reason { get; set; } = string.Empty;
+
+    /// <summary>
+    /// User or system that requested cancellation
+    /// </summary>
+    public string RequestedBy { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Cancellation scope (Migration, EntityType, Batch, etc.)
+    /// </summary>
+    public string Scope { get; set; } = "Migration";
+
+    /// <summary>
+    /// When the cancellation was created
+    /// </summary>
+    public DateTime CreatedAt { get; set; }
+
+    /// <summary>
+    /// Message version for compatibility
+    /// </summary>
+    public string Version { get; set; } = string.Empty;
+}
+
+/// <summary>
 /// Batch completion message
 /// </summary>
 public class BatchCompletionMessage

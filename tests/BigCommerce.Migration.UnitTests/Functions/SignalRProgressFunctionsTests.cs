@@ -1,5 +1,6 @@
 #pragma warning disable CS8602, CS8604
 using System;
+using System.Linq;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -194,6 +195,100 @@ namespace BigCommerce.Migration.UnitTests.Functions
             Assert.Equal("MigrationStatusChanged", result.Target);
             Assert.NotNull(result.Arguments);
             Assert.Single(result.Arguments);
+        }
+
+        [Fact]
+        public void ProcessProgressEvents_WithValidCancellationProgressEvent_ShouldProcessSuccessfully()
+        {
+            // Arrange
+            var cancellationEvent = new CancellationProgressEvent
+            {
+                MigrationId = "test-migration-cancel",
+                Scope = CancellationScope.Migration,
+                Status = "propagating",
+                Reason = "User requested cancellation",
+                EntityType = "products",
+                BatchId = "batch-123",
+                RequestedBy = "user@test.com"
+            };
+
+            var queueMessage = JsonSerializer.Serialize(cancellationEvent, new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            });
+
+            // Act
+            var result = _signalRProgressFunctions.ProcessProgressEvents(queueMessage);
+
+            // Assert
+            Assert.NotNull(result);
+            Assert.Equal("CancellationProgressUpdated", result.Target);
+            Assert.NotNull(result.Arguments);
+            Assert.Single(result.Arguments);
+        }
+
+        [Fact]
+        public void ProcessProgressEvents_WithCancellationProgressEvent_ShouldDeserializeWithoutConflicts()
+        {
+            // Arrange - Test the exact scenario that was failing in production
+            var cancellationJson = @"{
+                ""eventType"": ""cancellation-progress"",
+                ""scope"": 0,
+                ""status"": ""propagating"",
+                ""reason"": ""User requested cancellation"",
+                ""entityType"": ""brands"",
+                ""batchId"": null,
+                ""storeId"": null,
+                ""estimatedTimeToComplete"": null,
+                ""propagatedAt"": ""2025-08-03T10:39:17.2338097Z"",
+                ""requestedBy"": ""user@test.com"",
+                ""totalInstances"": 2,
+                ""acknowledgedInstances"": 1,
+                ""additionalContext"": {},
+                ""migrationId"": ""test-migration-123"",
+                ""timestamp"": ""2025-08-03T10:39:17.2343353Z"",
+                ""hubMethod"": ""CancellationProgressUpdated"",
+                ""connectionId"": null,
+                ""groupName"": null
+            }";
+
+            // Act - This should NOT throw or return error message
+            var result = _signalRProgressFunctions.ProcessProgressEvents(cancellationJson);
+
+            // Assert - Should process successfully, not return error
+            Assert.NotNull(result);
+            Assert.Equal("CancellationProgressUpdated", result.Target);
+            Assert.NotEqual("error", result.Target); // Should NOT be an error message
+            Assert.NotNull(result.Arguments);
+            Assert.Single(result.Arguments);
+        }
+
+        [Fact]
+        public void ProcessProgressEvents_WithCancellationProgressEvent_ShouldNotReturnInvalidMessage()
+        {
+            // Arrange - Test that this specific event type doesn't trigger "Invalid message" error
+            var cancellationEvent = new CancellationProgressEvent
+            {
+                MigrationId = "test-migration-456",
+                Scope = CancellationScope.EntityType,
+                Status = "completed",
+                Reason = "Entity type cancellation",
+                EntityType = "categories"
+            };
+
+            var queueMessage = JsonSerializer.Serialize(cancellationEvent, new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            });
+
+            // Act
+            var result = _signalRProgressFunctions.ProcessProgressEvents(queueMessage);
+
+            // Assert - Should NOT return "Invalid message" error that was happening in production
+            Assert.NotNull(result);
+            Assert.NotEqual("error", result.Target);
+            Assert.DoesNotContain("Invalid message", result.Arguments?.FirstOrDefault()?.ToString() ?? string.Empty);
+            Assert.Equal("CancellationProgressUpdated", result.Target);
         }
 
         #endregion
@@ -408,12 +503,13 @@ namespace BigCommerce.Migration.UnitTests.Functions
         [Fact]
         public void SignalRProgressFunctions_ShouldDependOnAbstractions()
         {
-            // Assert - Constructor should depend on abstractions (ILogger interface)
+            // Assert - Constructor should depend on abstractions (ILogger and ISignalRMessageConverter interfaces)
             var constructor = typeof(SignalRProgressFunctions).GetConstructors()[0];
             var parameters = constructor.GetParameters();
 
-            Assert.Single(parameters);
+            Assert.Equal(2, parameters.Length);
             Assert.Equal(typeof(ILogger<SignalRProgressFunctions>), parameters[0].ParameterType);
+            Assert.Equal(typeof(BigCommerce.Migration.Core.Services.ISignalRMessageConverter), parameters[1].ParameterType);
         }
 
         #endregion

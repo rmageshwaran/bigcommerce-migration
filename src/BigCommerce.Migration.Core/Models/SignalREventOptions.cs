@@ -468,4 +468,72 @@ namespace BigCommerce.Migration.Core.Models
         /// </summary>
         public Dictionary<string, object>? PerformanceMetrics { get; set; }
     }
+
+    /// <summary>
+    /// Options for creating CancellationProgressEvent (Task 7.1 Live Cancellation)
+    /// Supports multi-level cancellation with real-time dashboard updates
+    /// </summary>
+    public class CancellationProgressOptions : SignalREventOptionsBase
+    {
+        /// <summary>
+        /// Cancellation scope level (Migration, EntityType, Batch, Store)
+        /// </summary>
+        public CancellationScope Scope { get; set; }
+
+        /// <summary>
+        /// Current cancellation status (requested, processing, completed, failed)
+        /// </summary>
+        public string Status { get; set; } = "requested";
+
+        /// <summary>
+        /// Human-readable reason for the cancellation
+        /// </summary>
+        public string Reason { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Entity type being cancelled (when Scope = EntityType)
+        /// Examples: "categories", "products", "brands"
+        /// </summary>
+        public string? EntityType { get; set; }
+
+        /// <summary>
+        /// Batch identifier being cancelled (when Scope = Batch)
+        /// </summary>
+        public string? BatchId { get; set; }
+
+        /// <summary>
+        /// Store identifier being cancelled (when Scope = Store)
+        /// </summary>
+        public string? StoreId { get; set; }
+
+        /// <summary>
+        /// Estimated time for cancellation to complete (in seconds)
+        /// </summary>
+        public int? EstimatedTimeToComplete { get; set; }
+
+        /// <summary>
+        /// When the cancellation was propagated to all instances
+        /// </summary>
+        public DateTime? PropagatedAt { get; set; }
+
+        /// <summary>
+        /// Who requested the cancellation (user email, system, etc.)
+        /// </summary>
+        public string? RequestedBy { get; set; }
+
+        /// <summary>
+        /// Number of active instances that need to process the cancellation
+        /// </summary>
+        public int? TotalInstances { get; set; }
+
+        /// <summary>
+        /// Number of instances that have acknowledged the cancellation
+        /// </summary>
+        public int? AcknowledgedInstances { get; set; }
+
+        /// <summary>
+        /// Additional context information for the cancellation
+        /// </summary>
+        public Dictionary<string, object>? AdditionalContext { get; set; }
+    }
 } 

@@ -57,6 +57,7 @@ public class BigCommerceApiClient : IBigCommerceApiClient
         }
         catch (Exception ex)
         {
+            // ApiRequestHandler already logs to OpenSearch - just add context and re-throw
             _logger.LogError(ex, "Failed to get category trees for store {StoreId}, channel {ChannelId}", 
                 storeConfig.StoreId, storeConfig.ChannelId);
             throw;

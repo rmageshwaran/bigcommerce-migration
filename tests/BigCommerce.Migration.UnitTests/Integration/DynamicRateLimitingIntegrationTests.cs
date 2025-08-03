@@ -3,6 +3,9 @@ using Microsoft.Extensions.Logging;
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Infrastructure.Services;
 using BigCommerce.Migration.Orchestration.Extensions;
+using BigCommerce.Migration.Functions.Extensions;
+using Microsoft.Extensions.Configuration;
+using System.Collections.Generic;
 using FluentAssertions;
 using Xunit;
 
@@ -24,12 +27,23 @@ public class DynamicRateLimitingIntegrationTests
         var services = new ServiceCollection();
         services.AddLogging();
         
-        // Add minimal required dependencies for testing
-        services.AddSingleton<Microsoft.Extensions.Configuration.IConfiguration>(
-            new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build());
+        // Add comprehensive configuration for DI validation
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["AzureWebJobsStorage"] = "DefaultEndpointsProtocol=https;AccountName=test;AccountKey=test;EndpointSuffix=core.windows.net",
+                ["BigCommerce:BaseUrl"] = "https://test.mybigcommerce.com/",
+                ["BigCommerce:AccessToken"] = "test-token",
+                ["Logging:LogLevel:Default"] = "Information",
+                ["DynamicRateLimiting:BaseRateRequestsPerSecond"] = "12",
+                ["DynamicRateLimiting:MinRateRequestsPerSecond"] = "5",
+                ["DynamicRateLimiting:MaxRateRequestsPerSecond"] = "50"
+            })
+            .Build();
+        services.AddSingleton<IConfiguration>(configuration);
         
-        // Add orchestration services (includes our dynamic rate limiting registration)
-        services.AddOrchestrationServices();
+        // Use full service registration with proper configuration
+        services.AddBigCommerceMigrationServices(configuration);
         
         var serviceProvider = services.BuildServiceProvider();
 
@@ -65,10 +79,21 @@ public class DynamicRateLimitingIntegrationTests
         var services = new ServiceCollection();
         services.AddLogging();
         
-        services.AddSingleton<Microsoft.Extensions.Configuration.IConfiguration>(
-            new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build());
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["AzureWebJobsStorage"] = "DefaultEndpointsProtocol=https;AccountName=test;AccountKey=test;EndpointSuffix=core.windows.net",
+                ["BigCommerce:BaseUrl"] = "https://test.mybigcommerce.com/",
+                ["BigCommerce:AccessToken"] = "test-token",
+                ["Logging:LogLevel:Default"] = "Information",
+                ["DynamicRateLimiting:BaseRateRequestsPerSecond"] = "12",
+                ["DynamicRateLimiting:MinRateRequestsPerSecond"] = "5",
+                ["DynamicRateLimiting:MaxRateRequestsPerSecond"] = "50"
+            })
+            .Build();
+        services.AddSingleton<IConfiguration>(configuration);
         
-        services.AddOrchestrationServices();
+        services.AddBigCommerceMigrationServices(configuration);
         
         var serviceProvider = services.BuildServiceProvider();
 
@@ -92,10 +117,21 @@ public class DynamicRateLimitingIntegrationTests
         var services = new ServiceCollection();
         services.AddLogging();
         
-        services.AddSingleton<Microsoft.Extensions.Configuration.IConfiguration>(
-            new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build());
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["AzureWebJobsStorage"] = "DefaultEndpointsProtocol=https;AccountName=test;AccountKey=test;EndpointSuffix=core.windows.net",
+                ["BigCommerce:BaseUrl"] = "https://test.mybigcommerce.com/",
+                ["BigCommerce:AccessToken"] = "test-token",
+                ["Logging:LogLevel:Default"] = "Information",
+                ["DynamicRateLimiting:BaseRateRequestsPerSecond"] = "12",
+                ["DynamicRateLimiting:MinRateRequestsPerSecond"] = "5",
+                ["DynamicRateLimiting:MaxRateRequestsPerSecond"] = "50"
+            })
+            .Build();
+        services.AddSingleton<IConfiguration>(configuration);
         
-        services.AddOrchestrationServices();
+        services.AddBigCommerceMigrationServices(configuration);
         
         var serviceProvider = services.BuildServiceProvider();
         var dynamicRateLimiter = serviceProvider.GetRequiredService<IDynamicRateLimiter>();
@@ -118,10 +154,21 @@ public class DynamicRateLimitingIntegrationTests
         var services = new ServiceCollection();
         services.AddLogging();
         
-        services.AddSingleton<Microsoft.Extensions.Configuration.IConfiguration>(
-            new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build());
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["AzureWebJobsStorage"] = "DefaultEndpointsProtocol=https;AccountName=test;AccountKey=test;EndpointSuffix=core.windows.net",
+                ["BigCommerce:BaseUrl"] = "https://test.mybigcommerce.com/",
+                ["BigCommerce:AccessToken"] = "test-token",
+                ["Logging:LogLevel:Default"] = "Information",
+                ["DynamicRateLimiting:BaseRateRequestsPerSecond"] = "12",
+                ["DynamicRateLimiting:MinRateRequestsPerSecond"] = "5",
+                ["DynamicRateLimiting:MaxRateRequestsPerSecond"] = "50"
+            })
+            .Build();
+        services.AddSingleton<IConfiguration>(configuration);
         
-        services.AddOrchestrationServices();
+        services.AddBigCommerceMigrationServices(configuration);
         
         var serviceProvider = services.BuildServiceProvider();
 

@@ -161,13 +161,13 @@ namespace BigCommerce.Migration.UnitTests.Core.Services
             dictionary.Should().NotContainKey("TotalEntities");
             
             // Verify values
-            dictionary["migrationId"].Should().Be("test-migration-123");
+            dictionary["migrationId"].ToString().Should().Be("test-migration-123");
             dictionary["overallProgress"].ToString().Should().Be("75.5");
             dictionary["totalEntities"].ToString().Should().Be("1000");
             dictionary["processedEntities"].ToString().Should().Be("755");
-            dictionary["currentEntityType"].Should().Be("products");
-            dictionary["hubMethod"].Should().Be("MigrationProgressUpdated");
-            dictionary["eventType"].Should().Be("MigrationProgress");
+            dictionary["currentEntityType"].ToString().Should().Be("products");
+            dictionary["hubMethod"].ToString().Should().Be("MigrationProgressUpdated");
+            dictionary["eventType"].ToString().Should().Be("MigrationProgress");
         }
 
         [Fact]

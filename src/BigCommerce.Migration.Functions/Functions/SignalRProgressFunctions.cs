@@ -201,6 +201,7 @@ namespace BigCommerce.Migration.Functions.Functions
                     "subbatch-started" => JsonSerializer.Deserialize<SubBatchStartedEvent>(queueMessage ?? string.Empty, options),
                     "subbatch-completed" => JsonSerializer.Deserialize<SubBatchCompletedEvent>(queueMessage ?? string.Empty, options),
                     "subbatch-progress" => JsonSerializer.Deserialize<SubBatchMigrationProgressEvent>(queueMessage ?? string.Empty, options),
+                    "cancellation-progress" => JsonSerializer.Deserialize<CancellationProgressEvent>(queueMessage ?? string.Empty, options),
                     _ => null
                 };
 

@@ -70,12 +70,31 @@ public class EntityMigrationOrchestrator
 
         try
         {
-            // Step 0: Check for cancellation before starting
-            var isCancelled = await context.CallActivityAsync<bool>("CheckMigrationCancellation", request.MigrationId);
-            if (isCancelled)
+            // Step 0: Check for live cancellation before starting (Entity-level)
+            var entityCancellationCheck = await context.CallActivityAsync<CancellationCheckResult>(
+                "CheckLiveCancellationActivity",
+                new CancellationCheckRequest
+                {
+                    MigrationId = request.MigrationId,
+                    Scope = CancellationScope.EntityType,
+                    EntityType = request.EntityType
+                });
+
+            if (entityCancellationCheck.IsCancelled)
             {
-                result.Errors.Add($"{request.EntityType} migration was cancelled before processing started");
+                result.Errors.Add($"{request.EntityType} migration was cancelled before processing started. Reason: {entityCancellationCheck.Reason}");
                 result.ProcessingTime = context.CurrentUtcDateTime - startTime;
+                
+                // Process cancellation through live cancellation system
+                await context.CallActivityAsync("ProcessCancellationActivity", 
+                    new CancellationProcessRequest 
+                    { 
+                        MigrationId = request.MigrationId, 
+                        Scope = CancellationScope.EntityType,
+                        EntityType = request.EntityType,
+                        Reason = entityCancellationCheck.Reason ?? $"{request.EntityType} entity migration cancelled"
+                    });
+                
                 return result;
             }
 
@@ -153,9 +172,7 @@ public class EntityMigrationOrchestrator
                     CategoryTreeContext = request.CategoryTreeContext ?? new CategoryTreeContext(),
                     PaginationMetadata = discoveryResult.PaginationMetadata,
                     UseDirectPagination = true,
-                    IsCancelled = false,
-                    CancellationReason = "",
-                    CancelledAt = null
+                                    IsCancelled = false
                 };
                 
                 // Use parallel pipeline for page-based processing
@@ -502,11 +519,32 @@ public class EntityMigrationOrchestrator
             
             try
             {
-                // Step 0: Check for cancellation before processing each batch
-                var isCancelled = await context.CallActivityAsync<bool>("CheckMigrationCancellation", request.MigrationId);
-                if (isCancelled)
+                // Step 0: Check for live cancellation before processing each batch (Batch-level)
+                var batchCancellationCheck = await context.CallActivityAsync<CancellationCheckResult>(
+                    "CheckLiveCancellationActivity",
+                    new CancellationCheckRequest
+                    {
+                        MigrationId = request.MigrationId,
+                        Scope = CancellationScope.Batch,
+                        EntityType = request.EntityType,
+                        BatchId = $"batch-{batchNumber}"
+                    });
+
+                if (batchCancellationCheck.IsCancelled)
                 {
-                    result.Errors.Add($"{request.EntityType} migration was cancelled during batch {batchNumber} processing");
+                    result.Errors.Add($"{request.EntityType} migration was cancelled during batch {batchNumber} processing. Reason: {batchCancellationCheck.Reason}");
+                    
+                    // Process cancellation through live cancellation system
+                    await context.CallActivityAsync("ProcessCancellationActivity", 
+                        new CancellationProcessRequest 
+                        { 
+                            MigrationId = request.MigrationId, 
+                            Scope = CancellationScope.Batch,
+                            EntityType = request.EntityType,
+                            BatchId = $"batch-{batchNumber}",
+                            Reason = batchCancellationCheck.Reason ?? $"{request.EntityType} batch {batchNumber} cancelled"
+                        });
+                        
                     return; // Exit the loop early
                 }
 

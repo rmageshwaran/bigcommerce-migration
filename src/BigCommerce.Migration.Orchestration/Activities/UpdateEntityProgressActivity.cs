@@ -1,6 +1,7 @@
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Logging;
 using BigCommerce.Migration.Core.Interfaces;
+using BigCommerce.Migration.Core.Models;
 using BigCommerce.Migration.Orchestration.Models;
 
 namespace BigCommerce.Migration.Orchestration.Activities;
@@ -11,13 +12,16 @@ namespace BigCommerce.Migration.Orchestration.Activities;
 public class UpdateEntityProgressActivity
 {
     private readonly IProgressTracker _progressTracker;
+    private readonly ILiveCancellationManager _liveCancellationManager;
     private readonly ILogger<UpdateEntityProgressActivity> _logger;
 
     public UpdateEntityProgressActivity(
         IProgressTracker progressTracker,
+        ILiveCancellationManager liveCancellationManager,
         ILogger<UpdateEntityProgressActivity> logger)
     {
         _progressTracker = progressTracker ?? throw new ArgumentNullException(nameof(progressTracker));
+        _liveCancellationManager = liveCancellationManager ?? throw new ArgumentNullException(nameof(liveCancellationManager));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -36,6 +40,21 @@ public class UpdateEntityProgressActivity
             
             var migrationId = progressUpdate.MigrationId;
             var entityType = progressUpdate.EntityType;
+
+            // 🛑 LIVE CANCELLATION: Check for cancellation before updating progress
+            var isCancelled = await _liveCancellationManager.IsCancelledAsync(
+                migrationId,
+                CancellationScope.EntityType,
+                entityType,
+                null,
+                null);
+
+            if (isCancelled)
+            {
+                _logger.LogInformation("🚫 [LIVE-CANCEL] Skipping progress update for cancelled migration {MigrationId}, EntityType: {EntityType}", 
+                    migrationId, entityType);
+                return;
+            }
 
             // Phase 4.1: Check soft cancellation token from request (no storage calls)
             if (progressUpdate.IsCancelled)

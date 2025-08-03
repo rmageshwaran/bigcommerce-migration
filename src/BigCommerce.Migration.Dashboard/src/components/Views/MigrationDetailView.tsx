@@ -35,6 +35,9 @@ import {
 } from '@mui/icons-material';
 import { format } from 'date-fns';
 import { apiService } from '../../services/apiService';
+import { LiveCancellationDialog } from '../Dashboard/LiveCancellationDialog';
+import type { LiveCancellationRequest } from '../../types';
+import { CancellationScope } from '../../types';
 import { useDashboard } from '../../context/DashboardContext';
 import type { MigrationStatus } from '../../types';
 import Collapse from '@mui/material/Collapse';
@@ -107,8 +110,8 @@ export const MigrationDetailView: React.FC = () => {
   const [entityErrorsTotal, setEntityErrorsTotal] = useState<Record<string, number>>({});
   const pageSize = 10;
 
-  // Cancel migration state
-  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  // Live cancellation state
+  const [liveCancelDialogOpen, setLiveCancelDialogOpen] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   
   // Notification state
@@ -257,21 +260,21 @@ export const MigrationDetailView: React.FC = () => {
     }
   };
 
-  // Cancel migration handlers
+  // Live cancellation handlers
   const handleCancelClick = () => {
-    setCancelDialogOpen(true);
+    setLiveCancelDialogOpen(true);
   };
 
-  const handleCancelCancel = () => {
-    setCancelDialogOpen(false);
+  const handleLiveCancelDialogClose = () => {
+    setLiveCancelDialogOpen(false);
   };
 
-  const handleCancelConfirm = async () => {
+  const handleLiveCancelConfirm = async (request: LiveCancellationRequest) => {
     if (!requestId || !migrationInfo) return;
     
     setIsCancelling(true);
     try {
-      await apiService.cancelMigration(requestId);
+      await apiService.liveCancelMigration(request);
       
       // Refresh the migration info to reflect the cancelled status
       await fetchEntitySummary();
@@ -290,7 +293,7 @@ export const MigrationDetailView: React.FC = () => {
       setError(err instanceof Error ? err.message : 'Failed to cancel migration');
     } finally {
       setIsCancelling(false);
-      setCancelDialogOpen(false);
+      setLiveCancelDialogOpen(false);
     }
   };
 
@@ -622,57 +625,14 @@ export const MigrationDetailView: React.FC = () => {
         </CardContent>
       </Card>
 
-      {/* Cancel Confirmation Dialog */}
-      <Dialog
-        open={cancelDialogOpen}
-        onClose={handleCancelCancel}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle>Cancel Migration</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            Are you sure you want to cancel this migration?
-          </DialogContentText>
-          {migrationInfo && (
-            <Box sx={{ mt: 2, p: 2, bgcolor: 'background.default', borderRadius: 1 }}>
-              <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
-                <strong>Migration ID:</strong> {migrationInfo.migrationId}
-              </Typography>
-              <Typography variant="body2">
-                <strong>Source Store:</strong> {migrationInfo.sourceStore}
-              </Typography>
-              <Typography variant="body2">
-                <strong>Destination Store:</strong> {migrationInfo.destinationStore}
-              </Typography>
-              <Typography variant="body2">
-                <strong>Current Status:</strong> {migrationInfo.status.charAt(0).toUpperCase() + migrationInfo.status.slice(1)}
-              </Typography>
-            </Box>
-          )}
-          <DialogContentText sx={{ mt: 2 }}>
-            <strong>Warning:</strong> This action cannot be undone. The migration will be stopped and any 
-            partial progress may be lost. You will need to restart the migration from the beginning.
-          </DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button 
-            onClick={handleCancelCancel}
-            disabled={isCancelling}
-          >
-            Keep Running
-          </Button>
-          <Button 
-            onClick={handleCancelConfirm}
-            color="error"
-            variant="contained"
-            disabled={isCancelling}
-            startIcon={isCancelling ? <CircularProgress size={16} /> : <StopIcon />}
-          >
-            {isCancelling ? 'Cancelling...' : 'Cancel Migration'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      {/* Live Cancellation Dialog (Task 7.6) */}
+      <LiveCancellationDialog
+        open={liveCancelDialogOpen}
+        migrationId={requestId || ''}
+        onClose={handleLiveCancelDialogClose}
+        onConfirm={handleLiveCancelConfirm}
+        isCancelling={isCancelling}
+      />
 
       {/* Success/Error Notification */}
       <Snackbar 

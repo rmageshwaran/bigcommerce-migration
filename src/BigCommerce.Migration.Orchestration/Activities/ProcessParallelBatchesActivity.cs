@@ -32,6 +32,7 @@ public class ProcessParallelBatchesActivity
     private readonly IEntityMappingService _entityMappingService;
     private readonly IEntityErrorHandlingService _errorHandlingService;
     private readonly IMigrationStorageService _migrationStorageService;
+    private readonly ILiveCancellationManager _liveCancellationManager;
     
     // 🎯 REAL-TIME PROGRESS: Store total migration entities for accurate progress calculation
     private int _totalMigrationEntities;
@@ -48,7 +49,8 @@ public class ProcessParallelBatchesActivity
         IEntityCreateService entityCreateService,
         IEntityMappingService entityMappingService,
         IEntityErrorHandlingService errorHandlingService,
-        IMigrationStorageService migrationStorageService)
+        IMigrationStorageService migrationStorageService,
+        ILiveCancellationManager liveCancellationManager)
     {
         _logger = logger;
         _parallelProcessor = parallelProcessor;
@@ -62,6 +64,7 @@ public class ProcessParallelBatchesActivity
         _entityMappingService = entityMappingService;
         _errorHandlingService = errorHandlingService;
         _migrationStorageService = migrationStorageService;
+        _liveCancellationManager = liveCancellationManager ?? throw new ArgumentNullException(nameof(liveCancellationManager));
     }
 
     /// <summary>
@@ -344,11 +347,17 @@ public class ProcessParallelBatchesActivity
                 request.EntityType, request.MigrationId);
         }
 
+        // ✅ CRITICAL CANCELLATION FIX: When cancellation occurs, use actual processed entities from global aggregator
+        var actualProcessedEntities = _globalProgressAggregator?.GetActualProcessedCount() ?? parallelResult.TotalEntitiesProcessed;
+        
+        _logger.LogInformation("🚨 [CANCELLATION-FIX] Reporting actual processed entities: {ActualProcessed} (was going to report: {OriginalTotal})", 
+            actualProcessedEntities, parallelResult.TotalEntitiesProcessed);
+
         return new BigCommerce.Migration.Core.Interfaces.BatchProcessingResult
         {
             BatchNumber = 1,
-            TotalProcessed = parallelResult.TotalEntitiesProcessed,
-            SuccessfulEntities = parallelResult.TotalEntitiesProcessed - parallelResult.TotalEntitiesFailed,
+            TotalProcessed = actualProcessedEntities,  // ✅ Use actual processed count instead of parallel result
+            SuccessfulEntities = actualProcessedEntities - parallelResult.TotalEntitiesFailed,
             FailedEntities = parallelResult.TotalEntitiesFailed,
             Errors = parallelResult.ProcessingErrors ?? new List<string>(),
             ProcessingTime = parallelResult.TotalProcessingTime
@@ -1132,6 +1141,21 @@ public class ProcessParallelBatchesActivity
                     break;
                 }
 
+                // 🛑 LIVE CANCELLATION: Check for real-time cancellation during entity processing
+                var isLiveCancelled = await _liveCancellationManager.IsCancelledAsync(
+                    batch.MigrationId,
+                    CancellationScope.Migration,
+                    batch.EntityType,
+                    $"batch-{batch.BatchNumber}",
+                    null);
+
+                if (isLiveCancelled)
+                {
+                    _logger.LogInformation("🐌 [SEQUENTIAL-{Context}] 🚫 [LIVE-CANCEL] Entity processing was cancelled for Migration {MigrationId} at entity {Index}/{Total}, EntityType: {EntityType}", 
+                        levelContext, batch.MigrationId, i + 1, entities.Count, batch.EntityType);
+                    break;
+                }
+
                 _logger.LogInformation("🐌 [SEQUENTIAL-{Context}] 🔄 PROCESSING: Entity {Index}/{Total} - ID={EntityId}, Name='{EntityName}'", 
                     levelContext, i + 1, entities.Count, entityId, entityName);
 
@@ -1204,6 +1228,23 @@ public class ProcessParallelBatchesActivity
         for (int subBatchIndex = 0; subBatchIndex < subBatches.Count; subBatchIndex++)
         {
             var subBatch = subBatches[subBatchIndex];
+            
+            // 🛑 SUB-BATCH CANCELLATION: Check for real-time cancellation before each sub-batch
+            var isSubBatchCancelled = await _liveCancellationManager.IsCancelledAsync(
+                batch.MigrationId,
+                CancellationScope.Batch,
+                batch.EntityType,
+                $"batch-{batch.BatchNumber}-subbatch-{subBatch.SubBatchNumber}",
+                null);
+
+            if (isSubBatchCancelled)
+            {
+                _logger.LogInformation("🎯 [SUB-BATCH-{BatchId}] 🚫 [LIVE-CANCEL] Sub-batch {SubBatchNumber}/{TotalSubBatches} processing was cancelled for Migration {MigrationId}, EntityType: {EntityType}", 
+                    batchId, subBatch.SubBatchNumber, subBatches.Count, batch.MigrationId, batch.EntityType);
+                
+                overallResult.Errors.Add($"Sub-batch {subBatch.SubBatchNumber}/{subBatches.Count} processing was cancelled");
+                break; // Exit the sub-batch loop early
+            }
             
             // 🚨 GLOBAL COORDINATION: Sub-batch started events now handled by global aggregator
             // Individual sub-batch events removed to prevent UI warnings and conflicts
@@ -1300,6 +1341,25 @@ public class ProcessParallelBatchesActivity
         
         _logger.LogInformation("⚡ [SUB-BATCH-{ParentBatch}-{SubBatch}] PARALLEL: Processing {Count} entities with max {MaxConcurrency} concurrency", 
             subBatch.ParentBatchNumber, subBatch.SubBatchNumber, subBatch.Entities.Count, subBatch.MaxConcurrency);
+        
+        // 🛑 SUB-BATCH CANCELLATION: Final check before starting parallel entity processing
+        var isSubBatchCancelled = await _liveCancellationManager.IsCancelledAsync(
+            subBatch.MigrationId,
+            CancellationScope.Batch,
+            subBatch.EntityType,
+            $"batch-{subBatch.ParentBatchNumber}-subbatch-{subBatch.SubBatchNumber}",
+            null);
+
+        if (isSubBatchCancelled)
+        {
+            _logger.LogInformation("⚡ [SUB-BATCH-{ParentBatch}-{SubBatch}] 🚫 [LIVE-CANCEL] Sub-batch processing was cancelled for Migration {MigrationId}, EntityType: {EntityType}", 
+                subBatch.ParentBatchNumber, subBatch.SubBatchNumber, subBatch.MigrationId, subBatch.EntityType);
+            
+            result.Errors.Add($"Sub-batch {subBatch.SubBatchNumber} processing was cancelled");
+            result.ProcessingTime = DateTime.UtcNow - startTime;
+            result.CompletedAt = DateTime.UtcNow;
+            return result; // Return early without processing entities
+        }
         
         // Use SemaphoreSlim to limit concurrency to 5
         using var semaphore = new SemaphoreSlim(subBatch.MaxConcurrency, subBatch.MaxConcurrency);

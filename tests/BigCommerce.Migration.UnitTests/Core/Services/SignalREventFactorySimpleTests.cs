@@ -1,4 +1,5 @@
 using System;
+using System.Text.Json;
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
 using BigCommerce.Migration.Core.Services;
@@ -478,7 +479,7 @@ namespace BigCommerce.Migration.UnitTests.Core.Services
             result.MigrationId.Should().Be(TestMigrationId);
             result.Timestamp.Should().Be(_testTimestamp);
             result.HubMethod.Should().Be("BatchProgressUpdated");
-            result.EventType.Should().Be("BatchProgress");
+            result.EventType.Should().Be("batch");
             result.BatchNumber.Should().Be(5);
             result.TotalBatches.Should().Be(20);
             result.BatchSize.Should().Be(100);
@@ -513,7 +514,7 @@ namespace BigCommerce.Migration.UnitTests.Core.Services
             result.MigrationId.Should().Be(TestMigrationId);
             result.Timestamp.Should().Be(_testTimestamp);
             result.HubMethod.Should().Be("EntityProgressUpdated");
-            result.EventType.Should().Be("EntityProgress");
+            result.EventType.Should().Be("entity");
             result.EntityType.Should().Be("products");
             result.ProcessedCount.Should().Be(100);
             result.TotalCount.Should().Be(150);
@@ -544,7 +545,7 @@ namespace BigCommerce.Migration.UnitTests.Core.Services
             result.MigrationId.Should().Be(TestMigrationId);
             result.Timestamp.Should().Be(_testTimestamp);
             result.HubMethod.Should().Be("ErrorOccurred");
-            result.EventType.Should().Be("ErrorProgress");
+            result.EventType.Should().Be("error");
             result.Severity.Should().Be("warning");
             result.Message.Should().Be("API rate limit exceeded");
             result.EntityType.Should().Be("products");
@@ -573,7 +574,7 @@ namespace BigCommerce.Migration.UnitTests.Core.Services
             result.MigrationId.Should().Be(TestMigrationId);
             result.Timestamp.Should().Be(_testTimestamp);
             result.HubMethod.Should().Be("MigrationStatusChanged");
-            result.EventType.Should().Be("StatusProgress");
+            result.EventType.Should().Be("status");
             result.Status.Should().Be("completed");
             result.Message.Should().Be("Migration completed successfully");
         }
@@ -602,7 +603,7 @@ namespace BigCommerce.Migration.UnitTests.Core.Services
             result.MigrationId.Should().Be(TestMigrationId);
             result.Timestamp.Should().Be(_testTimestamp);
             result.HubMethod.Should().Be("SubBatchStarted");
-            result.EventType.Should().Be("SubBatchStarted");
+            result.EventType.Should().Be("subbatch-started");
             result.ParentBatchNumber.Should().Be(3);
             result.SubBatchNumber.Should().Be(2);
             result.TotalSubBatches.Should().Be(5);
@@ -636,7 +637,7 @@ namespace BigCommerce.Migration.UnitTests.Core.Services
             result.MigrationId.Should().Be(TestMigrationId);
             result.Timestamp.Should().Be(_testTimestamp);
             result.HubMethod.Should().Be("SubBatchCompleted");
-            result.EventType.Should().Be("SubBatchCompleted");
+            result.EventType.Should().Be("subbatch-completed");
             result.ParentBatchNumber.Should().Be(3);
             result.SubBatchNumber.Should().Be(2);
             result.TotalSubBatches.Should().Be(5);
@@ -675,7 +676,7 @@ namespace BigCommerce.Migration.UnitTests.Core.Services
             result.MigrationId.Should().Be(TestMigrationId);
             result.Timestamp.Should().Be(_testTimestamp);
             result.HubMethod.Should().Be("SubBatchMigrationProgress");
-            result.EventType.Should().Be("SubBatchProgress");
+            result.EventType.Should().Be("subbatch-progress");
             result.TotalPages.Should().Be(10);
             result.CompletedPages.Should().Be(7);
             result.TotalSubBatches.Should().Be(5);
@@ -689,6 +690,175 @@ namespace BigCommerce.Migration.UnitTests.Core.Services
 
         #endregion
 
+        #region CreateCancellationProgress Tests
+
+        [Fact]
+        public void CreateCancellationProgress_WithValidOptions_ShouldCreateEventWithCorrectProperties()
+        {
+            // Arrange
+            var options = new CancellationProgressOptions
+            {
+                Scope = CancellationScope.Migration,
+                Status = "propagating",
+                Reason = "User requested cancellation",
+                EntityType = "products",
+                BatchId = "batch-123",
+                StoreId = "store-456",
+                EstimatedTimeToComplete = 30,
+                RequestedBy = "user@example.com",
+                TotalInstances = 3,
+                AcknowledgedInstances = 1
+            };
+
+            // Act
+            var result = _factory.CreateCancellationProgress(TestMigrationId, options);
+
+            // Assert
+            result.Should().NotBeNull();
+            result.MigrationId.Should().Be(TestMigrationId);
+            result.Timestamp.Should().Be(_testTimestamp);
+            result.HubMethod.Should().Be("CancellationProgressUpdated");
+            result.EventType.Should().Be("cancellation-progress");
+            result.Scope.Should().Be(CancellationScope.Migration);
+            result.Status.Should().Be("propagating");
+            result.Reason.Should().Be("User requested cancellation");
+            result.EntityType.Should().Be("products");
+            result.BatchId.Should().Be("batch-123");
+            result.StoreId.Should().Be("store-456");
+            result.EstimatedTimeToComplete.Should().Be(30);
+            result.RequestedBy.Should().Be("user@example.com");
+            result.TotalInstances.Should().Be(3);
+            result.AcknowledgedInstances.Should().Be(1);
+            result.AdditionalContext.Should().NotBeNull().And.BeEmpty();
+        }
+
+        [Fact]
+        public void CreateCancellationProgress_ShouldNotSetBaseClassCancellationProperties()
+        {
+            // Arrange - This test ensures we don't set conflicting base class properties
+            var options = new CancellationProgressOptions
+            {
+                Scope = CancellationScope.EntityType,
+                Reason = "Test cancellation reason",
+                EntityType = "brands"
+            };
+
+            // Act
+            var result = _factory.CreateCancellationProgress(TestMigrationId, options);
+
+            // Assert - Base class cancellation properties should NOT be set to avoid JSON conflicts
+            result.IsCancelled.Should().BeFalse("because base class IsCancelled should not be set for CancellationProgressEvent");
+            result.CancellationReason.Should().BeNull("because base class CancellationReason should not be set for CancellationProgressEvent");
+            result.CancelledAt.Should().BeNull("because base class CancelledAt should not be set for CancellationProgressEvent");
+            
+            // But the specific CancellationProgressEvent properties should be set
+            result.Reason.Should().Be("Test cancellation reason");
+            result.Scope.Should().Be(CancellationScope.EntityType);
+        }
+
+        [Fact]
+        public void CreateCancellationProgress_ShouldSerializeAndDeserializeWithoutConflicts()
+        {
+            // Arrange - This is a round-trip test to catch property conflicts
+            var options = new CancellationProgressOptions
+            {
+                Scope = CancellationScope.Batch,
+                Status = "completed",
+                Reason = "Batch cancellation test",
+                BatchId = "test-batch-456"
+            };
+
+            // Act - Create the event
+            var cancellationEvent = _factory.CreateCancellationProgress(TestMigrationId, options);
+            
+            // Serialize to JSON (what actually goes to the queue)
+            var json = JsonSerializer.Serialize(cancellationEvent, new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            });
+
+            // Deserialize back (what ProcessProgressEvents does)
+            var deserializedEvent = JsonSerializer.Deserialize<CancellationProgressEvent>(json, new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            });
+
+            // Assert - Should deserialize successfully without conflicts
+            deserializedEvent.Should().NotBeNull();
+            deserializedEvent!.MigrationId.Should().Be(TestMigrationId);
+            deserializedEvent.EventType.Should().Be("cancellation-progress");
+            deserializedEvent.HubMethod.Should().Be("CancellationProgressUpdated");
+            deserializedEvent.Scope.Should().Be(CancellationScope.Batch);
+            deserializedEvent.Status.Should().Be("completed");
+            deserializedEvent.Reason.Should().Be("Batch cancellation test");
+            deserializedEvent.BatchId.Should().Be("test-batch-456");
+        }
+
+        [Fact]
+        public void CreateCancellationProgress_WithNullReason_ShouldThrowArgumentException()
+        {
+            // Arrange
+            var options = new CancellationProgressOptions
+            {
+                Scope = CancellationScope.Migration,
+                Reason = null! // Reason is required
+            };
+
+            // Act & Assert
+            var exception = Assert.Throws<ArgumentException>(() => _factory.CreateCancellationProgress(TestMigrationId, options));
+            exception.Message.Should().Contain("Reason is required for cancellation events");
+        }
+
+        [Fact]
+        public void CreateCancellationProgress_WithMinimalOptions_ShouldUseDefaults()
+        {
+            // Arrange - Only provide required properties
+            var options = new CancellationProgressOptions
+            {
+                Scope = CancellationScope.Store,
+                Reason = "Minimal test"
+            };
+
+            // Act
+            var result = _factory.CreateCancellationProgress(TestMigrationId, options);
+
+            // Assert - Should use appropriate defaults
+            result.Status.Should().Be("requested", "because default status should be 'requested'");
+            result.EntityType.Should().BeNull();
+            result.BatchId.Should().BeNull();
+            result.StoreId.Should().BeNull();
+            result.EstimatedTimeToComplete.Should().BeNull();
+            result.RequestedBy.Should().BeNull();
+            result.TotalInstances.Should().BeNull();
+            result.AcknowledgedInstances.Should().BeNull();
+            result.AdditionalContext.Should().NotBeNull().And.BeEmpty();
+        }
+
+        [Fact]
+        public void CreateCancellationProgress_WithNullMigrationId_ShouldThrowArgumentException()
+        {
+            // Arrange
+            var options = new CancellationProgressOptions
+            {
+                Scope = CancellationScope.Migration,
+                Reason = "Test reason"
+            };
+
+            // Act & Assert
+            var exception = Assert.Throws<ArgumentException>(() => _factory.CreateCancellationProgress(null!, options));
+            exception.Message.Should().Contain("MigrationId cannot be null or empty");
+        }
+
+        [Fact]
+        public void CreateCancellationProgress_WithNullOptions_ShouldThrowArgumentNullException()
+        {
+            // Act & Assert
+            var exception = Assert.Throws<ArgumentNullException>(() => _factory.CreateCancellationProgress(TestMigrationId, null!));
+            exception.ParamName.Should().Be("options");
+        }
+
+        #endregion
+
         #region Base Properties Tests
 
         [Fact]
@@ -696,7 +866,7 @@ namespace BigCommerce.Migration.UnitTests.Core.Services
         {
             // Arrange
             var migrationOptions = new MigrationProgressOptions { OverallProgress = 50.0 };
-            var batchOptions = new BatchProgressOptions { BatchNumber = 1, TotalBatches = 10 };
+            var batchOptions = new BatchProgressOptions { BatchNumber = 1, TotalBatches = 10, EntityType = "categories" };
 
             // Act
             var migrationEvent = _factory.CreateMigrationProgress(TestMigrationId, migrationOptions);

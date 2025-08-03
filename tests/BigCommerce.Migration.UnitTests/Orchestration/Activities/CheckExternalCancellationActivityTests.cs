@@ -20,6 +20,7 @@ namespace BigCommerce.Migration.UnitTests.Orchestration.Activities;
 public class CheckExternalCancellationActivityTests
 {
     private readonly Mock<IMigrationStorageService> _mockStorageService;
+    private readonly Mock<ILiveCancellationManager> _mockLiveCancellationManager;
     private readonly Mock<ILogger<CheckExternalCancellationActivity>> _mockLogger;
     private readonly CheckExternalCancellationActivity _activity;
     private const string TestMigrationId = "test-migration-456";
@@ -28,8 +29,12 @@ public class CheckExternalCancellationActivityTests
     public CheckExternalCancellationActivityTests()
     {
         _mockStorageService = new Mock<IMigrationStorageService>();
+        _mockLiveCancellationManager = new Mock<ILiveCancellationManager>();
         _mockLogger = new Mock<ILogger<CheckExternalCancellationActivity>>();
-        _activity = new CheckExternalCancellationActivity(_mockStorageService.Object, _mockLogger.Object);
+        _activity = new CheckExternalCancellationActivity(
+            _mockStorageService.Object,
+            _mockLiveCancellationManager.Object,
+            _mockLogger.Object);
     }
 
     #region Constructor Tests
@@ -39,7 +44,7 @@ public class CheckExternalCancellationActivityTests
     {
         // Act & Assert
         var exception = Assert.Throws<ArgumentNullException>(() =>
-            new CheckExternalCancellationActivity(null!, _mockLogger.Object));
+            new CheckExternalCancellationActivity(null!, _mockLiveCancellationManager.Object, _mockLogger.Object));
 
         Assert.Equal("storageService", exception.ParamName);
     }
@@ -49,7 +54,7 @@ public class CheckExternalCancellationActivityTests
     {
         // Act & Assert
         var exception = Assert.Throws<ArgumentNullException>(() =>
-            new CheckExternalCancellationActivity(_mockStorageService.Object, null!));
+            new CheckExternalCancellationActivity(_mockStorageService.Object, _mockLiveCancellationManager.Object, null!));
 
         Assert.Equal("logger", exception.ParamName);
     }
@@ -58,7 +63,10 @@ public class CheckExternalCancellationActivityTests
     public void Constructor_WithValidParameters_ShouldCreateInstance()
     {
         // Act
-        var activity = new CheckExternalCancellationActivity(_mockStorageService.Object, _mockLogger.Object);
+        var activity = new CheckExternalCancellationActivity(
+            _mockStorageService.Object,
+            _mockLiveCancellationManager.Object,
+            _mockLogger.Object);
 
         // Assert
         Assert.NotNull(activity);
@@ -225,16 +233,20 @@ public class CheckExternalCancellationActivityTests
     }
 
     [Fact]
-    public async Task CheckExternalCancellationOnceAsync_WithOperationCancelledException_ShouldThrow()
+    public async Task CheckExternalCancellationOnceAsync_WithOperationCancelledException_ShouldHandleGracefully()
     {
         // Arrange
         var request = new CheckExternalCancellationRequest { MigrationId = TestMigrationId };
         var cancellationTokenSource = new CancellationTokenSource();
         cancellationTokenSource.Cancel();
         
-        // Act & Assert
-        await Assert.ThrowsAsync<OperationCanceledException>(() =>
-            _activity.CheckExternalCancellationOnceAsync(request, cancellationTokenSource.Token));
+        // Act - Should handle cancellation gracefully, not throw
+        var result = await _activity.CheckExternalCancellationOnceAsync(request, cancellationTokenSource.Token);
+        
+        // Assert - Should return safe defaults when cancelled
+        Assert.NotNull(result);
+        Assert.False(result.IsCancelled); // Safe default when check fails
+        Assert.False(result.IsProcessed);
         
         // Verify logging
         VerifyLogContains(LogLevel.Information, "External cancellation check was cancelled");

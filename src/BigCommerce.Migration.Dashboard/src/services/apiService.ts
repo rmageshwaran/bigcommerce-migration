@@ -9,8 +9,11 @@ import type {
   ApiResponse,
   PaginatedResponse,
   MigrationHistoryResponse,
-  MigrationCancellationResponse
+  MigrationCancellationResponse,
+  LiveCancellationRequest,
+  LiveCancellationResponse
 } from '../types';
+import { CancellationScope } from '../types';
 
 // ===== API ENDPOINT MAPPING =====
 /*
@@ -315,6 +318,50 @@ export class ApiService {
     }
     
     return response.data as MigrationCancellationResponse;
+  }
+
+  /**
+   * Live cancellation with multi-level scope support (Task 7.6)
+   * Maps to: POST /api/migrations/{id}/live-cancel (New endpoint)
+   */
+  public async liveCancelMigration(request: LiveCancellationRequest): Promise<LiveCancellationResponse> {
+    const response = await this.post<ApiResponse<LiveCancellationResponse>>(
+      `/migrations/${request.migrationId}/live-cancel`, 
+      request
+    );
+    
+    // Handle case where backend returns HTTP 200 with empty body (successful cancellation)
+    if (!response || !response.data) {
+      console.log('✅ Live cancellation: Backend returned successful HTTP status with empty body');
+      return {
+        migrationId: request.migrationId,
+        scope: request.scope,
+        status: 'cancelled',
+        message: `${request.scope} cancellation completed successfully`,
+        cancelledAt: new Date().toISOString(),
+        affectedComponents: this.getAffectedComponents(request.scope)
+      };
+    }
+    
+    return response.data as LiveCancellationResponse;
+  }
+
+  /**
+   * Get affected components based on cancellation scope
+   */
+  private getAffectedComponents(scope: CancellationScope): string[] {
+    switch (scope) {
+      case CancellationScope.Migration:
+        return ['All entities', 'All batches', 'All stores'];
+      case CancellationScope.EntityType:
+        return ['Current entity type', 'Related batches'];
+      case CancellationScope.Batch:
+        return ['Current batch'];
+      case CancellationScope.Store:
+        return ['Current store processing'];
+      default:
+        return [];
+    }
   }
 
   /**

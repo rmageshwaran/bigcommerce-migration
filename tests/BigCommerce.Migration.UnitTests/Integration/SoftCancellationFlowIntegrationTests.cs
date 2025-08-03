@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.DependencyInjection;
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
+using BigCommerce.Migration.Core.Services;
 using BigCommerce.Migration.Infrastructure.Services;
 using BigCommerce.Migration.Orchestration.Models;
 using BigCommerce.Migration.Orchestration.Activities;
@@ -39,8 +40,13 @@ namespace BigCommerce.Migration.UnitTests.Integration
             services.AddSingleton(_mockQueueService.Object);
             services.AddSingleton(_mockProgressTracker.Object);
             
+            // Add missing ILiveCancellationManager mock for activities that need it
+            var mockLiveCancellationManager = new Mock<ILiveCancellationManager>();
+            services.AddSingleton(mockLiveCancellationManager.Object);
+            
             // Add real implementations for validation
             services.AddScoped<IProgressStateValidator, ProgressStateValidator>();
+            services.AddSingleton<ISignalRMessageConverter, SignalRMessageConverter>();
             services.AddScoped<UpdateEntityProgressActivity>();
             services.AddScoped<StartEntityProcessingActivity>();
             services.AddScoped<CheckExternalCancellationActivity>();

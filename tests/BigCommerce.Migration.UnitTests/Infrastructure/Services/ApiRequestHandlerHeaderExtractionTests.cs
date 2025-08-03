@@ -13,7 +13,10 @@ namespace BigCommerce.Migration.UnitTests.Infrastructure.Services;
 /// Unit tests for BigCommerce rate limit header extraction in ApiRequestHandler
 /// Tests the extraction of X-Rate-Limit-* headers from BigCommerce API responses
 /// Follows TDD approach - tests written before implementation
+/// 
+/// NOTE: Uses NonParallelCollection to prevent test isolation issues when running in parallel with other tests
 /// </summary>
+[Collection("NonParallelCollection")]
 public class ApiRequestHandlerHeaderExtractionTests
 {
     private readonly Mock<HttpClient> _mockHttpClient;

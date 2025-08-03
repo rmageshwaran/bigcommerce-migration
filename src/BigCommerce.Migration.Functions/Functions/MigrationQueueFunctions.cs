@@ -466,6 +466,10 @@ public class MigrationQueueFunctions
     private Core.Models.QueueMessage ConvertAzureQueueMessage(AzureQueueMessage azureQueueMessage)
     {
         var content = azureQueueMessage.Body?.ToString() ?? string.Empty;
+        
+        // 🚨 DEBUG: Log the raw content to debug poison queue issue
+        _logger.LogInformation("🚨 [POISON-DEBUG] Raw message content: {Content}", content.Length > 200 ? content.Substring(0, 200) + "..." : content);
+        
         var messageType = ExtractMessageTypeFromContent(content);
         
         var queueMessage = new Core.Models.QueueMessage

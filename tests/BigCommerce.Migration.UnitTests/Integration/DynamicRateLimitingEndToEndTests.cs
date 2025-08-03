@@ -1,12 +1,15 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Configuration;
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
 using BigCommerce.Migration.Infrastructure.Services;
 using BigCommerce.Migration.Orchestration.Extensions;
+using BigCommerce.Migration.Functions.Extensions;
 using FluentAssertions;
 using Xunit;
 using System.Net;
+using System.Collections.Generic;
 
 namespace BigCommerce.Migration.UnitTests.Integration;
 
@@ -27,9 +30,22 @@ public class DynamicRateLimitingEndToEndTests
     {
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddSingleton<Microsoft.Extensions.Configuration.IConfiguration>(
-            new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build());
-        services.AddOrchestrationServices();
+        var configuration = new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["AzureWebJobsStorage"] = "DefaultEndpointsProtocol=https;AccountName=test;AccountKey=test;EndpointSuffix=core.windows.net",
+                ["BigCommerce:BaseUrl"] = "https://test.mybigcommerce.com/",
+                ["BigCommerce:AccessToken"] = "test-token",
+                ["Logging:LogLevel:Default"] = "Information",
+                ["DynamicRateLimiting:BaseRateRequestsPerSecond"] = "12",
+                ["DynamicRateLimiting:MinRateRequestsPerSecond"] = "5",
+                ["DynamicRateLimiting:MaxRateRequestsPerSecond"] = "50"
+            })
+            .Build();
+        services.AddSingleton<Microsoft.Extensions.Configuration.IConfiguration>(configuration);
+        
+        // Use full service registration with proper configuration
+        services.AddBigCommerceMigrationServices(configuration);
         
         _serviceProvider = services.BuildServiceProvider();
         _dynamicRateLimiter = _serviceProvider.GetRequiredService<IDynamicRateLimiter>();

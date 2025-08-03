@@ -61,14 +61,31 @@ public class MigrationOrchestrator
 
         try
         {
-            // Step 0: Check for cancellation before starting
-            var isCancelled = await context.CallActivityAsync<bool>("CheckMigrationCancellation", request.MigrationId);
-            if (isCancelled)
+            // Step 0: Check for live cancellation before starting (Migration-level)
+            var migrationCancellationCheck = await context.CallActivityAsync<CancellationCheckResult>(
+                "CheckLiveCancellationActivity",
+                new CancellationCheckRequest
+                {
+                    MigrationId = request.MigrationId,
+                    Scope = CancellationScope.Migration
+                });
+
+            if (migrationCancellationCheck.IsCancelled)
             {
                 result.Status = MigrationStatus.Cancelled;
-                result.Errors.Add("Migration was cancelled before processing started");
+                result.Errors.Add($"Migration was cancelled before processing started. Reason: {migrationCancellationCheck.Reason}");
                 result.EndTime = context.CurrentUtcDateTime;
                 result.CalculateDuration();
+                
+                // Process cancellation through live cancellation system
+                await context.CallActivityAsync("ProcessCancellationActivity", 
+                    new CancellationProcessRequest 
+                    { 
+                        MigrationId = request.MigrationId, 
+                        Scope = CancellationScope.Migration,
+                        Reason = migrationCancellationCheck.Reason ?? "Migration cancelled before processing started"
+                    });
+                
                 return result;
             }
 
@@ -172,14 +189,32 @@ public class MigrationOrchestrator
 
             foreach (var entityType in entitiesToProcess)
             {
-                // Check for cancellation before processing each entity type
-                isCancelled = await context.CallActivityAsync<bool>("CheckMigrationCancellation", request.MigrationId);
-                if (isCancelled)
+                // Check for live cancellation before processing each entity type (Migration-level)
+                var entityTypeCancellationCheck = await context.CallActivityAsync<CancellationCheckResult>(
+                    "CheckLiveCancellationActivity",
+                    new CancellationCheckRequest
+                    {
+                        MigrationId = request.MigrationId,
+                        Scope = CancellationScope.Migration
+                    });
+
+                if (entityTypeCancellationCheck.IsCancelled)
                 {
                     result.Status = MigrationStatus.Cancelled;
-                    result.Errors.Add($"Migration was cancelled during {entityType} processing");
+                    result.Errors.Add($"Migration was cancelled during {entityType} processing. Reason: {entityTypeCancellationCheck.Reason}");
                     result.EndTime = context.CurrentUtcDateTime;
                     result.CalculateDuration();
+                    
+                    // Process cancellation through live cancellation system
+                    await context.CallActivityAsync("ProcessCancellationActivity", 
+                        new CancellationProcessRequest 
+                        { 
+                            MigrationId = request.MigrationId, 
+                            Scope = CancellationScope.Migration,
+                            EntityType = entityType,
+                            Reason = entityTypeCancellationCheck.Reason ?? $"Migration cancelled during {entityType} processing"
+                        });
+                    
                     return result;
                 }
 

@@ -26,6 +26,7 @@ public class ProcessEntityBatchActivityCancellationTests
     private readonly Mock<IRateLimitService> _mockRateLimitService;
     private readonly Mock<IOpenSearchService> _mockOpenSearchService;
     private readonly Mock<IMigrationStorageService> _mockMigrationStorageService;
+    private readonly Mock<ILiveCancellationManager> _mockLiveCancellationManager;
     private readonly Mock<IErrorMessageFormatter> _mockErrorMessageFormatter;
     private readonly ProcessEntityBatchActivity _activity;
 
@@ -44,6 +45,7 @@ public class ProcessEntityBatchActivityCancellationTests
         _mockRateLimitService = new Mock<IRateLimitService>();
         _mockOpenSearchService = new Mock<IOpenSearchService>();
         _mockMigrationStorageService = new Mock<IMigrationStorageService>();
+        _mockLiveCancellationManager = new Mock<ILiveCancellationManager>();
         _mockErrorMessageFormatter = new Mock<IErrorMessageFormatter>();
 
         _activity = new ProcessEntityBatchActivity(
@@ -56,6 +58,7 @@ public class ProcessEntityBatchActivityCancellationTests
             _mockRateLimitService.Object,
             _mockOpenSearchService.Object,
             _mockMigrationStorageService.Object,
+            _mockLiveCancellationManager.Object,
             _mockErrorMessageFormatter.Object);
     }
 

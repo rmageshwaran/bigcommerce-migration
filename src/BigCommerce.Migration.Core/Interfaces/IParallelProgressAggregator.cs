@@ -126,6 +126,18 @@ public interface IParallelProgressAggregator : IDisposable
     /// <returns>Progress percentage and throughput information</returns>
     Task<ProgressPercentageInfo> GetProgressPercentageAsync();
 
+    /// <summary>
+    /// ✅ CRITICAL CANCELLATION FIX: Gets the actual number of entities processed (successful + failed)
+    /// This is essential for accurate statistics when cancellation occurs mid-migration
+    /// 
+    /// **Purpose:**
+    /// - Returns actual processed count instead of originally expected count
+    /// - Essential for correct statistics when cancellation interrupts processing
+    /// - Used to fix orchestrator reporting when live cancellation occurs
+    /// </summary>
+    /// <returns>The actual processed entity count</returns>
+    int GetActualProcessedCount();
+
     #endregion
 
     #region Performance Metrics

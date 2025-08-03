@@ -49,10 +49,10 @@ public class MigrationManagementFunctionsTests
             .ToList();
         
         // Assert - Should only contain management operations
-        var expectedMethods = new List<string> { "StartMigration", "CancelMigration", "PauseMigration", "ResumeMigration" };
+        // Note: CancelMigration moved to LiveCancelMigration in main MigrationHttpFunctions for consistency
+        var expectedMethods = new List<string> { "StartMigration", "PauseMigration", "ResumeMigration" };
         methods.Should().BeSubsetOf(expectedMethods, "Management functions should only handle migration lifecycle operations");
         methods.Should().Contain("StartMigration", "Must handle migration creation");
-        methods.Should().Contain("CancelMigration", "Must handle migration cancellation");
     }
 
     /// <summary>
@@ -94,41 +94,10 @@ public class MigrationManagementFunctionsTests
     }
 
     /// <summary>
-    /// RED PHASE: Test CancelMigration functionality
-    /// This test will fail until we implement the segregated CancelMigration method
+    /// NOTE: CancelMigration functionality moved to LiveCancelMigration in MigrationHttpFunctions
+    /// for consistency with the live cancellation system. Management functions now focus on
+    /// start/pause/resume operations only.
     /// </summary>
-    [Fact(Skip = "Azure Functions HTTP mocking issue - infrastructure related")]
-    public async Task CancelMigration_Should_Cancel_Migration_And_Update_Status()
-    {
-        // Arrange
-        var migrationId = "migration-123";
-        var existingMigration = new BigCommerce.Migration.Core.Models.MigrationEntry
-        {
-            Id = migrationId,
-            Status = BigCommerce.Migration.Core.Models.MigrationStatus.InProgress,
-            SourceStoreId = "source-123",
-            DestinationStoreId = "dest-456"
-        };
-
-        _mockStorageService.Setup(s => s.GetMigrationAsync(migrationId))
-            .ReturnsAsync(existingMigration);
-        _mockRequest.Setup(r => r.CreateResponse()).Returns(Mock.Of<HttpResponseData>());
-
-        var functions = new MigrationManagementFunctions(
-            _mockLogger.Object,
-            _mockQueueService.Object,
-            _mockStorageService.Object,
-            _mockOpenSearchService.Object);
-
-        // Act
-        var result = await functions.CancelMigration(_mockRequest.Object, _mockContext.Object);
-
-        // Assert
-        result.Should().NotBeNull("Should return a response");
-        _mockStorageService.Verify(s => s.UpdateMigrationAsync(It.Is<BigCommerce.Migration.Core.Models.MigrationEntry>(m => 
-            m.Id == migrationId && m.Status == BigCommerce.Migration.Core.Models.MigrationStatus.Cancelled)), Times.Once,
-            "Should update migration status to cancelled");
-    }
 
     /// <summary>
     /// RED PHASE: Test that management functions have proper dependency injection

@@ -133,9 +133,8 @@ public class EntityMappingService : IEntityMappingService
             _logger.LogDebug("Getting entity mappings for migration {MigrationId}, entity type {EntityType}", 
                 migrationId, entityType);
             
-            // This would need to be implemented in the storage service
-            // For now, return empty list as placeholder
-            var mappings = new List<EntityMapping>();
+            // ✅ FIX: Call the storage service method that's already implemented!
+            var mappings = await _migrationStorageService.GetEntityMappingsAsync(migrationId, entityType);
             
             _logger.LogDebug("Retrieved {Count} entity mappings for migration {MigrationId}, entity type {EntityType}", 
                 mappings.Count, migrationId, entityType);

@@ -82,20 +82,21 @@ public static class MigrationDurableOrchestrator
                 return result;
             }
 
-            // Step 3: Resolve Category Tree IDs
-            logger.LogInformation("Step 3: Resolving category tree IDs for MigrationId: {MigrationId}", migrationId);
-            var resolvedCategoryTreeContext = await context.CallActivityAsync<CategoryTreeContext>(
-                "ResolveCategoryTreeIds",
-                new ResolveCategoryTreeIdsRequest
-                {
-                    MigrationId = migrationId,
-                    SourceStore = input.MigrationRequest?.SourceStore ?? new StoreConfiguration(),
-                    DestinationStore = input.MigrationRequest?.DestinationStore ?? new StoreConfiguration(),
-                    CategoryTreeContext = input.CategoryTreeContext
-                });
+            // Step 3: 🚀 SKIP CATEGORY TREE RESOLUTION: Using mock context for brand/product-only migration
+            logger.LogInformation("Step 3: Using mock category tree context for brand/product migration (MigrationId: {MigrationId})", migrationId);
+            
+            // Create a mock CategoryTreeContext since we're not migrating categories
+            // Products use hard-coded category ID, brands don't need categories
+            var mockCategoryTreeContext = new CategoryTreeContext
+            {
+                SourceChannelId = "1",
+                DestinationChannelId = "1", 
+                SourceCategoryTreeId = "1",
+                DestinationCategoryTreeId = "1"
+            };
 
-            // Update the input context with resolved tree IDs
-            input.CategoryTreeContext = resolvedCategoryTreeContext;
+            // Update the input context with mock tree IDs
+            input.CategoryTreeContext = mockCategoryTreeContext;
 
             // Step 4: Check for cancellation before starting entity processing using deterministic pattern
             var cancellationState = context.GetOrInitializeCancellationState(migrationId);

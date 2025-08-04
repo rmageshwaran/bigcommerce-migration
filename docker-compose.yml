@@ -24,6 +24,7 @@ services:
 
   # BigCommerce Migration Functions (Main API Service)
   bigcommerce-functions:
+    platform: linux/amd64
     build:
       context: .
       dockerfile: Dockerfile.functions.noanalyzers
@@ -146,6 +147,7 @@ services:
 
   # Test Services - Unit Tests
   unit-tests:
+    platform: linux/amd64
     build:
       context: .
       dockerfile: Dockerfile.tests
@@ -175,6 +177,7 @@ services:
 
   # Test Services - Orchestration Tests
   orchestration-tests:
+    platform: linux/amd64
     build:
       context: .
       dockerfile: Dockerfile.tests
@@ -196,6 +199,7 @@ services:
 
   # Test Services - Integration Tests
   integration-tests:
+    platform: linux/amd64
     build:
       context: .
       dockerfile: Dockerfile.tests
@@ -228,6 +232,7 @@ services:
 
   # Test Services - Performance Tests
   performance-tests:
+    platform: linux/amd64
     build:
       context: .
       dockerfile: Dockerfile.tests
@@ -252,6 +257,7 @@ services:
 
   # Test Services - All Tests (run all test suites)
   all-tests:
+    platform: linux/amd64
     build:
       context: .
       dockerfile: Dockerfile.tests

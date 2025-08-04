@@ -60,8 +60,14 @@ public class DiscoverEntitiesActivity
             _logger.LogInformation("Using {StrategyType} for {EntityType} in migration {MigrationId}", 
                 strategy.GetType().Name, request.EntityType, request.MigrationId);
 
+            // 🚨 CRITICAL DEBUG: About to call strategy.DiscoverEntitiesAsync
+            _logger.LogError("🚨 [CRITICAL-ACTIVITY] About to call strategy.DiscoverEntitiesAsync on {StrategyType}!", strategy.GetType().Name);
+            
             // Delegate to strategy implementation
             var result = await strategy.DiscoverEntitiesAsync(request, cancellationToken);
+            
+            // 🚨 CRITICAL DEBUG: Strategy call completed
+            _logger.LogError("🚨 [CRITICAL-ACTIVITY] Strategy.DiscoverEntitiesAsync COMPLETED! TotalCount: {TotalCount}", result.TotalCount);
 
             _logger.LogInformation("Discovery completed for {EntityType}: {Count} entities found with {DataCount} entity data cached", 
                 request.EntityType, result.TotalCount, result.EntityData.Count);

@@ -37,6 +37,12 @@ public class EntityTransformStrategyFactory : IEntityTransformStrategyFactory
         }
 
         var normalizedEntityType = entityType.ToLowerInvariant();
+        
+        // Handle sub-orchestrator entity types
+        if (normalizedEntityType == "categories-level")
+        {
+            normalizedEntityType = "categories";
+        }
 
         if (_strategies.TryGetValue(normalizedEntityType, out var strategy))
         {

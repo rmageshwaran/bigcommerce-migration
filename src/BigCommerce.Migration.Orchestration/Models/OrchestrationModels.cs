@@ -735,3 +735,104 @@ public class StartEntityProcessingRequest
     /// </summary>
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
 } 
+
+/// <summary>
+/// 🎯 SUB-BATCH OPTIMIZATION: Request model for processing entities within a sub-batch
+/// Part of the sub-batch optimization that splits 50-entity pages into 10 sub-batches of 5 parallel entities
+/// </summary>
+public class SubBatchRequest
+{
+    /// <summary>
+    /// Sub-batch number within the parent batch (1-10 for each page)
+    /// </summary>
+    public int SubBatchNumber { get; set; }
+    
+    /// <summary>
+    /// Original page/batch number (1-4 for 192 brands)
+    /// </summary>
+    public int ParentBatchNumber { get; set; }
+    
+    /// <summary>
+    /// Entities to process in this sub-batch (5 entities max for optimal parallelism)
+    /// </summary>
+    public List<Dictionary<string, object>> Entities { get; set; } = new();
+    
+    /// <summary>
+    /// Maximum number of concurrent entities to process within this sub-batch
+    /// </summary>
+    public int MaxConcurrency { get; set; } = 5;
+    
+    /// <summary>
+    /// Migration identifier
+    /// </summary>
+    public string MigrationId { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// Type of entity being processed (e.g., "brands")
+    /// </summary>
+    public string EntityType { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// Source store configuration
+    /// </summary>
+    public StoreConfiguration SourceStore { get; set; } = new();
+    
+    /// <summary>
+    /// Destination store configuration
+    /// </summary>
+    public StoreConfiguration DestinationStore { get; set; } = new();
+}
+
+/// <summary>
+/// 🎯 SUB-BATCH OPTIMIZATION: Result model for sub-batch processing completion
+/// Tracks success/failure statistics and timing for each sub-batch within a page
+/// </summary>
+public class SubBatchResult
+{
+    /// <summary>
+/// Migration identifier for this sub-batch
+/// </summary>
+public string? MigrationId { get; set; }
+
+/// <summary>
+/// Sub-batch number that was processed (1-10)
+/// </summary>
+public int SubBatchNumber { get; set; }
+
+/// <summary>
+/// Parent batch/page number (1-4)
+/// </summary>
+public int ParentBatchNumber { get; set; }
+    
+    /// <summary>
+    /// Total number of entities in this sub-batch
+    /// </summary>
+    public int TotalEntities { get; set; }
+    
+    /// <summary>
+    /// Number of entities successfully processed
+    /// </summary>
+    public int SuccessfulEntities { get; set; }
+    
+    /// <summary>
+    /// Number of entities that failed processing
+    /// </summary>
+    public int FailedEntities { get; set; }
+    
+    /// <summary>
+    /// List of error messages from failed entity processing
+    /// </summary>
+    public List<string> Errors { get; set; } = new();
+    
+    /// <summary>
+    /// Time taken to process this sub-batch
+    /// </summary>
+    public TimeSpan ProcessingTime { get; set; }
+    
+    /// <summary>
+    /// When this sub-batch was completed
+    /// </summary>
+    public DateTime CompletedAt { get; set; }
+}
+
+ 

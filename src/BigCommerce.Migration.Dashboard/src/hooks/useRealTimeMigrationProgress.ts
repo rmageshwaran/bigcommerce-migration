@@ -442,10 +442,8 @@ export const useRealTimeMigrationProgress = (
     updatePerformanceMetrics(progressData);
     addEvent('progress', progressData, `Progress: ${progressData.overallProgressPercentage?.toFixed(1)}%`);
 
-    // Show completion notification
-    if (enableNotifications && progressData.status === 'completed') {
-      notificationService.success('Migration Complete', `Migration ${migrationId} completed successfully!`);
-    }
+    // ✅ FIX: Don't show completion notification here - DashboardContext handles this centrally
+    // This prevents duplicate notifications when migration completes
   }, [migrationId, updatePerformanceMetrics, addEvent, enableNotifications]);
 
   // Handle migration status updates

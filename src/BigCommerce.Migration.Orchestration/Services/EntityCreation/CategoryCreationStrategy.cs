@@ -54,9 +54,24 @@ public class CategoryCreationStrategy : IEntityCreationStrategy
             throw new InvalidOperationException(errorMessage);
         }
 
-        var executionId = Guid.NewGuid().ToString("N")[..8];
-        _logger.LogInformation("🏷️ [CAT-{ExecutionId}] Creating {Count} categories for migration {MigrationId}", 
+        // Use deterministic execution ID for logging (Durable Functions compliance)
+        var executionId = $"{migrationId}-{entities.Count}".GetHashCode().ToString("X8");
+        
+        _logger.LogInformation("🏷️ [CAT-{ExecutionId}] ⭐ STARTING: Creating {CategoryCount} categories for migration {MigrationId}", 
             executionId, entities.Count, migrationId);
+
+        // Log detailed category information
+        for (int i = 0; i < entities.Count; i++)
+        {
+            var category = entities[i];
+            var categoryName = category.TryGetValue("name", out var name) ? name?.ToString() : "unknown";
+            var categoryId = category.TryGetValue("id", out var id) ? id?.ToString() : "unknown";
+            var parentId = category.TryGetValue("parent_id", out var parent) ? parent?.ToString() : "null";
+            var treeId = category.TryGetValue("tree_id", out var tree) ? tree?.ToString() : "null";
+            
+            _logger.LogDebug("🏷️ [CAT-{ExecutionId}] INPUT[{Index}]: ID={CategoryId}, Name='{CategoryName}', ParentId={ParentId}, TreeId={TreeId}", 
+                executionId, i, categoryId, categoryName, parentId, treeId);
+        }
 
         try
         {
@@ -73,26 +88,114 @@ public class CategoryCreationStrategy : IEntityCreationStrategy
                     executionId, categoryName, parentId, migrationId);
             }
 
+            // 🔧 SAFETY NET: Ensure tree_id is set on all entities before API call
+            _logger.LogInformation("🏷️ [CAT-{ExecutionId}] 🔧 SAFETY-CHECK: Ensuring tree_id is set on all {CategoryCount} categories", 
+                executionId, entities.Count);
+            
+            var destinationTreeId = categoryTreeContext.DestinationCategoryTreeId;
+            if (int.TryParse(destinationTreeId, out var treeIdInt))
+            {
+                for (int i = 0; i < entities.Count; i++)
+                {
+                    var category = entities[i];
+                    var categoryName = category.GetValueOrDefault("name")?.ToString() ?? "unknown";
+                    var existingTreeId = category.GetValueOrDefault("tree_id");
+                    
+                    // Force set tree_id to ensure it's present
+                    category["tree_id"] = treeIdInt;
+                    
+                    _logger.LogDebug("🏷️ [CAT-{ExecutionId}] SAFETY[{Index}]: '{CategoryName}' - tree_id forced to {TreeId} (was: {ExistingTreeId})", 
+                        executionId, i, categoryName, treeIdInt, existingTreeId ?? "NULL");
+                }
+                
+                _logger.LogInformation("🏷️ [CAT-{ExecutionId}] ✅ SAFETY-COMPLETE: All categories have tree_id={TreeId}", 
+                    executionId, treeIdInt);
+            }
+            else
+            {
+                _logger.LogError("🏷️ [CAT-{ExecutionId}] ❌ SAFETY-FAILED: Cannot parse destination tree ID '{TreeId}' as integer", 
+                    executionId, destinationTreeId);
+                throw new InvalidOperationException($"Invalid destination tree ID: {destinationTreeId}");
+            }
+
             // Create categories using the API client
+            _logger.LogInformation("🏷️ [CAT-{ExecutionId}] 🚀 CALLING API: Creating {CategoryCount} categories via BigCommerce API", 
+                executionId, entities.Count);
+            
             var result = await _apiClient.CreateCategoriesAsync(
                 destinationStore, 
                 categoryTreeContext.DestinationCategoryTreeId, 
                 entities, 
                 cancellationToken);
 
-            // ✅ Check if the API returned an empty result and throw an exception to capture error details
-            if (result == null || !result.Any())
+            _logger.LogInformation("🏷️ [CAT-{ExecutionId}] 📨 API RESPONSE: Received response with {ResultCount} entities", 
+                executionId, result?.Count ?? 0);
+
+            // ✅ Handle partial success scenarios (207 responses)
+            var inputCount = entities.Count;
+            var createdCount = result?.Count ?? 0;
+            
+            // Log detailed response information with full entity structure debugging
+            if (result != null && result.Any())
             {
-                var errorMessage = $"BigCommerce API returned empty response for {entities.Count} categories";
-                _logger.LogError("🏷️ [CAT-{ExecutionId}] {ErrorMessage} in migration {MigrationId}", 
+                for (int i = 0; i < Math.Min(3, result.Count); i++) // Log first 3 entities for debugging
+                {
+                    var created = result[i];
+                    var createdId = created.GetValueOrDefault("category_id")?.ToString() ?? "unknown"; // 🔧 FIX: Use category_id
+                    var createdName = created.GetValueOrDefault("name")?.ToString() ?? "";
+                    var createdParentId = created.GetValueOrDefault("parent_id")?.ToString() ?? "0";
+                    
+                    _logger.LogInformation("🏷️ [CAT-{ExecutionId}] OUTPUT[{Index}]: ID={CreatedId}, Name='{CreatedName}', ParentId={CreatedParentId}", 
+                        executionId, i, createdId, createdName, createdParentId);
+                    
+                    // 🔍 ENTITY STRUCTURE DEBUG: Log all keys in the created entity
+                    var entityKeys = string.Join(", ", created.Keys);
+                    _logger.LogInformation("🔍 [ENTITY-STRUCTURE] Entity {Index} keys: {Keys}", i, entityKeys);
+                    
+                    // 🔍 FULL ENTITY DEBUG: Log the complete entity structure (first entity only)
+                    if (i == 0)
+                    {
+                        var entityJson = System.Text.Json.JsonSerializer.Serialize(created);
+                        _logger.LogInformation("🔍 [FULL-ENTITY] Complete entity structure: {EntityJson}", entityJson);
+                    }
+                }
+            }
+            
+            if (result == null || createdCount == 0)
+            {
+                var errorMessage = $"BigCommerce API returned empty response for {inputCount} categories";
+                _logger.LogError("🏷️ [CAT-{ExecutionId}] ❌ TOTAL FAILURE: {ErrorMessage} in migration {MigrationId}", 
                     executionId, errorMessage, migrationId);
                 
                 // Throw an exception to trigger the error handling flow with stack trace preservation
                 throw new InvalidOperationException(errorMessage);
             }
 
-            _logger.LogInformation("✅ [CAT-{ExecutionId}] Successfully created {CreatedCount} categories for migration {MigrationId}", 
-                executionId, result?.Count ?? 0, migrationId);
+            // 🚨 CRITICAL FIX: Detect partial success scenarios
+            if (createdCount < inputCount)
+            {
+                var failedCount = inputCount - createdCount;
+                _logger.LogWarning("🏷️ [CAT-{ExecutionId}] ⚠️ PARTIAL SUCCESS: Created {CreatedCount}/{InputCount} categories in migration {MigrationId}. {FailedCount} categories failed!",
+                    executionId, createdCount, inputCount, migrationId, failedCount);
+                
+                // Log which categories were created vs failed for debugging
+                var createdIds = result.Select(r => r.GetValueOrDefault("category_id")?.ToString() ?? "unknown").ToList(); // 🔧 FIX: Use category_id
+                var inputIds = entities.Select(e => e.GetValueOrDefault("category_id")?.ToString() ?? "unknown").ToList(); // 🔧 FIX: Use category_id
+                var failedIds = inputIds.Except(createdIds).ToList();
+                
+                _logger.LogWarning("🏷️ [CAT-{ExecutionId}] 📊 FAILED IDs: {FailedIds}", executionId, string.Join(", ", failedIds));
+                _logger.LogInformation("🏷️ [CAT-{ExecutionId}] ✅ SUCCESS IDs: {SuccessIds}", executionId, string.Join(", ", createdIds));
+                
+                // Still return the partial results, but caller needs to handle the count discrepancy
+            }
+            else
+            {
+                _logger.LogInformation("🏷️ [CAT-{ExecutionId}] 🎉 FULL SUCCESS: All {CreatedCount} categories created successfully", 
+                    executionId, createdCount);
+            }
+
+            _logger.LogInformation("🏷️ [CAT-{ExecutionId}] ✅ COMPLETED: Successfully created {CreatedCount}/{InputCount} categories for migration {MigrationId}", 
+                executionId, createdCount, inputCount, migrationId);
 
             return result;
         }

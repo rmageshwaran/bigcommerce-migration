@@ -38,19 +38,31 @@ public class EntityFetchService : IEntityFetchService
         _logger.LogInformation("Fetching entities of type {EntityType} for batch {BatchNumber} in migration {MigrationId}", 
             request.EntityType, request.BatchNumber, request.MigrationId);
 
-        // ✅ DEBUG: Log the decision-making process for debugging
-        _logger.LogDebug("EntityFetchService decision - UseDirectPagination: {UseDirectPagination}, HasEntityIds: {HasEntityIds}, CachedDataCount: {CachedDataCount}",
+        // 🚨 CRITICAL DEBUG: Log the decision-making process for debugging (TEMPORARY)
+        _logger.LogInformation("🔍 [FETCH-DEBUG] EntityFetchService decision - UseDirectPagination: {UseDirectPagination}, HasEntityIds: {HasEntityIds}, CachedDataCount: {CachedDataCount}",
             request.UseDirectPagination, request.EntityIds?.Any() ?? false, request.CachedEntityData?.Count ?? 0);
+        
+        _logger.LogInformation("🔍 [FETCH-DEBUG] EntityIds details: Count={Count}, IsNull={IsNull}, BatchNumber={BatchNumber}, EntityType={EntityType}",
+            request.EntityIds?.Count ?? -1, request.EntityIds == null, request.BatchNumber, request.EntityType);
 
         try
         {
-            // Handle direct pagination for efficient strategies (empty EntityIds but has UseDirectPagination)
-            if (request.UseDirectPagination && (!request.EntityIds.Any() || request.EntityIds.First().StartsWith("page-")))
+            // Handle direct pagination for efficient strategies (empty EntityIds or placeholder EntityIds)
+                    if (request.UseDirectPagination && (!request.EntityIds.Any() ||
+            request.EntityIds.First().StartsWith("page-") ||
+            request.EntityIds.First().StartsWith("root-") ||
+            request.EntityIds.First().StartsWith("level") ||
+            request.EntityIds.First().StartsWith("category-")))
             {
-                _logger.LogDebug("Using direct pagination for {EntityType} batch {BatchNumber} in migration {MigrationId}", 
+                _logger.LogInformation("🚀 [FETCH-DEBUG] Taking direct pagination path for {EntityType} batch {BatchNumber} in migration {MigrationId}", 
                     request.EntityType, request.BatchNumber, request.MigrationId);
                 
                 return await FetchEntitiesWithDirectPaginationAsync(request, cancellationToken);
+            }
+            else
+            {
+                _logger.LogInformation("🚨 [FETCH-DEBUG] NOT taking direct pagination path - UseDirectPagination: {UseDirectPagination}, EntityIdsEmpty: {EntityIdsEmpty}",
+                    request.UseDirectPagination, !request.EntityIds.Any());
             }
             
             // Handle cached entity data (hierarchical strategies like categories)
@@ -195,34 +207,81 @@ public class EntityFetchService : IEntityFetchService
         CancellationToken cancellationToken)
     {
         var pageNumber = request.BatchNumber; // Direct mapping: batch 1 = page 1, batch 2 = page 2, etc.
-        var batchSize = 10; // Default batch size, could be configurable
         
-        _logger.LogDebug("Fetching page {PageNumber} for {EntityType} using direct pagination in migration {MigrationId}", 
-            pageNumber, request.EntityType, request.MigrationId);
+                        // 🎯 CONSISTENT PAGE SIZE: Use the same page size as discovery to avoid mismatch
+        // Get the original page size from discovery metadata to ensure chunking alignment
+        var discoveryPageSize = 250; // Default that matches V3EfficientPaginationStrategy
+        if (request.PaginationMetadata?.ContainsKey("PageSize") == true)
+        {
+            if (int.TryParse(request.PaginationMetadata["PageSize"].ToString(), out var metadataPageSize))
+            {
+                discoveryPageSize = metadataPageSize;
+            }
+        }
+        var batchSize = discoveryPageSize; // Match discovery page size for proper chunking alignment
+        
+        _logger.LogInformation("🔧 [FETCH-FIX] Using page size {PageSize} (discovery matched) for parallel processing of {EntityType} batch {BatchNumber}", 
+            batchSize, request.EntityType, request.BatchNumber);
+        
+        _logger.LogDebug("Fetching page {PageNumber} for {EntityType} using direct pagination (limit={Limit}) in migration {MigrationId}", 
+            pageNumber, request.EntityType, batchSize, request.MigrationId);
 
         try
         {
-            var paginationRequest = new BigCommercePaginationRequest
-            {
-                Page = pageNumber,
-                Limit = batchSize,
-                SortBy = "id",
-                SortDirection = "asc"
-            };
+            List<Dictionary<string, object>> entities;
 
-            // Add entity-specific parameters
-            if (request.EntityType.ToLowerInvariant() == "categories" && request.CategoryTreeContext != null)
+            // 🎯 SPECIAL HANDLING: For categories with placeholder EntityIds, use CategoryFetchStrategy
+            if (request.EntityType.ToLowerInvariant() == "categories" && 
+                request.EntityIds?.Any() == true && 
+                (request.EntityIds.First().StartsWith("root-") || 
+                 request.EntityIds.First().StartsWith("level") ||
+                 request.EntityIds.First().StartsWith("category-")))
             {
-                paginationRequest.CategoryTreeId = request.CategoryTreeContext.SourceCategoryTreeId;
+                _logger.LogInformation("🔄 [FETCH-REDIRECT] Categories with placeholder EntityIds - calling CategoryFetchStrategy for migration {MigrationId}", 
+                    request.MigrationId);
+                
+                var strategy = _strategyFactory.GetStrategy("categories");
+                entities = await strategy.FetchEntitiesAsync(
+                    request.EntityIds,
+                    request.MigrationId,
+                    request.SourceStore,
+                    request.CategoryTreeContext,
+                    cancellationToken);
             }
+            else
+            {
+                // Standard direct pagination for other entities or non-placeholder EntityIds
+                var paginationRequest = new BigCommercePaginationRequest
+                {
+                    Page = pageNumber,
+                    Limit = batchSize,
+                    SortBy = "id",
+                    SortDirection = "asc"
+                };
 
-            var response = await _apiClient.GetPaginatedEntitiesAsync(
-                request.SourceStore,
-                request.EntityType,
-                paginationRequest,
-                cancellationToken);
+                // Add entity-specific parameters
+                if (request.EntityType.ToLowerInvariant() == "categories" && request.CategoryTreeContext != null)
+                {
+                    paginationRequest.CategoryTreeId = request.CategoryTreeContext.SourceCategoryTreeId;
+                }
+                
+                // Add sub-resources for products to get complete data for creation
+                if (request.EntityType.ToLowerInvariant() == "products")
+                {
+                    paginationRequest.AdditionalParams = new Dictionary<string, string>
+                    {
+                        ["include"] = "bulk_pricing_rules,modifiers,options,parent_relations,custom_fields,videos"
+                    };
+                }
 
-            var entities = response.Data ?? new List<Dictionary<string, object>>();
+                var response = await _apiClient.GetPaginatedEntitiesAsync(
+                    request.SourceStore,
+                    request.EntityType,
+                    paginationRequest,
+                    cancellationToken);
+
+                entities = response.Data ?? new List<Dictionary<string, object>>();
+            }
             
             // Add original entity ID tracking for error reporting
             foreach (var entity in entities)
@@ -231,8 +290,8 @@ public class EntityFetchService : IEntityFetchService
                 entity["_original_entity_id"] = entityId;
             }
 
-            _logger.LogDebug("Direct pagination fetched {Count} {EntityType} entities from page {PageNumber} in migration {MigrationId}", 
-                entities.Count, request.EntityType, pageNumber, request.MigrationId);
+            _logger.LogInformation("✅ [FETCH-FIX] Direct pagination fetched {Count} {EntityType} entities from page {PageNumber} (limit={Limit}) in migration {MigrationId}", 
+                entities.Count, request.EntityType, pageNumber, batchSize, request.MigrationId);
 
             return entities;
         }

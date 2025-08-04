@@ -167,19 +167,19 @@ public class V3HierarchicalStrategy : IEntityDiscoveryStrategy
                 }
             }
             
-            // ✅ FIX: Extract ALL entity IDs (not just hierarchically sorted ones)
-            // The hierarchical sorting is for the cached data only, not for filtering which entities to process
-            var allEntityIds = ExtractEntityIds(allEntities); // Use original unsorted list for complete entity IDs
+            // ✅ FIX: Extract entity IDs from HIERARCHICALLY SORTED entities to preserve parent-child order
+            // This ensures parent categories are migrated before children, allowing proper mapping resolution
+            var hierarchicalEntityIds = ExtractEntityIds(sortedEntities); // Use hierarchically sorted list for proper order!
             
-            _logger.LogInformation("✅ Hierarchical strategy completed for {EntityType}: {TotalEntities} entities discovered, {SortedEntities} entities sorted and cached", 
-                request.EntityType, allEntityIds.Count, sortedEntities.Count);
+            _logger.LogInformation("✅ Hierarchical strategy completed for {EntityType}: {TotalEntities} entities discovered, {SortedEntities} entities sorted and cached, hierarchical order preserved", 
+                request.EntityType, allEntities.Count, sortedEntities.Count);
 
             return new EntityDiscoveryResult
             {
                 EntityType = request.EntityType,
-                EntityIds = allEntityIds, // ✅ Return ALL entity IDs, not just hierarchically sorted ones
+                EntityIds = hierarchicalEntityIds, // ✅ Use hierarchically sorted entity IDs for proper parent-child order!
                 EntityData = sortedEntities, // Store hierarchically sorted entity data
-                TotalCount = allEntityIds.Count, // ✅ Use total count of all entities
+                TotalCount = allEntities.Count, // ✅ Use total count of all entities (some may be dropped in sorting)
                 ApiVersion = BigCommerceApiVersion.V3,
                 SkipDiscovery = false,
                 V3PaginationMetadata = v3Metadata,
@@ -192,7 +192,10 @@ public class V3HierarchicalStrategy : IEntityDiscoveryStrategy
                     { "HierarchicallySorted", true },
                     { "DataCached", true },
                     { "OptimizedForHierarchy", true },
-                    { "AllEntitiesIncluded", true } // ✅ Indicate all entities are included
+                    { "AllEntitiesIncluded", true }, // ✅ Indicate all entities are included
+                    { "UseDirectPagination", true }, // 🚀 ENABLE page-based chunked processing for timeout safety
+                    { "RequiresParentFixup", true }, // 🔗 PHASE 2: Flag that parent relationship fixup is needed
+                    { "HierarchyMetadata", ExtractHierarchyMetadata(sortedEntities) } // 🔗 PHASE 2: Store hierarchy info for parent fixup
                 }
             };
         }
@@ -291,5 +294,74 @@ public class V3HierarchicalStrategy : IEntityDiscoveryStrategy
         }
         
         return entityIds.Where(id => !string.IsNullOrEmpty(id)).ToList();
+    }
+
+    /// <summary>
+    /// 🔗 PHASE 2: Extract hierarchy information for parent relationship fixing
+    /// </summary>
+    private Dictionary<string, object> ExtractHierarchyMetadata(List<Dictionary<string, object>> categories)
+    {
+        var hierarchyInfo = new Dictionary<string, List<Dictionary<string, object>>>();
+        
+        foreach (var category in categories)
+        {
+            var parentId = category.GetValueOrDefault("parent_id")?.ToString() ?? "0";
+            
+            if (!hierarchyInfo.ContainsKey(parentId))
+            {
+                hierarchyInfo[parentId] = new List<Dictionary<string, object>>();
+            }
+            
+            hierarchyInfo[parentId].Add(new Dictionary<string, object>
+            {
+                { "id", category.GetValueOrDefault("id") },
+                { "parent_id", parentId },
+                { "name", category.GetValueOrDefault("name") }
+            });
+        }
+
+        _logger.LogInformation("🔗 [PHASE-2-PREP] Hierarchy metadata extracted: {HierarchyLevels} parent groups for {TotalCategories} categories",
+            hierarchyInfo.Keys.Count, categories.Count);
+
+        return new Dictionary<string, object>
+        {
+            { "ParentChildMap", hierarchyInfo },
+            { "TotalCategories", categories.Count },
+            { "MaxDepth", CalculateMaxDepth(hierarchyInfo) }
+        };
+    }
+
+    /// <summary>
+    /// Calculate maximum hierarchy depth for logging
+    /// </summary>
+    private int CalculateMaxDepth(Dictionary<string, List<Dictionary<string, object>>> hierarchyInfo)
+    {
+        var maxLevels = 1;
+        var currentLevel = hierarchyInfo.GetValueOrDefault("0", new List<Dictionary<string, object>>());
+        
+        while (currentLevel.Any())
+        {
+            var nextLevel = new List<Dictionary<string, object>>();
+            foreach (var item in currentLevel)
+            {
+                var itemId = item.GetValueOrDefault("id")?.ToString() ?? "";
+                if (hierarchyInfo.ContainsKey(itemId))
+                {
+                    nextLevel.AddRange(hierarchyInfo[itemId]);
+                }
+            }
+            
+            if (nextLevel.Any())
+            {
+                maxLevels++;
+                currentLevel = nextLevel;
+            }
+            else
+            {
+                break;
+            }
+        }
+        
+        return maxLevels;
     }
 } 

@@ -201,10 +201,19 @@ public class DurableFunctionAnalyzer : DiagnosticAnalyzer
         if (hasOrchestrationTrigger)
             return true;
 
-        // Check if the file name contains "Orchestrator"
+        // Check if the file is a Durable Functions orchestrator (more specific patterns)
         var fileName = node.SyntaxTree.FilePath;
-        if (fileName != null && fileName.IndexOf("Orchestrator", StringComparison.OrdinalIgnoreCase) >= 0)
-            return true;
+        if (fileName != null)
+        {
+            // Only target files that are actual Durable Functions orchestrators
+            // These should be in specific directories and have specific naming patterns
+            var isInOrchestratorDirectory = fileName.Contains("/Orchestrators/") || fileName.Contains("\\Orchestrators\\");
+            var isDurableOrchestrator = fileName.Contains("DurableOrchestrator") || 
+                                      fileName.Contains("MigrationOrchestrator") || 
+                                      fileName.Contains("EntityMigrationOrchestrator");
+            
+            return isInOrchestratorDirectory && isDurableOrchestrator;
+        }
 
         return false;
     }

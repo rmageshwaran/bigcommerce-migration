@@ -134,8 +134,13 @@ class NotificationService {
     this.notifications.unshift(fullNotification);
     this.notifyListeners();
 
-    // Show toast if not persistent
-    if (!notification.persistent) {
+    // Show toast for non-persistent notifications OR important migration events
+    const shouldShowToast = !notification.persistent || 
+                           notification.type === NotificationType.MIGRATION_COMPLETE ||
+                           notification.type === NotificationType.MIGRATION_FAILED ||
+                           notification.type === NotificationType.MIGRATION_STARTED;
+                           
+    if (shouldShowToast) {
       this.showToast(notification.type, notification.title, notification.message);
     }
 
@@ -199,14 +204,31 @@ class NotificationService {
   }
 
   public migrationCompleted(migrationId: string, migrationName: string, duration: string): void {
+    console.log('🎉 [NOTIFICATION] Migration completed notification triggered:', {
+      migrationId: migrationId.slice(-8),
+      migrationName,
+      duration
+    });
+    
+    // Create user-friendly migration ID (last 8 chars)
+    const shortMigrationId = migrationId.slice(-8);
+    const displayName = migrationName || `Migration ${shortMigrationId}`;
+    
     this.addNotification({
       type: NotificationType.MIGRATION_COMPLETE,
       priority: NotificationPriority.HIGH,
-      title: 'Migration Complete',
-      message: `Migration "${migrationName}" completed successfully in ${duration}`,
+      title: '🎉 Migration Complete',
+      message: `${displayName} completed successfully in ${duration}. Migration ID: ${shortMigrationId}`,
       migrationId,
       persistent: true,
-      soundEnabled: true
+      soundEnabled: true,
+      actions: [
+        {
+          label: 'View Details',
+          action: () => this.navigateToMigration(migrationId),
+          style: 'primary'
+        }
+      ]
     });
   }
 

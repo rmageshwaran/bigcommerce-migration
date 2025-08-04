@@ -2,6 +2,7 @@ using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Logging;
 using BigCommerce.Migration.Core.Models;
 using BigCommerce.Migration.Core.Interfaces;
+using BigCommerce.Migration.Core.Services;
 using BigCommerce.Migration.Orchestration.Models;
 using System.Text.Json;
 
@@ -15,22 +16,24 @@ public class MigrationOrchestrator
 {
     private readonly ILogger<MigrationOrchestrator> _logger;
     private readonly IProgressEventPublisher _progressEventPublisher;
+    private readonly ISignalREventFactory _signalREventFactory; // 🎯 CENTRALIZED SIGNALR: Factory for consistent event creation
 
     // Entity processing order based on dependencies
+    // 🚀 CATEGORIES DISABLED: Focusing on brands and products first
     private static readonly string[] EntityProcessingOrder = new[]
     {
-        "categories",    // Must be first (no dependencies)
         "brands",        // No dependencies
-        "products",      // Depends on categories
-        "variants",      // Depends on categories and products
-        "images",        // Depends on categories and products
-        "modifiers"      // Depends on categories and products
+        "products",      // No category dependencies (using hard-coded category ID)
+        "variants",      // Depends on products
+        "images",        // Depends on products
+        "modifiers"      // Depends on products
     };
 
-    public MigrationOrchestrator(ILogger<MigrationOrchestrator> logger, IProgressEventPublisher progressEventPublisher)
+    public MigrationOrchestrator(ILogger<MigrationOrchestrator> logger, IProgressEventPublisher progressEventPublisher, ISignalREventFactory signalREventFactory)
     {
         _logger = logger;
         _progressEventPublisher = progressEventPublisher;
+        _signalREventFactory = signalREventFactory ?? throw new ArgumentNullException(nameof(signalREventFactory)); // 🎯 CENTRALIZED SIGNALR: Store factory reference
     }
 
     /// <summary>
@@ -89,9 +92,9 @@ public class MigrationOrchestrator
             context.SetCustomStatus("Initializing migration");
             try
             {
-                var migrationProgressEvent = new MigrationProgressEvent
+                // ✅ CENTRALIZED SIGNALR: Use factory for consistent event creation with auto-populated base properties
+                var migrationProgressEvent = _signalREventFactory.CreateMigrationProgress(request.MigrationId, new MigrationProgressOptions
                 {
-                    MigrationId = request.MigrationId,
                     OverallProgress = 0,
                     Status = "initializing",
                     TotalEntities = 0,
@@ -99,18 +102,23 @@ public class MigrationOrchestrator
                     FailedEntities = 0,
                     CurrentEntityType = "",
                     EstimatedTimeRemaining = null
-                };
+                    // ✅ Base properties (Timestamp, IsCancelled, HubMethod) auto-populated by factory
+                    // ✅ Validation built-in
+                    // ✅ Consistent naming enforced
+                });
 
                 await _progressEventPublisher.PublishMigrationProgressAsync(migrationProgressEvent);
 
-                var statusEvent = new StatusProgressEvent
+                // ✅ CENTRALIZED SIGNALR: Use factory for consistent event creation with auto-populated base properties
+                var statusEvent = _signalREventFactory.CreateStatusProgress(request.MigrationId, new StatusProgressOptions
                 {
-                    MigrationId = request.MigrationId,
                     Status = "initializing",
                     Message = "Migration initialization started",
-                    Metadata = new { Entities = request.OriginalRequest.Entities },
-                    Timestamp = context.CurrentUtcDateTime
-                };
+                    Data = new { Entities = request.OriginalRequest.Entities }
+                    // ✅ Base properties (Timestamp, IsCancelled, HubMethod) auto-populated by factory
+                    // ✅ Validation built-in
+                    // ✅ Consistent naming enforced
+                });
 
                 await _progressEventPublisher.PublishStatusAsync(statusEvent);
             }
@@ -122,7 +130,7 @@ public class MigrationOrchestrator
 
             // Step 3: Validate stores and resolve dependencies
             context.SetCustomStatus("Validating stores");
-            var validationResult = await context.CallActivityAsync<ValidationResult>(
+            var validationResult = await context.CallActivityAsync<BigCommerce.Migration.Core.Interfaces.ValidationResult>(
                 "ValidateMigrationStores", new
                 {
                     MigrationId = request.MigrationId,
@@ -266,9 +274,9 @@ public class MigrationOrchestrator
             {
                 var migrationSummary = result.GetStatisticsSummary();
                 
-                var migrationProgressEvent = new MigrationProgressEvent
+                // ✅ CENTRALIZED SIGNALR: Use factory for consistent event creation with auto-populated base properties
+                var migrationProgressEvent = _signalREventFactory.CreateMigrationProgress(request.MigrationId, new MigrationProgressOptions
                 {
-                    MigrationId = request.MigrationId,
                     OverallProgress = 100,
                     Status = result.Status.ToString().ToLowerInvariant(),
                     TotalEntities = migrationSummary.TotalEntities,
@@ -276,23 +284,28 @@ public class MigrationOrchestrator
                     FailedEntities = migrationSummary.FailedEntities,
                     CurrentEntityType = "",
                     EstimatedTimeRemaining = TimeSpan.Zero
-                };
+                    // ✅ Base properties (Timestamp, IsCancelled, HubMethod) auto-populated by factory
+                    // ✅ Validation built-in
+                    // ✅ Consistent naming enforced
+                });
 
                 await _progressEventPublisher.PublishMigrationProgressAsync(migrationProgressEvent);
 
-                var statusEvent = new StatusProgressEvent
+                // ✅ CENTRALIZED SIGNALR: Use factory for consistent event creation with auto-populated base properties
+                var statusEvent = _signalREventFactory.CreateStatusProgress(request.MigrationId, new StatusProgressOptions
                 {
-                    MigrationId = request.MigrationId,
                     Status = result.Status.ToString().ToLowerInvariant(),
                     Message = result.Errors.Any() ? "Migration completed with errors" : "Migration completed successfully",
-                    Metadata = new { 
+                    Data = new { 
                         TotalEntities = migrationSummary.TotalEntities,
                         SuccessfulEntities = migrationSummary.SuccessfulEntities,
                         FailedEntities = migrationSummary.FailedEntities,
                         SuccessRate = migrationSummary.SuccessRate
-                    },
-                    Timestamp = context.CurrentUtcDateTime
-                };
+                    }
+                    // ✅ Base properties (Timestamp, IsCancelled, HubMethod) auto-populated by factory
+                    // ✅ Validation built-in
+                    // ✅ Consistent naming enforced
+                });
 
                 await _progressEventPublisher.PublishStatusAsync(statusEvent);
             }
@@ -341,7 +354,7 @@ public class MigrationOrchestrator
     /// <returns>Entity configuration</returns>
     private static EntityConfiguration CreateEntityConfiguration(string entityType)
     {
-        return new EntityConfiguration
+        var config = new EntityConfiguration
         {
             EntityType = entityType,
             IncludeDeleted = false,
@@ -352,6 +365,15 @@ public class MigrationOrchestrator
             FieldMappings = new Dictionary<string, string>(),
             Settings = new Dictionary<string, object>()
         };
+
+        // 🚀 LEVEL-BY-LEVEL: For categories, explicitly start with Level 0 (root categories with parent_id=0)
+        if (entityType.Equals("categories", StringComparison.OrdinalIgnoreCase))
+        {
+            config.Level = 0; // Start with Level 0 (parent_id = 0) to find root categories first
+            config.ParentIds = null; // No parent IDs for Level 0
+        }
+
+        return config;
     }
 
     /// <summary>

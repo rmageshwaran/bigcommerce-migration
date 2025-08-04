@@ -57,8 +57,10 @@ public class StartEntityProcessingActivity
         }
         catch (OperationCanceledException)
         {
-            _logger.LogInformation("StartEntityProcessingAsync was cancelled");
-            throw;
+            _logger.LogInformation("Entity processing start was cancelled for entity type {EntityType} in migration {MigrationId}", 
+                request.EntityType, request.MigrationId);
+            // Activity should complete gracefully, not throw
+            return;
         }
         catch (Exception ex)
         {

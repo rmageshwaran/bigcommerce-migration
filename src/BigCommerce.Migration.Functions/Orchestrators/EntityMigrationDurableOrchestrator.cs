@@ -7,6 +7,7 @@ using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Orchestration.Models;
 using BigCommerce.Migration.Orchestration.Activities;
 using BigCommerce.Migration.Orchestration.Extensions;
+using BigCommerce.Migration.Orchestration.Orchestrators;
 using System.Linq;
 
 namespace BigCommerce.Migration.Functions.Orchestrators;
@@ -171,39 +172,34 @@ public static class EntityMigrationDurableOrchestrator
                     entityType, migrationId);
             }
             
-            var parallelBatchRequest = new ProcessParallelBatchesRequest
-                    {
-                        MigrationId = migrationId,
-                        EntityType = entityType,
-                        TotalBatches = totalBatches,
-                BatchSize = batchSize,
-                EntityIds = entityIds,
-                        SourceStore = input.SourceStore ?? new StoreConfiguration(),
-                        DestinationStore = input.DestinationStore ?? new StoreConfiguration(),
-                        CategoryTreeContext = input.CategoryTreeContext ?? new CategoryTreeContext(),
-                PaginationMetadata = discoverResult?.PaginationMetadata ?? new Dictionary<string, object>(),
-                        UseDirectPagination = useDirectPagination,
-                            IsCancelled = input.IsCancelled,
-                            CancellationReason = input.CancellationReason,
+            // 🚀 CHUNKED APPROACH: Use sub-orchestrator instead of monolithic activity
+            var entityMigrationRequest = new EntityMigrationRequest
+            {
+                MigrationId = input.MigrationId,
+                EntityType = entityType,
+                SourceStore = input.SourceStore ?? new StoreConfiguration(),
+                DestinationStore = input.DestinationStore ?? new StoreConfiguration(),
+                CategoryTreeContext = input.CategoryTreeContext ?? new CategoryTreeContext(),
+                IsCancelled = input.IsCancelled,
+                CancellationReason = input.CancellationReason,
                 CancelledAt = input?.CancelledAt
             };
 
-            var parallelResult = await context.CallActivityAsync<BigCommerce.Migration.Core.Interfaces.BatchProcessingResult>(
-                "ProcessParallelBatches",
-                parallelBatchRequest);
+            var parallelResult = await context.CallSubOrchestratorAsync<EntityMigrationResult>(
+                nameof(EntityMigrationOrchestrator),
+                entityMigrationRequest);
 
-            logger.LogInformation("🎉 P2.5: PARALLEL processing completed for {EntityType} in {Duration}ms - {Processed}/{Total} entities", 
+            logger.LogInformation("🎉 P2.5: CHUNKED processing completed for {EntityType} in {Duration}ms - {Processed}/{Total} entities", 
                 entityType, parallelResult.ProcessingTime.TotalMilliseconds, 
-                parallelResult.TotalProcessed, discoverResult?.TotalCount ?? 0);
+                parallelResult.ProcessedEntities, parallelResult.TotalEntities);
 
-            // Update result with parallel processing results
-            // 🚨 FIX: Use actual cumulative processed count, not wrong TotalProcessed value
-            result.ProcessedEntities = parallelResult.SuccessfulEntities + parallelResult.FailedEntities;  // Actual processed count
+            // Update result with chunked processing results (direct mapping from EntityMigrationResult)
+            result.ProcessedEntities = parallelResult.ProcessedEntities;
             result.SuccessfulEntities = parallelResult.SuccessfulEntities;
             result.FailedEntities = parallelResult.FailedEntities;
             
-            logger.LogInformation("🚨 [DURABLE-ORCHESTRATOR-FIX] Fixed ProcessedEntities: TotalProcessed={TotalProcessed} (WRONG) -> ProcessedEntities={ProcessedEntities} (CORRECT) = Successful={Successful} + Failed={Failed}", 
-                parallelResult.TotalProcessed, result.ProcessedEntities, result.SuccessfulEntities, result.FailedEntities);
+            logger.LogInformation("🚀 [CHUNKED-ORCHESTRATOR] Successfully processed {EntityType}: ProcessedEntities={ProcessedEntities}, Successful={Successful}, Failed={Failed}", 
+                entityType, result.ProcessedEntities, result.SuccessfulEntities, result.FailedEntities);
 
             // Step 6: Complete entity processing
             await context.CallActivityAsync(
@@ -213,7 +209,7 @@ public static class EntityMigrationDurableOrchestrator
                     MigrationId = migrationId,
                     EntityType = entityType,
                     Phase = "Completed",
-                    TotalEntities = discoverResult?.TotalCount ?? 0,
+                    TotalEntities = parallelResult.TotalEntities,
                     ProcessedEntities = result.ProcessedEntities,
                     SuccessfulEntities = result.SuccessfulEntities,
                     FailedEntities = result.FailedEntities,

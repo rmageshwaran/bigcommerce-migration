@@ -78,8 +78,71 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
         // Ensure custom_url structure exists and is valid
         EnsureCustomUrlStructure(transformed, categoryTreeContext, migrationId);
 
-        // Apply parent_id mapping for hierarchical categories
-        await HandleParentIdConversionAsync(transformed, migrationId, cancellationToken);
+        // 🚀 MULTI-MODE PROCESSING: Handle parent_id based on processing mode and level
+        var processingPhase = entity.TryGetValue("_processing_phase", out var phase) ? phase?.ToString() : "UNKNOWN";
+        var processingMode = entity.TryGetValue("_processing_mode", out var mode) ? mode?.ToString() : "UNKNOWN";
+        var processingLevel = entity.TryGetValue("_processing_level", out var level) ? (int)(level ?? -1) : -1;
+        
+        if (processingMode == "LevelByLevel")
+        {
+            // 🚀 LEVEL-BY-LEVEL: New unified approach
+            if (processingLevel == 0)
+            {
+                // Level 0: Root categories - set parent_id = 0
+                transformed["parent_id"] = 0;
+                _logger.LogInformation("✅ [LEVEL-0] Root category {EntityId} '{EntityName}' processed with parent_id=0 in migration {MigrationId}", 
+                    entityId, entityName, migrationId);
+            }
+            else if (processingLevel > 0)
+            {
+                // Level N: Child categories - need parent_id resolution using entity mappings
+                await HandleParentIdConversionAsync(transformed, migrationId, cancellationToken);
+                _logger.LogInformation("✅ [LEVEL-{Level}] Child category {EntityId} '{EntityName}' processed with parent_id resolution in migration {MigrationId}", 
+                    processingLevel, entityId, entityName, migrationId);
+            }
+            else
+            {
+                _logger.LogWarning("⚠️ [LEVEL-UNKNOWN] Invalid processing level {Level} for Level-by-Level category {EntityId} '{EntityName}' in migration {MigrationId}", 
+                    processingLevel, entityId, entityName, migrationId);
+                transformed["parent_id"] = 0; // Safe fallback
+            }
+        }
+        else if (processingPhase == "PHASE1" && processingLevel == 0)
+        {
+            // LEGACY PHASE 1: Root categories only - they already have parent_id = 0, just verify
+            var originalParentId = entity.TryGetValue("parent_id", out var origParent) ? origParent?.ToString() : "UNKNOWN";
+            
+            if (originalParentId != "0")
+            {
+                _logger.LogWarning("⚠️ [PHASE-1] Category {EntityId} '{EntityName}' has parent_id={OriginalParentId} but should be root (0) in Phase 1", 
+                    entityId, entityName, originalParentId);
+            }
+            
+            // Keep original parent_id = 0 for root categories
+            transformed["parent_id"] = 0;
+            _logger.LogInformation("✅ [PHASE-1] Root category {EntityId} '{EntityName}' processed with parent_id=0 in migration {MigrationId}", 
+                entityId, entityName, migrationId);
+        }
+        else if (processingPhase == "PHASE2" && processingLevel > 0)
+        {
+            // LEGACY PHASE 2: Child categories - need parent_id resolution
+            await HandleParentIdConversionAsync(transformed, migrationId, cancellationToken);
+            _logger.LogInformation("✅ [PHASE-2] Level {Level} category {EntityId} '{EntityName}' processed with parent_id resolution in migration {MigrationId}", 
+                processingLevel, entityId, entityName, migrationId);
+        }
+        else if (processingPhase == "UNKNOWN" || processingLevel == -1)
+        {
+            // LEGACY MODE: Traditional processing (backward compatibility)
+            _logger.LogInformation("🔄 [LEGACY] Using legacy parent_id=0 fallback for category {EntityId} '{EntityName}' in migration {MigrationId}", 
+                entityId, entityName, migrationId);
+            transformed["parent_id"] = 0; // Fallback to old behavior
+        }
+        else
+        {
+            _logger.LogWarning("⚠️ [UNKNOWN] Unexpected processing mode {Mode} phase {Phase} level {Level} for category {EntityId} '{EntityName}' in migration {MigrationId}", 
+                processingMode, processingPhase, processingLevel, entityId, entityName, migrationId);
+            transformed["parent_id"] = 0; // Safe fallback
+        }
 
         // Remove fields that shouldn't be sent to BigCommerce API
         RemoveInvalidFields(transformed, migrationId);

@@ -90,6 +90,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<V2DirectPaginationStrategy>();
         services.AddSingleton<V3EfficientPaginationStrategy>();
         services.AddSingleton<V3HierarchicalStrategy>();
+        services.AddSingleton<LevelByLevelCategoryStrategy>();
+
         
         // 🎯 Register entity creation strategy pattern implementations (Task 3.1 - COMPLETED)
         // Strategy Pattern for Open/Closed Principle compliance

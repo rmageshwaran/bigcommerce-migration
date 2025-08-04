@@ -59,4 +59,14 @@ public class EntityConfiguration
     /// Additional entity-specific settings
     /// </summary>
     public Dictionary<string, object> Settings { get; set; } = new();
+    
+    /// <summary>
+    /// Level-by-Level category migration: Current processing level (0=root, 1=first children, etc.)
+    /// </summary>
+    public int? Level { get; set; }
+    
+    /// <summary>
+    /// Level-by-Level category migration: Parent category IDs for current level processing
+    /// </summary>
+    public List<string>? ParentIds { get; set; }
 } 

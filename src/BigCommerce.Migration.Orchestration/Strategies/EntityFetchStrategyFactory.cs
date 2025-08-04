@@ -60,10 +60,11 @@ public class EntityFetchStrategyFactory : IEntityFetchStrategyFactory
     {
         var normalized = entityType.Trim().ToLowerInvariant();
         
-        // Handle singular/plural variations
+        // Handle singular/plural variations and sub-orchestrator types
         return normalized switch
         {
             "category" => "categories",
+            "categories-level" => "categories", // Sub-orchestrator type maps to categories
             "product" => "products", 
             "brand" => "brands",
             "variant" => "variants",

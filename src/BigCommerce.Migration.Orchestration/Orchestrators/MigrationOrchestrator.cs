@@ -19,14 +19,14 @@ public class MigrationOrchestrator
     private readonly ISignalREventFactory _signalREventFactory; // 🎯 CENTRALIZED SIGNALR: Factory for consistent event creation
 
     // Entity processing order based on dependencies
+    // 🚀 CATEGORIES DISABLED: Focusing on brands and products first
     private static readonly string[] EntityProcessingOrder = new[]
     {
-        "categories",    // Must be first (no dependencies)
         "brands",        // No dependencies
-        "products",      // Depends on categories
-        "variants",      // Depends on categories and products
-        "images",        // Depends on categories and products
-        "modifiers"      // Depends on categories and products
+        "products",      // No category dependencies (using hard-coded category ID)
+        "variants",      // Depends on products
+        "images",        // Depends on products
+        "modifiers"      // Depends on products
     };
 
     public MigrationOrchestrator(ILogger<MigrationOrchestrator> logger, IProgressEventPublisher progressEventPublisher, ISignalREventFactory signalREventFactory)
@@ -354,7 +354,7 @@ public class MigrationOrchestrator
     /// <returns>Entity configuration</returns>
     private static EntityConfiguration CreateEntityConfiguration(string entityType)
     {
-        return new EntityConfiguration
+        var config = new EntityConfiguration
         {
             EntityType = entityType,
             IncludeDeleted = false,
@@ -365,6 +365,15 @@ public class MigrationOrchestrator
             FieldMappings = new Dictionary<string, string>(),
             Settings = new Dictionary<string, object>()
         };
+
+        // 🚀 LEVEL-BY-LEVEL: For categories, explicitly start with Level 0 (root categories with parent_id=0)
+        if (entityType.Equals("categories", StringComparison.OrdinalIgnoreCase))
+        {
+            config.Level = 0; // Start with Level 0 (parent_id = 0) to find root categories first
+            config.ParentIds = null; // No parent IDs for Level 0
+        }
+
+        return config;
     }
 
     /// <summary>

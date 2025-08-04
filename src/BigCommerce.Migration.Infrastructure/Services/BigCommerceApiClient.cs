@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
 using Microsoft.Extensions.Logging;
@@ -133,12 +134,26 @@ public class BigCommerceApiClient : IBigCommerceApiClient
             var request = ApiRequest.CreatePost(url, jsonContent, storeConfig);
             var response = await _apiRequestHandler.ExecuteRequestAsync<Dictionary<string, object>>(request, cancellationToken);
             
+            // 🔍 DEBUG: Log the complete API response structure
+            if (response != null)
+            {
+                var responseJson = JsonSerializer.Serialize(response);
+                _logger.LogInformation("🔍 [API-RESPONSE-DEBUG] Complete BigCommerce API response: {ResponseJson}", responseJson);
+                _logger.LogInformation("🔍 [API-RESPONSE-DEBUG] Response keys: {Keys}", string.Join(", ", response.Keys));
+            }
+            else
+            {
+                _logger.LogWarning("🔍 [API-RESPONSE-DEBUG] Response is null!");
+            }
+            
             if (response?.TryGetValue("data", out var dataValue) == true && dataValue is JsonElement dataElement)
             {
                 var createdCategories = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(dataElement.GetRawText()) ?? new List<Dictionary<string, object>>();
+                _logger.LogInformation("🔍 [API-RESPONSE-DEBUG] Successfully parsed {Count} categories from 'data' field", createdCategories.Count);
                 return createdCategories;
             }
 
+            _logger.LogWarning("🔍 [API-RESPONSE-DEBUG] No 'data' field found in response - returning empty list!");
             return new List<Dictionary<string, object>>();
         }
         catch (Exception ex)
@@ -181,33 +196,80 @@ public class BigCommerceApiClient : IBigCommerceApiClient
 
     /// <summary>
     /// Creates products in a specific store and channel
+    /// Note: BigCommerce API requires individual product creation, not batch
     /// </summary>
     public async Task<List<Dictionary<string, object>>> CreateProductsAsync(StoreConfiguration storeConfig, List<Dictionary<string, object>> products, CancellationToken cancellationToken = default)
     {
         ValidateStoreConfiguration(storeConfig);
 
-        var url = $"{storeConfig.GetApiBaseUrl()}/catalog/products?channel_id={storeConfig.ChannelId}";
-        var jsonContent = JsonSerializer.Serialize(products);
-
-        try
+        if (products == null || !products.Any())
         {
-            var request = ApiRequest.CreatePost(url, jsonContent, storeConfig);
-            var response = await _apiRequestHandler.ExecuteRequestAsync<Dictionary<string, object>>(request, cancellationToken);
-            
-            if (response?.TryGetValue("data", out var dataValue) == true && dataValue is JsonElement dataElement)
-            {
-                var createdProducts = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(dataElement.GetRawText()) ?? new List<Dictionary<string, object>>();
-                return createdProducts;
-            }
-
             return new List<Dictionary<string, object>>();
         }
-        catch (Exception ex)
+
+        var createdProducts = new List<Dictionary<string, object>>();
+        var baseUrl = $"{storeConfig.GetApiBaseUrl()}/catalog/products";
+
+        _logger.LogInformation("Creating {ProductCount} products individually for store {StoreId}", 
+            products.Count, storeConfig.StoreId);
+
+        // Create products individually as BigCommerce doesn't support batch product creation
+        for (int i = 0; i < products.Count; i++)
         {
-            _logger.LogError(ex, "Failed to create products for store {StoreId}, channel {ChannelId}", 
-                storeConfig.StoreId, storeConfig.ChannelId);
-            throw;
+            var product = products[i];
+            cancellationToken.ThrowIfCancellationRequested();
+
+            try
+            {
+                var productName = product.TryGetValue("name", out var name) ? name?.ToString() : "unknown";
+                _logger.LogDebug("Creating product {Index}/{Total}: '{ProductName}' in store {StoreId}",
+                    i + 1, products.Count, productName, storeConfig.StoreId);
+
+                // Remove source ID and tracking fields
+                var cleanProduct = new Dictionary<string, object>(product);
+                cleanProduct.Remove("id");
+                cleanProduct.Remove("_original_entity_id");
+
+                var jsonContent = JsonSerializer.Serialize(cleanProduct, new JsonSerializerOptions
+                {
+                    PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+                    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+                });
+
+                var request = ApiRequest.CreatePost(baseUrl, jsonContent, storeConfig);
+                var response = await _apiRequestHandler.ExecuteRequestAsync<Dictionary<string, object>>(request, cancellationToken);
+                
+                if (response?.TryGetValue("data", out var dataValue) == true && dataValue is JsonElement dataElement)
+                {
+                    var createdProduct = JsonSerializer.Deserialize<Dictionary<string, object>>(dataElement.GetRawText());
+                    if (createdProduct != null)
+                    {
+                        createdProducts.Add(createdProduct);
+                        _logger.LogDebug("Successfully created product '{ProductName}' with ID {ProductId}",
+                            productName, createdProduct.TryGetValue("id", out var id) ? id.ToString() : "unknown");
+                    }
+                }
+                else if (response != null && response.ContainsKey("id"))
+                {
+                    // Handle direct response format
+                    createdProducts.Add(response);
+                    _logger.LogDebug("Successfully created product '{ProductName}' with ID {ProductId}",
+                        productName, response.TryGetValue("id", out var id) ? id.ToString() : "unknown");
+                }
+            }
+            catch (Exception ex)
+            {
+                var productName = product.TryGetValue("name", out var name) ? name?.ToString() : "unknown";
+                _logger.LogError(ex, "Failed to create product '{ProductName}' ({Index}/{Total}) in store {StoreId}", 
+                    productName, i + 1, products.Count, storeConfig.StoreId);
+                throw; // Re-throw to be handled by ProductCreationStrategy
+            }
         }
+
+        _logger.LogInformation("Successfully created {CreatedCount}/{TotalCount} products for store {StoreId}", 
+            createdProducts.Count, products.Count, storeConfig.StoreId);
+
+        return createdProducts;
     }
 
     /// <summary>
@@ -634,6 +696,15 @@ public class BigCommerceApiClient : IBigCommerceApiClient
             case "brands":
                 // Brands API doesn't support channel_id or tree_id parameters
                 break;
+        }
+        
+        // Add any additional parameters from the request
+        if (request.AdditionalParams != null && request.AdditionalParams.Any())
+        {
+            foreach (var param in request.AdditionalParams)
+            {
+                queryParams.Add($"{param.Key}={param.Value}");
+            }
         }
         
         return $"{baseUrl}/{endpoint}?{string.Join("&", queryParams)}";

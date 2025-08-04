@@ -494,6 +494,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IEntityCreateService, EntityCreateService>();
         services.AddSingleton<IEntityMappingService, EntityMappingService>();
         services.AddSingleton<IEntityErrorHandlingService, EntityErrorHandlingService>();
+        
+        // 🔗 HYBRID TWO-PHASE: Register category parent relationship service for Phase 2
+        services.AddSingleton<ICategoryParentRelationshipService, CategoryParentRelationshipService>();
 
         // Register API authentication services
         services.AddSingleton<IApiKeyService, ApiKeyService>();

@@ -35,9 +35,14 @@ public class EntityCreationStrategyFactory : IEntityCreationStrategyFactory
 
         _logger.LogDebug("Selecting creation strategy for entity type: {EntityType}", entityType);
 
+        // Normalize entity type to handle sub-orchestrator types
+        var normalizedEntityType = entityType.Equals("categories-level", StringComparison.OrdinalIgnoreCase) 
+            ? "categories" 
+            : entityType;
+
         // Find strategy that matches entity type (case-insensitive)
         var strategy = _strategies.FirstOrDefault(s => 
-            s.EntityType.Equals(entityType, StringComparison.OrdinalIgnoreCase));
+            s.EntityType.Equals(normalizedEntityType, StringComparison.OrdinalIgnoreCase));
 
         if (strategy == null)
         {

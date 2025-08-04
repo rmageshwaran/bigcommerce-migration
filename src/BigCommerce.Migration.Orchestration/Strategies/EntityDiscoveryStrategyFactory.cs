@@ -16,6 +16,7 @@ public class EntityDiscoveryStrategyFactory : IEntityDiscoveryStrategyFactory
     private readonly ILogger<V2DirectPaginationStrategy> _v2Logger;
     private readonly ILogger<V3EfficientPaginationStrategy> _v3EfficientLogger;
     private readonly ILogger<V3HierarchicalStrategy> _v3HierarchicalLogger;
+    private readonly ILogger<LevelByLevelCategoryStrategy> _levelByLevelLogger;
 
     /// <summary>
     /// Initializes a new instance of EntityDiscoveryStrategyFactory
@@ -25,18 +26,21 @@ public class EntityDiscoveryStrategyFactory : IEntityDiscoveryStrategyFactory
     /// <param name="v2Logger">Logger for V2 strategy</param>
     /// <param name="v3EfficientLogger">Logger for V3 efficient strategy</param>
     /// <param name="v3HierarchicalLogger">Logger for V3 hierarchical strategy</param>
+    /// <param name="levelByLevelLogger">Logger for Level-by-Level category strategy</param>
     public EntityDiscoveryStrategyFactory(
         IBigCommerceApiClient apiClient,
         ILogger<EntityDiscoveryStrategyFactory> logger,
         ILogger<V2DirectPaginationStrategy> v2Logger,
         ILogger<V3EfficientPaginationStrategy> v3EfficientLogger,
-        ILogger<V3HierarchicalStrategy> v3HierarchicalLogger)
+        ILogger<V3HierarchicalStrategy> v3HierarchicalLogger,
+        ILogger<LevelByLevelCategoryStrategy> levelByLevelLogger)
     {
         _apiClient = apiClient ?? throw new ArgumentNullException(nameof(apiClient));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _v2Logger = v2Logger ?? throw new ArgumentNullException(nameof(v2Logger));
         _v3EfficientLogger = v3EfficientLogger ?? throw new ArgumentNullException(nameof(v3EfficientLogger));
         _v3HierarchicalLogger = v3HierarchicalLogger ?? throw new ArgumentNullException(nameof(v3HierarchicalLogger));
+        _levelByLevelLogger = levelByLevelLogger ?? throw new ArgumentNullException(nameof(levelByLevelLogger));
     }
 
     /// <summary>
@@ -91,11 +95,13 @@ public class EntityDiscoveryStrategyFactory : IEntityDiscoveryStrategyFactory
     /// <returns>V3 strategy instance</returns>
     private IEntityDiscoveryStrategy CreateV3Strategy(string entityType)
     {
-        // 🎯 EXPLICIT STRATEGY SELECTION: Ensure correct processing approach
-        if (IsHierarchicalEntity(entityType))
+        // 🎯 ENHANCED STRATEGY SELECTION: Use optimized strategies based on entity characteristics
+        if (entityType.Equals("categories", StringComparison.OrdinalIgnoreCase) || 
+            entityType.Equals("categories-level", StringComparison.OrdinalIgnoreCase))
         {
-            _logger.LogInformation("📋 Creating V3 hierarchical strategy for {EntityType} - will use ID-based batching with full data caching", entityType);
-            return new V3HierarchicalStrategy(_apiClient, _v3HierarchicalLogger);
+            _logger.LogInformation("🚀 Creating Level-by-Level strategy for {EntityType} - will use level-by-level processing with same orchestrator workflow for each level", entityType);
+            // ✅ PROPER FIX: Use properly injected logger following same pattern as other strategies
+            return new LevelByLevelCategoryStrategy(_apiClient, _levelByLevelLogger);
         }
         else
         {
@@ -106,15 +112,21 @@ public class EntityDiscoveryStrategyFactory : IEntityDiscoveryStrategyFactory
 
     /// <summary>
     /// Determines if an entity type requires hierarchical processing
+    /// UPDATED: Categories now use page-based processing like other entities for better performance
     /// </summary>
     /// <param name="entityType">The entity type to check</param>
     /// <returns>True if hierarchical, false otherwise</returns>
     private static bool IsHierarchicalEntity(string entityType)
     {
-        // 🎯 EXPLICIT HIERARCHICAL ENTITIES: Only categories require hierarchical processing
-        // All other entities (brands, products, etc.) use simple page-by-page processing
-        var isHierarchical = entityType.Equals("categories", StringComparison.OrdinalIgnoreCase);
+        // 🚀 PERFORMANCE FIX: All entities now use page-based processing to avoid memory issues and race conditions
+        // Categories will use Phase 1 (page-based bulk creation) + Phase 2 (parent relationship fixup)
+        // This eliminates loading all entities into memory and prevents race conditions
         
-        return isHierarchical;
+        // No entities use hierarchical processing during discovery anymore
+        return false;
+        
+        // OLD CODE (caused race conditions):
+        // var isHierarchical = entityType.Equals("categories", StringComparison.OrdinalIgnoreCase);
+        // return isHierarchical;
     }
 } 

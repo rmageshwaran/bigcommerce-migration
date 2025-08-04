@@ -34,6 +34,11 @@ namespace BigCommerce.Migration.Core.Services
         EntityProgressEvent CreateEntityProgress(string migrationId, EntityProgressOptions options);
         
         /// <summary>
+        /// Creates a TwoPhaseEntityProgressEvent for entities requiring two-phase processing
+        /// </summary>
+        TwoPhaseEntityProgressEvent CreateTwoPhaseEntityProgress(string migrationId, TwoPhaseEntityProgressOptions options);
+        
+        /// <summary>
         /// Creates an ErrorProgressEvent with consistent properties and validation
         /// </summary>
         ErrorProgressEvent CreateErrorProgress(string migrationId, ErrorProgressOptions options);
@@ -185,6 +190,98 @@ namespace BigCommerce.Migration.Core.Services
             };
 
             return entityEvent;
+        }
+
+        /// <summary>
+        /// Creates a TwoPhaseEntityProgressEvent with auto-populated base properties
+        /// </summary>
+        public TwoPhaseEntityProgressEvent CreateTwoPhaseEntityProgress(string migrationId, TwoPhaseEntityProgressOptions options)
+        {
+            ValidateMigrationId(migrationId);
+            ValidateRequired(options, nameof(options));
+
+            var twoPhaseEvent = new TwoPhaseEntityProgressEvent
+            {
+                // Base properties (auto-populated)
+                MigrationId = migrationId,
+                Timestamp = _dateTimeProvider.UtcNow,
+                IsCancelled = options.IsCancelled,
+                CancellationReason = options.CancellationReason,
+                CancelledAt = options.CancelledAt,
+                ConnectionId = null, // Typically broadcast to all
+                GroupName = null,    // Typically broadcast to all
+                
+                // Two-phase specific properties
+                EntityType = options.EntityType ?? throw new ArgumentException("EntityType is required", nameof(options)),
+                CurrentPhase = options.CurrentPhase,
+                TotalPhases = 2, // Always 2 for current implementation
+                Phase1 = options.Phase1 ?? new PhaseProgress(),
+                Phase2 = options.Phase2,
+                Overall = options.Overall ?? new TwoPhaseOverallProgress(),
+                PhaseDescription = options.PhaseDescription ?? "",
+                
+                // Standard EntityProgressEvent compatibility fields (populated from Overall statistics)
+                TotalCount = options.Overall?.TotalEntities ?? 0,
+                ProcessedCount = (options.Overall?.FullySuccessfulEntities ?? 0) + 
+                               (options.Overall?.PartiallySuccessfulEntities ?? 0) + 
+                               (options.Overall?.FailedEntities ?? 0),
+                SuccessCount = options.Overall?.FullySuccessfulEntities ?? 0, // Only count fully successful
+                FailureCount = (options.Overall?.PartiallySuccessfulEntities ?? 0) + 
+                              (options.Overall?.FailedEntities ?? 0), // Count partial + failed
+                Status = DetermineOverallStatus(options),
+                ProcessingTime = options.Overall?.TotalDuration
+            };
+
+            // Generate detailed status message
+            twoPhaseEvent.DetailedStatus = GenerateDetailedStatus(twoPhaseEvent);
+
+            return twoPhaseEvent;
+        }
+
+        /// <summary>
+        /// Determines the overall status for a two-phase entity progress event
+        /// </summary>
+        private static string DetermineOverallStatus(TwoPhaseEntityProgressOptions options)
+        {
+            if (options.IsCancelled) return "cancelled";
+            
+            return options.CurrentPhase switch
+            {
+                1 when options.Phase1?.Status == "processing" => "phase1_processing",
+                1 when options.Phase1?.Status == "completed" && options.Phase2 == null => "phase1_completed",
+                2 when options.Phase2?.Status == "processing" => "phase2_processing", 
+                2 when options.Phase2?.Status == "completed" => "completed",
+                2 when options.Phase2?.Status == "failed" => "phase2_failed",
+                _ => "processing"
+            };
+        }
+
+        /// <summary>
+        /// Generates a detailed status message for UI display
+        /// </summary>
+        private static string GenerateDetailedStatus(TwoPhaseEntityProgressEvent eventData)
+        {
+            var overall = eventData.Overall;
+            var phase1 = eventData.Phase1;
+            var phase2 = eventData.Phase2;
+
+            if (eventData.IsCancelled)
+                return $"Migration cancelled: {eventData.CancellationReason}";
+
+            if (eventData.CurrentPhase == 1)
+            {
+                return $"Phase 1 (Creation): {phase1.SuccessfulEntities}/{phase1.TotalEntities} categories created ({phase1.Progress:F1}%)";
+            }
+            else if (eventData.CurrentPhase == 2 && phase2 != null)
+            {
+                return $"Phase 2 (Relationships): {phase2.SuccessfulEntities}/{phase2.TotalEntities} relationships fixed ({phase2.Progress:F1}%). " +
+                       $"Overall: {overall.FullySuccessfulEntities}/{overall.TotalEntities} fully migrated ({overall.OverallProgress:F1}%)";
+            }
+            else
+            {
+                return $"Migration completed: {overall.FullySuccessfulEntities}/{overall.TotalEntities} fully successful, " +
+                       $"{overall.PartiallySuccessfulEntities} partial, {overall.FailedEntities} failed";
+            }
         }
 
         /// <summary>

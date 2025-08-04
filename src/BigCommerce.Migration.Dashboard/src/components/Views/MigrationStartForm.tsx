@@ -33,6 +33,7 @@ interface MigrationFormData {
     // Product Data Migration
     brands: boolean;
     categories: boolean;
+    products: boolean;
     priceLists: boolean;
     promotions: boolean;
     
@@ -130,6 +131,7 @@ export const MigrationStartForm: React.FC = () => {
       couponCodes: false,
       brands: false,
       categories: false,
+      products: false,
       priceLists: false,
       promotions: false,
       orders: false,
@@ -216,6 +218,7 @@ export const MigrationStartForm: React.FC = () => {
           couponCodes: false,
           brands: false,
           categories: false,
+          products: false,
           priceLists: false,
           promotions: false,
           orders: false,
@@ -251,6 +254,7 @@ export const MigrationStartForm: React.FC = () => {
       entities: [
         { key: 'brands' as const, label: 'Brands' },
         { key: 'categories' as const, label: 'Categories' },
+        { key: 'products' as const, label: 'Products' },
         { key: 'priceLists' as const, label: 'Price Lists' },
         { key: 'promotions' as const, label: 'Promotions' },
       ],

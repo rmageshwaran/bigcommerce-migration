@@ -135,18 +135,29 @@ public class CategoryCreationStrategy : IEntityCreationStrategy
             var inputCount = entities.Count;
             var createdCount = result?.Count ?? 0;
             
-            // Log detailed response information
+            // Log detailed response information with full entity structure debugging
             if (result != null && result.Any())
             {
-                for (int i = 0; i < result.Count; i++)
+                for (int i = 0; i < Math.Min(3, result.Count); i++) // Log first 3 entities for debugging
                 {
                     var created = result[i];
-                    var createdId = created.GetValueOrDefault("id")?.ToString() ?? "unknown";
+                    var createdId = created.GetValueOrDefault("category_id")?.ToString() ?? "unknown"; // 🔧 FIX: Use category_id
                     var createdName = created.GetValueOrDefault("name")?.ToString() ?? "";
                     var createdParentId = created.GetValueOrDefault("parent_id")?.ToString() ?? "0";
                     
-                    _logger.LogDebug("🏷️ [CAT-{ExecutionId}] OUTPUT[{Index}]: ID={CreatedId}, Name='{CreatedName}', ParentId={CreatedParentId}", 
+                    _logger.LogInformation("🏷️ [CAT-{ExecutionId}] OUTPUT[{Index}]: ID={CreatedId}, Name='{CreatedName}', ParentId={CreatedParentId}", 
                         executionId, i, createdId, createdName, createdParentId);
+                    
+                    // 🔍 ENTITY STRUCTURE DEBUG: Log all keys in the created entity
+                    var entityKeys = string.Join(", ", created.Keys);
+                    _logger.LogInformation("🔍 [ENTITY-STRUCTURE] Entity {Index} keys: {Keys}", i, entityKeys);
+                    
+                    // 🔍 FULL ENTITY DEBUG: Log the complete entity structure (first entity only)
+                    if (i == 0)
+                    {
+                        var entityJson = System.Text.Json.JsonSerializer.Serialize(created);
+                        _logger.LogInformation("🔍 [FULL-ENTITY] Complete entity structure: {EntityJson}", entityJson);
+                    }
                 }
             }
             
@@ -168,8 +179,8 @@ public class CategoryCreationStrategy : IEntityCreationStrategy
                     executionId, createdCount, inputCount, migrationId, failedCount);
                 
                 // Log which categories were created vs failed for debugging
-                var createdIds = result.Select(r => r.GetValueOrDefault("id")?.ToString() ?? "unknown").ToList();
-                var inputIds = entities.Select(e => e.GetValueOrDefault("id")?.ToString() ?? "unknown").ToList();
+                var createdIds = result.Select(r => r.GetValueOrDefault("category_id")?.ToString() ?? "unknown").ToList(); // 🔧 FIX: Use category_id
+                var inputIds = entities.Select(e => e.GetValueOrDefault("category_id")?.ToString() ?? "unknown").ToList(); // 🔧 FIX: Use category_id
                 var failedIds = inputIds.Except(createdIds).ToList();
                 
                 _logger.LogWarning("🏷️ [CAT-{ExecutionId}] 📊 FAILED IDs: {FailedIds}", executionId, string.Join(", ", failedIds));

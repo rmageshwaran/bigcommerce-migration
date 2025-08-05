@@ -85,6 +85,10 @@ public static class ServiceCollectionExtensions
         // ✅ Register error message formatter (SOLID: Single Responsibility)
         services.AddSingleton<IErrorMessageFormatter, ErrorMessageFormatter>();
         
+        // 🚀 SUB-BATCH PROCESSING: Register sub-batch configuration and processing services
+        services.AddSingleton<ISubBatchConfigurationService, SubBatchConfigurationService>();
+        services.AddScoped<ISubBatchProcessor, SubBatchProcessor>();
+        
         // Register entity discovery strategy pattern implementations (Task 2.3.3 - COMPLETED)
         services.AddSingleton<IEntityDiscoveryStrategyFactory, EntityDiscoveryStrategyFactory>();
         services.AddSingleton<V2DirectPaginationStrategy>();

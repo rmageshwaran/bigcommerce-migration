@@ -1,6 +1,7 @@
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
 using Microsoft.Extensions.Logging;
+using BigCommerce.Migration.Orchestration.Services;
 
 namespace BigCommerce.Migration.Orchestration.Services.EntityCreation;
 
@@ -12,11 +13,19 @@ public class ProductCreationStrategy : IEntityCreationStrategy
 {
     private readonly IBigCommerceApiClient _apiClient;
     private readonly ILogger<ProductCreationStrategy> _logger;
+    private readonly ISubBatchConfigurationService _configService;
+    private readonly ISubBatchProcessor _subBatchProcessor;
 
-    public ProductCreationStrategy(IBigCommerceApiClient apiClient, ILogger<ProductCreationStrategy> logger)
+    public ProductCreationStrategy(
+        IBigCommerceApiClient apiClient, 
+        ILogger<ProductCreationStrategy> logger,
+        ISubBatchConfigurationService configService,
+        ISubBatchProcessor subBatchProcessor)
     {
         _apiClient = apiClient ?? throw new ArgumentNullException(nameof(apiClient));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _configService = configService ?? throw new ArgumentNullException(nameof(configService));
+        _subBatchProcessor = subBatchProcessor ?? throw new ArgumentNullException(nameof(subBatchProcessor));
     }
 
     /// <summary>
@@ -55,20 +64,54 @@ public class ProductCreationStrategy : IEntityCreationStrategy
             // Validate store configuration
             ValidateStoreConfiguration(destinationStore);
 
-            // Log product details for debugging
-            foreach (var product in entities)
+            // 🚀 SUB-BATCH PROCESSING: Use configured sub-batching for optimal rate limiting
+            var config = _configService.GetConfiguration("products");
+            
+            _logger.LogInformation("🚀 [PROD-{ExecutionId}] Starting SUB-BATCH creation of {ProductCount} products " +
+                                 "using sub-batches of {SubBatchSize} with max {MaxConcurrency} concurrent for migration {MigrationId}", 
+                executionId, entities.Count, config.SubBatchSize, config.MaxConcurrency, migrationId);
+
+            // Sub-batch processor function that calls API client for each sub-batch
+            async Task<List<Dictionary<string, object>>> SubBatchProductProcessor(List<Dictionary<string, object>> subBatch, CancellationToken ct)
             {
-                var productName = product.TryGetValue("name", out var name) ? name?.ToString() : "unknown";
-                var sku = product.TryGetValue("sku", out var skuValue) ? skuValue?.ToString() : "no-sku";
-                
-                _logger.LogDebug("📦 [PROD-{ExecutionId}] Creating product: Name='{ProductName}', SKU='{Sku}' in migration {MigrationId}",
-                    executionId, productName, sku, migrationId);
+                try
+                {
+                    _logger.LogDebug("📦 [PROD-{ExecutionId}] Processing sub-batch of {SubBatchSize} products (SUB-BATCH) in migration {MigrationId}",
+                        executionId, subBatch.Count, migrationId);
+
+                    // Log product details for debugging
+                    foreach (var product in subBatch)
+                    {
+                        var productName = product.TryGetValue("name", out var name) ? name?.ToString() : "unknown";
+                        var sku = product.TryGetValue("sku", out var skuValue) ? skuValue?.ToString() : "no-sku";
+                        
+                        _logger.LogDebug("📦 [PROD-{ExecutionId}] Sub-batch product: Name='{ProductName}', SKU='{Sku}' in migration {MigrationId}",
+                            executionId, productName, sku, migrationId);
+                    }
+
+                    // Create sub-batch using the API client
+                    var subBatchResult = await _apiClient.CreateProductsAsync(destinationStore, subBatch, ct);
+
+                    _logger.LogDebug("✅ [PROD-{ExecutionId}] Sub-batch completed: {CreatedCount}/{SubBatchSize} products created for migration {MigrationId}", 
+                        executionId, subBatchResult?.Count ?? 0, subBatch.Count, migrationId);
+
+                    return subBatchResult ?? new List<Dictionary<string, object>>();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "❌ [PROD-{ExecutionId}] Sub-batch failed for {SubBatchSize} products: {ErrorMessage}",
+                        executionId, subBatch.Count, ex.Message);
+                    
+                    // Return empty list for failed sub-batch to continue with other sub-batches
+                    return new List<Dictionary<string, object>>();
+                }
             }
 
-            // Create products using the API client
-            var result = await _apiClient.CreateProductsAsync(destinationStore, entities, cancellationToken);
+            // Process products using sub-batch processor
+            var result = await _subBatchProcessor.ProcessInSubBatchesAsync(
+                entities, config, SubBatchProductProcessor, "products", migrationId, cancellationToken);
 
-            _logger.LogInformation("✅ [PROD-{ExecutionId}] Successfully created {CreatedCount} products for migration {MigrationId}", 
+            _logger.LogInformation("✅ [PROD-{ExecutionId}] SUB-BATCH processing completed: {CreatedCount} products created successfully for migration {MigrationId}", 
                 executionId, result?.Count ?? 0, migrationId);
 
             return result;

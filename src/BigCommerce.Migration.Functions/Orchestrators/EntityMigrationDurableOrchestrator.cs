@@ -194,6 +194,21 @@ public static class EntityMigrationDurableOrchestrator
                 var chunkEntityIds = useDirectPagination 
                     ? new List<string>() // Direct pagination doesn't use pre-fetched IDs
                     : entityIds.Skip(startIndex).Take(actualChunkSize).ToList();
+                
+                // 🚨 CRITICAL FIX: For direct pagination, adjust pagination metadata for chunk boundaries
+                var chunkPaginationMetadata = new Dictionary<string, object>();
+                if (useDirectPagination && discoverResult?.PaginationMetadata != null)
+                {
+                    // Copy original metadata
+                    foreach (var kvp in discoverResult.PaginationMetadata)
+                    {
+                        chunkPaginationMetadata[kvp.Key] = kvp.Value;
+                    }
+                    // Override with chunk-specific values
+                    chunkPaginationMetadata["TotalCount"] = actualChunkSize; // Limit each chunk to its size
+                    chunkPaginationMetadata["StartIndex"] = startIndex;
+                    chunkPaginationMetadata["ChunkSize"] = actualChunkSize;
+                }
 
                 var chunkRequest = new ProcessEntityChunkRequest
                 {
@@ -208,7 +223,7 @@ public static class EntityMigrationDurableOrchestrator
                     DestinationStore = input.DestinationStore ?? new StoreConfiguration(),
                     CategoryTreeContext = input.CategoryTreeContext ?? new CategoryTreeContext(),
                     UseDirectPagination = useDirectPagination,
-                    PaginationMetadata = discoverResult?.PaginationMetadata,
+                    PaginationMetadata = useDirectPagination ? chunkPaginationMetadata : discoverResult?.PaginationMetadata,
                     IsCancelled = input.IsCancelled,
                     CancellationReason = input.CancellationReason ?? string.Empty,
                     CancelledAt = input.CancelledAt

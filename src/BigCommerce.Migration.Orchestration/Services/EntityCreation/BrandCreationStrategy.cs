@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using System.Text.Json;
 using System.Threading;
 using System.Text.Json.Serialization;
+using BigCommerce.Migration.Orchestration.Services;
 
 namespace BigCommerce.Migration.Orchestration.Services.EntityCreation;
 
@@ -17,12 +18,21 @@ public class BrandCreationStrategy : IEntityCreationStrategy
     private readonly IApiRequestHandler _apiRequestHandler;
     private readonly ILogger<BrandCreationStrategy> _logger;
     private readonly IEntityErrorHandlingService _errorHandlingService;
+    private readonly ISubBatchConfigurationService _configService;
+    private readonly ISubBatchProcessor _subBatchProcessor;
 
-    public BrandCreationStrategy(IApiRequestHandler apiRequestHandler, ILogger<BrandCreationStrategy> logger, IEntityErrorHandlingService errorHandlingService)
+    public BrandCreationStrategy(
+        IApiRequestHandler apiRequestHandler, 
+        ILogger<BrandCreationStrategy> logger, 
+        IEntityErrorHandlingService errorHandlingService,
+        ISubBatchConfigurationService configService,
+        ISubBatchProcessor subBatchProcessor)
     {
         _apiRequestHandler = apiRequestHandler ?? throw new ArgumentNullException(nameof(apiRequestHandler));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _errorHandlingService = errorHandlingService ?? throw new ArgumentNullException(nameof(errorHandlingService));
+        _configService = configService ?? throw new ArgumentNullException(nameof(configService));
+        _subBatchProcessor = subBatchProcessor ?? throw new ArgumentNullException(nameof(subBatchProcessor));
     }
 
     /// <summary>
@@ -60,25 +70,28 @@ public class BrandCreationStrategy : IEntityCreationStrategy
 
         try
         {
-            // 🚀 PARALLEL PROCESSING FIX: Process brands in parallel instead of sequential for-loop
-            _logger.LogInformation("🚀 [BRAND-{ExecutionId}] Starting PARALLEL creation of {BrandCount} brands for migration {MigrationId}", 
-                executionId, entities.Count, migrationId);
+            // 🚀 SUB-BATCH PROCESSING: Use configured sub-batching for optimal rate limiting
+            var config = _configService.GetConfiguration("brands");
+            
+            _logger.LogInformation("🚀 [BRAND-{ExecutionId}] Starting SUB-BATCH creation of {BrandCount} brands " +
+                                 "using sub-batches of {SubBatchSize} with max {MaxConcurrency} concurrent for migration {MigrationId}", 
+                executionId, entities.Count, config.SubBatchSize, config.MaxConcurrency, migrationId);
 
-            // Create tasks for parallel brand creation
-            var brandCreationTasks = entities.Select(async (brand, index) =>
+            // Individual brand processor function
+            async Task<Dictionary<string, object>?> IndividualBrandProcessor(Dictionary<string, object> brand, CancellationToken ct)
             {
                 try
                 {
                     var brandName = brand.TryGetValue("name", out var name) ? name?.ToString() : "unknown";
-                    _logger.LogDebug("🏪 [BRAND-{ExecutionId}] Creating brand {Index}/{Total}: '{BrandName}' (PARALLEL) in migration {MigrationId}",
-                        executionId, index + 1, entities.Count, brandName, migrationId);
+                    _logger.LogDebug("🏪 [BRAND-{ExecutionId}] Creating brand '{BrandName}' (SUB-BATCH) in migration {MigrationId}",
+                        executionId, brandName, migrationId);
 
-                    var createdBrand = await CreateSingleBrandAsync(destinationStore, brand, cancellationToken);
+                    var createdBrand = await CreateSingleBrandAsync(destinationStore, brand, ct);
                     
                     if (createdBrand != null)
                     {
-                        _logger.LogDebug("✅ [BRAND-{ExecutionId}] Successfully created brand {Index}/{Total}: '{BrandName}' (PARALLEL) in migration {MigrationId}",
-                            executionId, index + 1, entities.Count, brandName, migrationId);
+                        _logger.LogDebug("✅ [BRAND-{ExecutionId}] Successfully created brand '{BrandName}' (SUB-BATCH) in migration {MigrationId}",
+                            executionId, brandName, migrationId);
                     }
                     
                     return createdBrand;
@@ -88,32 +101,27 @@ public class BrandCreationStrategy : IEntityCreationStrategy
                     var brandName = brand.TryGetValue("name", out var name) ? name?.ToString() : "unknown";
                     var brandId = brand.TryGetValue("id", out var id) ? id?.ToString() : "unknown";
                     
-                    _logger.LogError(ex, "🏪 [BRAND-{ExecutionId}] ❌ Failed to create brand '{BrandName}' (ID: {BrandId}) (PARALLEL) in migration {MigrationId}",
+                    _logger.LogError(ex, "🏪 [BRAND-{ExecutionId}] ❌ Failed to create brand '{BrandName}' (ID: {BrandId}) (SUB-BATCH) in migration {MigrationId}",
                         executionId, brandName, brandId, migrationId);
 
-                    // Handle errors gracefully in parallel processing - don't throw, return null
-                    // We'll filter out nulls later and log the overall failure count
+                    // Return null for failed brands - sub-batch processor will filter them out
                     return null;
                 }
-            }).ToArray();
+            }
 
-            // Wait for all brand creation tasks to complete in parallel
-            _logger.LogInformation("⏳ [BRAND-{ExecutionId}] Awaiting {TaskCount} parallel brand creation tasks for migration {MigrationId}", 
-                executionId, brandCreationTasks.Length, migrationId);
-                
-            var createdBrandResults = await Task.WhenAll(brandCreationTasks);
+            // Process brands using sub-batch processor
+            var createdBrands = await _subBatchProcessor.ProcessIndividuallyInSubBatchesAsync(
+                entities, config, IndividualBrandProcessor, "brands", migrationId, cancellationToken);
             
-            // Filter out null results (failed brands) and collect successful ones
-            var createdBrands = createdBrandResults.Where(brand => brand != null).ToList();
             var failedCount = entities.Count - createdBrands.Count;
             
             if (failedCount > 0)
             {
-                _logger.LogWarning("⚠️ [BRAND-{ExecutionId}] {FailedCount}/{TotalCount} brand creations failed during parallel processing for migration {MigrationId}", 
+                _logger.LogWarning("⚠️ [BRAND-{ExecutionId}] {FailedCount}/{TotalCount} brand creations failed during sub-batch processing for migration {MigrationId}", 
                     executionId, failedCount, entities.Count, migrationId);
             }
 
-            _logger.LogInformation("✅ [BRAND-{ExecutionId}] PARALLEL processing completed: {CreatedCount}/{TotalCount} brands created successfully for migration {MigrationId}", 
+            _logger.LogInformation("✅ [BRAND-{ExecutionId}] SUB-BATCH processing completed: {CreatedCount}/{TotalCount} brands created successfully for migration {MigrationId}", 
                 executionId, createdBrands.Count, entities.Count, migrationId);
 
             return createdBrands;

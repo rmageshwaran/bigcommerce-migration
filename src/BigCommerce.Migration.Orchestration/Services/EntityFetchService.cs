@@ -44,11 +44,24 @@ public class EntityFetchService : IEntityFetchService
 
         try
         {
+            // 🚨 DEBUG: Log routing decision for chunks
+            _logger.LogDebug("🔀 [FETCH-ROUTING] EntityType={EntityType}, UseDirectPagination={UseDirectPagination}, EntityIds.Count={EntityIdsCount}, BatchNumber={BatchNumber}", 
+                request.EntityType, request.UseDirectPagination, request.EntityIds?.Count ?? 0, request.BatchNumber);
+            
             // Handle direct pagination for efficient strategies (empty EntityIds but has UseDirectPagination)
             if (request.UseDirectPagination && (!request.EntityIds.Any() || request.EntityIds.First().StartsWith("page-")))
             {
-                _logger.LogDebug("Using direct pagination for {EntityType} batch {BatchNumber} in migration {MigrationId}", 
+                _logger.LogInformation("🎯 [FETCH-ROUTING] Using direct pagination for {EntityType} batch {BatchNumber} in migration {MigrationId}", 
                     request.EntityType, request.BatchNumber, request.MigrationId);
+                
+                return await FetchEntitiesWithDirectPaginationAsync(request, cancellationToken);
+            }
+            
+            // 🚨 FORCE BRANDS TO USE DIRECT PAGINATION TO FIX SUB-BATCH DUPLICATION
+            if (request.EntityType.Equals("brands", StringComparison.OrdinalIgnoreCase) && request.UseDirectPagination)
+            {
+                _logger.LogInformation("🚀 [FETCH-ROUTING] FORCING brands to use direct pagination for batch {BatchNumber} in migration {MigrationId}", 
+                    request.BatchNumber, request.MigrationId);
                 
                 return await FetchEntitiesWithDirectPaginationAsync(request, cancellationToken);
             }
@@ -64,8 +77,8 @@ public class EntityFetchService : IEntityFetchService
 
             // 🎯 STRATEGY PATTERN: Delegate to appropriate strategy for entity ID-based fetching
             // This eliminates OCP violation - new entity types can be added without modifying this code
-            _logger.LogInformation("❌ Using fetch strategy for {EntityType} batch {BatchNumber} in migration {MigrationId} (no cached data available)", 
-                request.EntityType, request.BatchNumber, request.MigrationId);
+            _logger.LogInformation("🚨 [FETCH-ROUTING] Using fetch strategy for {EntityType} batch {BatchNumber} in migration {MigrationId} - UseDirectPagination={UseDirectPagination}, EntityIds.Count={EntityIdsCount}", 
+                request.EntityType, request.BatchNumber, request.MigrationId, request.UseDirectPagination, request.EntityIds?.Count ?? 0);
             
             var strategy = _strategyFactory.GetStrategy(request.EntityType);
             
@@ -201,6 +214,21 @@ public class EntityFetchService : IEntityFetchService
         var requestedChunkSize = request.EntityIds?.Count ?? 0;
         var isChunkedRequest = requestedChunkSize == 0 && request.PaginationMetadata?.ContainsKey("TotalCount") == true;
         
+        // 🚨 DEBUG: Log all pagination metadata to diagnose chunk duplication
+        if (request.PaginationMetadata != null)
+        {
+            foreach (var kvp in request.PaginationMetadata)
+            {
+                _logger.LogDebug("🔍 [FETCH-METADATA] {Key}={Value} for {EntityType} batch {BatchNumber}", 
+                    kvp.Key, kvp.Value, request.EntityType, request.BatchNumber);
+            }
+        }
+        else
+        {
+            _logger.LogDebug("🔍 [FETCH-METADATA] No PaginationMetadata for {EntityType} batch {BatchNumber}", 
+                request.EntityType, request.BatchNumber);
+        }
+        
         // Use appropriate batch size based on request type
         var batchSize = 50; // Default to 50
         
@@ -224,8 +252,55 @@ public class EntityFetchService : IEntityFetchService
             batchSize = Math.Min(500, totalCount); // Chunked: use total count (max 500)
         }
         
-        _logger.LogDebug("🔧 [FETCH] Using page size {PageSize} for {EntityType} (ChunkedRequest: {IsChunked}, RequestedChunkSize: {RequestedChunkSize})", 
-            batchSize, request.EntityType, isChunkedRequest, requestedChunkSize);
+        // 🚨 CHUNK FIX: Calculate correct page offset for chunked requests
+        var startIndex = 0;
+        var chunkSize = batchSize;
+        
+        if (isChunkedRequest && request.PaginationMetadata != null)
+        {
+            // Extract chunk-specific metadata
+            if (request.PaginationMetadata.TryGetValue("StartIndex", out var startIndexObj))
+            {
+                if (startIndexObj is System.Text.Json.JsonElement startJsonElement)
+                {
+                    startIndex = startJsonElement.TryGetInt32(out var startValue) ? startValue : 0;
+                }
+                else if (startIndexObj is int directStartInt)
+                {
+                    startIndex = directStartInt;
+                }
+                else if (int.TryParse(startIndexObj?.ToString(), out var parsedStartInt))
+                {
+                    startIndex = parsedStartInt;
+                }
+            }
+            
+            if (request.PaginationMetadata.TryGetValue("ChunkSize", out var chunkSizeObj))
+            {
+                if (chunkSizeObj is System.Text.Json.JsonElement chunkJsonElement)
+                {
+                    chunkSize = chunkJsonElement.TryGetInt32(out var chunkValue) ? chunkValue : batchSize;
+                }
+                else if (chunkSizeObj is int directChunkInt)
+                {
+                    chunkSize = directChunkInt;
+                }
+                else if (int.TryParse(chunkSizeObj?.ToString(), out var parsedChunkInt))
+                {
+                    chunkSize = parsedChunkInt;
+                }
+            }
+            
+            // Calculate the correct page for this chunk
+            pageNumber = (startIndex / 50) + 1; // Assuming 50 entities per page
+            batchSize = chunkSize; // Use the actual chunk size for this request
+        }
+        
+        _logger.LogDebug("🔧 [FETCH] Using page size {PageSize} for {EntityType} (ChunkedRequest: {IsChunked}, StartIndex: {StartIndex}, ChunkSize: {ChunkSize})", 
+            batchSize, request.EntityType, isChunkedRequest, startIndex, chunkSize);
+        
+        _logger.LogDebug("🔧 [FETCH-FINAL] Page={PageNumber}, Limit={Limit}, BatchNumber={BatchNumber} for {EntityType} in migration {MigrationId}", 
+            pageNumber, batchSize, request.BatchNumber, request.EntityType, request.MigrationId);
         
         _logger.LogDebug("Fetching page {PageNumber} for {EntityType} using direct pagination (limit={Limit}) in migration {MigrationId}", 
             pageNumber, request.EntityType, batchSize, request.MigrationId);

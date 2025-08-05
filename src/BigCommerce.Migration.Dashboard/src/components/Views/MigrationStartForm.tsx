@@ -218,6 +218,7 @@ export const MigrationStartForm: React.FC = () => {
           couponCodes: false,
           brands: false,
           categories: false,
+          products: false,
           priceLists: false,
           promotions: false,
           orders: false,

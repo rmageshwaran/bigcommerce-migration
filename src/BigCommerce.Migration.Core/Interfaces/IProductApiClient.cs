@@ -22,17 +22,8 @@ public interface IProductApiClient
         int limit = 50, 
         CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// Creates products in a specific store and channel
-    /// </summary>
-    /// <param name="storeConfig">Store configuration with credentials</param>
-    /// <param name="products">Products to create</param>
-    /// <param name="cancellationToken">Cancellation token</param>
-    /// <returns>List of created products</returns>
-    Task<List<Dictionary<string, object>>> CreateProductsAsync(
-        StoreConfiguration storeConfig, 
-        List<Dictionary<string, object>> products, 
-        CancellationToken cancellationToken = default);
+    // NOTE: CreateProductsAsync method removed - individual product processing
+    // is now handled directly in ProductCreationStrategy.CreateSingleProductAsync
 
     /// <summary>
     /// Gets product variants for a specific product

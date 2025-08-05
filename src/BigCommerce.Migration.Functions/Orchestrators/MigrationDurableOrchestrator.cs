@@ -440,15 +440,13 @@ public static class MigrationDurableOrchestrator
 
     private static List<string> GetEntityDependencyOrder(IEnumerable<string> requestedEntities)
     {
-        // Define the complete dependency order
+        // 🎯 FOCUSED TESTING: Only brands and products for function timeout testing
+        // Categories hardcoded in ProductTransformStrategy (ID: 14988)
+        // Other entities (variants, images, modifiers) disabled for focused testing
         var fullDependencyOrder = new[]
         {
-            "categories",  // Must be first - referenced by products
             "brands",      // Must be before products - referenced by products  
-            "products",    // Must be before variants and images
-            "variants",    // Depends on products
-            "images",      // Can reference products and variants
-            "modifiers"    // Product modifiers/options
+            "products"     // Focus on product migration performance and timeout testing
         };
 
         // Filter to only include requested entities while maintaining order

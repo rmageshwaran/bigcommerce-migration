@@ -194,83 +194,8 @@ public class BigCommerceApiClient : IBigCommerceApiClient
         }
     }
 
-    /// <summary>
-    /// Creates products in a specific store and channel
-    /// Note: BigCommerce API requires individual product creation, not batch
-    /// </summary>
-    public async Task<List<Dictionary<string, object>>> CreateProductsAsync(StoreConfiguration storeConfig, List<Dictionary<string, object>> products, CancellationToken cancellationToken = default)
-    {
-        ValidateStoreConfiguration(storeConfig);
-
-        if (products == null || !products.Any())
-        {
-            return new List<Dictionary<string, object>>();
-        }
-
-        var createdProducts = new List<Dictionary<string, object>>();
-        var baseUrl = $"{storeConfig.GetApiBaseUrl()}/catalog/products";
-
-        _logger.LogInformation("Creating {ProductCount} products individually for store {StoreId}", 
-            products.Count, storeConfig.StoreId);
-
-        // Create products individually as BigCommerce doesn't support batch product creation
-        for (int i = 0; i < products.Count; i++)
-        {
-            var product = products[i];
-            cancellationToken.ThrowIfCancellationRequested();
-
-            try
-            {
-                var productName = product.TryGetValue("name", out var name) ? name?.ToString() : "unknown";
-                _logger.LogDebug("Creating product {Index}/{Total}: '{ProductName}' in store {StoreId}",
-                    i + 1, products.Count, productName, storeConfig.StoreId);
-
-                // Remove source ID and tracking fields
-                var cleanProduct = new Dictionary<string, object>(product);
-                cleanProduct.Remove("id");
-                cleanProduct.Remove("_original_entity_id");
-
-                var jsonContent = JsonSerializer.Serialize(cleanProduct, new JsonSerializerOptions
-                {
-                    PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
-                    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-                });
-
-                var request = ApiRequest.CreatePost(baseUrl, jsonContent, storeConfig);
-                var response = await _apiRequestHandler.ExecuteRequestAsync<Dictionary<string, object>>(request, cancellationToken);
-                
-                if (response?.TryGetValue("data", out var dataValue) == true && dataValue is JsonElement dataElement)
-                {
-                    var createdProduct = JsonSerializer.Deserialize<Dictionary<string, object>>(dataElement.GetRawText());
-                    if (createdProduct != null)
-                    {
-                        createdProducts.Add(createdProduct);
-                        _logger.LogDebug("Successfully created product '{ProductName}' with ID {ProductId}",
-                            productName, createdProduct.TryGetValue("id", out var id) ? id.ToString() : "unknown");
-                    }
-                }
-                else if (response != null && response.ContainsKey("id"))
-                {
-                    // Handle direct response format
-                    createdProducts.Add(response);
-                    _logger.LogDebug("Successfully created product '{ProductName}' with ID {ProductId}",
-                        productName, response.TryGetValue("id", out var id) ? id.ToString() : "unknown");
-                }
-            }
-            catch (Exception ex)
-            {
-                var productName = product.TryGetValue("name", out var name) ? name?.ToString() : "unknown";
-                _logger.LogError(ex, "Failed to create product '{ProductName}' ({Index}/{Total}) in store {StoreId}", 
-                    productName, i + 1, products.Count, storeConfig.StoreId);
-                throw; // Re-throw to be handled by ProductCreationStrategy
-            }
-        }
-
-        _logger.LogInformation("Successfully created {CreatedCount}/{TotalCount} products for store {StoreId}", 
-            createdProducts.Count, products.Count, storeConfig.StoreId);
-
-        return createdProducts;
-    }
+    // NOTE: CreateProductsAsync batch method removed - replaced with individual processing
+    // in ProductCreationStrategy.CreateSingleProductAsync for better error isolation
 
     /// <summary>
     /// Checks if the API client can communicate with BigCommerce for a specific store

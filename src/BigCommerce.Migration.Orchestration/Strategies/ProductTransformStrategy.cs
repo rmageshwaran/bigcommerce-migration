@@ -185,11 +185,24 @@ public class ProductTransformStrategy : IEntityTransformStrategy
     /// </summary>
     private void TransformPricingFields(Dictionary<string, object> entity, Dictionary<string, object> transformed)
     {
-        // Main price field
+        // Main price field - REQUIRED by BigCommerce API
         var price = GetDecimalValue(entity, "price") ?? GetDecimalValue(entity, "retail_price");
+        
         if (price.HasValue && price > 0)
         {
             transformed["price"] = price.Value;
+        }
+        else
+        {
+            // Price is required by BigCommerce API - default to 1.00 if missing or 0
+            var productName = GetStringValue(entity, "name") ?? "unknown";
+            var productId = GetStringValue(entity, "id") ?? "unknown";
+            var sku = GetStringValue(entity, "sku") ?? "no-sku";
+            
+            _logger.LogWarning("🛒 [PROD-PRICE-FIX] Product '{ProductName}' (ID: {ProductId}, SKU: {Sku}) has invalid price: {Price}. Defaulting to $1 to prevent API validation failure.",
+                productName, productId, sku, price?.ToString() ?? "null");
+            
+            transformed["price"] = 1.0; // Default to $1
         }
 
         // Sale price
@@ -220,9 +233,22 @@ public class ProductTransformStrategy : IEntityTransformStrategy
     private void TransformWeightField(Dictionary<string, object> entity, Dictionary<string, object> transformed)
     {
         var weight = GetDecimalValue(entity, "weight");
+        
         if (weight.HasValue && weight > 0)
         {
             transformed["weight"] = weight.Value;
+        }
+        else
+        {
+            // Weight is required by BigCommerce API for shipping calculations - default to 1.0 if missing or 0
+            var productName = GetStringValue(entity, "name") ?? "unknown";
+            var productId = GetStringValue(entity, "id") ?? "unknown";
+            var sku = GetStringValue(entity, "sku") ?? "no-sku";
+            
+            _logger.LogWarning("📦 [PROD-WEIGHT-FIX] Product '{ProductName}' (ID: {ProductId}, SKU: {Sku}) has invalid weight: {Weight}. Defaulting to 1 lb to prevent API validation failure.",
+                productName, productId, sku, weight?.ToString() ?? "null");
+            
+            transformed["weight"] = 1.0; // Default to 1 lb
         }
     }
 

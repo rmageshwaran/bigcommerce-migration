@@ -196,12 +196,36 @@ public class EntityFetchService : IEntityFetchService
     {
         var pageNumber = request.BatchNumber; // Direct mapping: batch 1 = page 1, batch 2 = page 2, etc.
         
-        // 🎯 OPTIMAL PARALLELISM FIX: Use the same batch size as ProcessParallelBatchesActivity (50)
-        // This ensures each batch fetches exactly 50 entities for proper parallel processing
-        var batchSize = 50; // Optimal page size for parallel processing
+        // 🎯 CHUNKED ORCHESTRATION FIX: Use chunk size from request, not hardcoded 50
+        // For chunked orchestration, we need to fetch the full chunk size (up to 500 entities)
+        var requestedChunkSize = request.EntityIds?.Count ?? 0;
+        var isChunkedRequest = requestedChunkSize == 0 && request.PaginationMetadata?.ContainsKey("TotalCount") == true;
         
-        _logger.LogDebug("🔧 [FETCH] Using optimal page size {PageSize} for parallel processing of {EntityType}", 
-            batchSize, request.EntityType);
+        // Use appropriate batch size based on request type
+        var batchSize = 50; // Default to 50
+        
+        if (isChunkedRequest && request.PaginationMetadata?.TryGetValue("TotalCount", out var totalCountObj) == true)
+        {
+            // Handle JsonElement conversion safely
+            int totalCount = 50; // Default fallback
+            if (totalCountObj is System.Text.Json.JsonElement jsonElement)
+            {
+                totalCount = jsonElement.TryGetInt32(out var intValue) ? intValue : 50;
+            }
+            else if (totalCountObj is int directInt)
+            {
+                totalCount = directInt;
+            }
+            else if (int.TryParse(totalCountObj?.ToString(), out var parsedInt))
+            {
+                totalCount = parsedInt;
+            }
+            
+            batchSize = Math.Min(500, totalCount); // Chunked: use total count (max 500)
+        }
+        
+        _logger.LogDebug("🔧 [FETCH] Using page size {PageSize} for {EntityType} (ChunkedRequest: {IsChunked}, RequestedChunkSize: {RequestedChunkSize})", 
+            batchSize, request.EntityType, isChunkedRequest, requestedChunkSize);
         
         _logger.LogDebug("Fetching page {PageNumber} for {EntityType} using direct pagination (limit={Limit}) in migration {MigrationId}", 
             pageNumber, request.EntityType, batchSize, request.MigrationId);

@@ -143,54 +143,146 @@ public static class EntityMigrationDurableOrchestrator
                     CancelledAt = input.CancelledAt
                 });
 
-            // 🚀 **STEP 6: PARALLEL PROCESSING** - Replace sequential loop with parallel processing
-            const int batchSize = 10; // Default batch size of 10
+            // 🚀 **STEP 6: SMART PROCESSING** - Hybrid approach for optimal performance
             var entityIds = discoverResult?.EntityIds ?? new List<string>();
-            var totalBatches = CalculateBatchCount(discoverResult?.TotalCount ?? 0, batchSize);
             
             // Handle efficient pagination strategy (empty EntityIds but has TotalCount)
             var useDirectPagination = !entityIds.Any() && (discoverResult?.TotalCount ?? 0) > 0;
+            var totalEntities = useDirectPagination ? (discoverResult?.TotalCount ?? 0) : entityIds.Count;
             
-            logger.LogInformation("🎯 PARALLEL PROCESSING: Processing {EntityCount} {EntityType} entities in {BatchCount} batches with 17.0x optimizations for MigrationId: {MigrationId}", 
-                useDirectPagination ? (discoverResult?.TotalCount ?? 0) : entityIds.Count, entityType, totalBatches, migrationId);
-
-            // 🎉 **CALL PARALLEL PROCESSING ACTIVITY** instead of sequential loop
+            // 🎯 PERFORMANCE OPTIMIZATION: Use chunked orchestration for moderate+ datasets  
+            const int CHUNKING_THRESHOLD = 100; // Use chunking for 100+ entities (safe threshold)
+            const int OPTIMAL_CHUNK_SIZE = 50; // 🚀 RATE LIMIT SAFE: Small chunks prevent API overwhelm
             
-            // 🚨 CRITICAL DEBUG: Log CategoryTreeContext before parallel processing
+            var shouldUseChunking = totalEntities > CHUNKING_THRESHOLD;
+            var batchSize = shouldUseChunking ? OPTIMAL_CHUNK_SIZE : totalEntities;
+            var totalBatches = shouldUseChunking ? CalculateBatchCount(totalEntities, OPTIMAL_CHUNK_SIZE) : 1;
+            
+            // Declare result variable at method scope to avoid compilation errors
+            BigCommerce.Migration.Core.Interfaces.BatchProcessingResult parallelResult;
+            
+            // 🚨 CRITICAL DEBUG: Log CategoryTreeContext before processing
             if (input.CategoryTreeContext == null)
             {
                 logger.LogError("🚨 [ORCHESTRATOR] ❌ CRITICAL: input.CategoryTreeContext is NULL for {EntityType} in migration {MigrationId}", entityType, migrationId);
             }
             else
             {
-                logger.LogInformation("🔄 [ORCHESTRATOR] 📋 CategoryTreeContext: SourceTreeId='{SourceTreeId}', DestinationTreeId='{DestinationTreeId}', SourceChannelId='{SourceChannelId}', DestinationChannelId='{DestinationChannelId}' for {EntityType} in migration {MigrationId}", 
+                logger.LogInformation("🔄 [ORCHESTRATOR] 📋 CategoryTreeContext: SourceTreeId='{SourceTreeId}', DestinationTreeId='{DestinationTreeId}' for {EntityType} in migration {MigrationId}", 
                     input.CategoryTreeContext.SourceCategoryTreeId ?? "NULL", 
                     input.CategoryTreeContext.DestinationCategoryTreeId ?? "NULL",
-                    input.CategoryTreeContext.SourceChannelId ?? "NULL",
-                    input.CategoryTreeContext.DestinationChannelId ?? "NULL",
                     entityType, migrationId);
             }
             
-            var parallelBatchRequest = new ProcessParallelBatchesRequest
-                    {
-                        MigrationId = migrationId,
-                        EntityType = entityType,
-                        TotalBatches = totalBatches,
-                BatchSize = batchSize,
-                EntityIds = entityIds,
-                        SourceStore = input.SourceStore ?? new StoreConfiguration(),
-                        DestinationStore = input.DestinationStore ?? new StoreConfiguration(),
-                        CategoryTreeContext = input.CategoryTreeContext ?? new CategoryTreeContext(),
-                PaginationMetadata = discoverResult?.PaginationMetadata ?? new Dictionary<string, object>(),
-                        UseDirectPagination = useDirectPagination,
-                            IsCancelled = input.IsCancelled,
-                            CancellationReason = input.CancellationReason,
-                CancelledAt = input?.CancelledAt
-            };
+            if (shouldUseChunking)
+            {
+                // 🚀 LARGE DATASET: Use chunked orchestration for timeout prevention
+                logger.LogInformation("🚀 CHUNKED WORKFLOW: Processing {TotalEntities} {EntityType} entities in {TotalChunks} chunks " +
+                                    "of max {ChunkSize} entities each to prevent timeouts", 
+                    totalEntities, entityType, totalBatches, batchSize);
 
-            var parallelResult = await context.CallActivityAsync<BigCommerce.Migration.Core.Interfaces.BatchProcessingResult>(
-                "ProcessParallelBatches",
-                parallelBatchRequest);
+                // Process all chunks in parallel using sub-orchestrators
+                var chunkTasks = new List<Task<BigCommerce.Migration.Core.Interfaces.BatchProcessingResult>>();
+            
+                for (int chunkNumber = 0; chunkNumber < totalBatches; chunkNumber++)
+                {
+                    var startIndex = chunkNumber * batchSize;
+                    var endIndex = Math.Min(startIndex + batchSize, totalEntities);
+                var actualChunkSize = endIndex - startIndex;
+                
+                // Get entity IDs for this chunk
+                var chunkEntityIds = useDirectPagination 
+                    ? new List<string>() // Direct pagination doesn't use pre-fetched IDs
+                    : entityIds.Skip(startIndex).Take(actualChunkSize).ToList();
+
+                var chunkRequest = new ProcessEntityChunkRequest
+                {
+                    MigrationId = migrationId,
+                    EntityType = entityType,
+                    ChunkNumber = chunkNumber,
+                    TotalChunks = totalBatches,
+                    StartIndex = startIndex,
+                    ChunkSize = actualChunkSize,
+                    EntityIds = chunkEntityIds,
+                    SourceStore = input.SourceStore ?? new StoreConfiguration(),
+                    DestinationStore = input.DestinationStore ?? new StoreConfiguration(),
+                    CategoryTreeContext = input.CategoryTreeContext ?? new CategoryTreeContext(),
+                    UseDirectPagination = useDirectPagination,
+                    PaginationMetadata = discoverResult?.PaginationMetadata,
+                    IsCancelled = input.IsCancelled,
+                    CancellationReason = input.CancellationReason ?? string.Empty,
+                    CancelledAt = input.CancelledAt
+                };
+
+                logger.LogInformation("🎯 [CHUNK-{ChunkNumber}] Queuing chunk processing: entities {StartIndex}-{EndIndex} " +
+                                    "({ActualChunkSize} entities) for {EntityType}", 
+                    chunkNumber, startIndex, endIndex - 1, actualChunkSize, entityType);
+
+                // Call ProcessEntityChunkOrchestrator for each chunk
+                var chunkTask = context.CallSubOrchestratorAsync<BigCommerce.Migration.Core.Interfaces.BatchProcessingResult>(
+                    "ProcessEntityChunkOrchestrator",
+                    chunkRequest);
+                
+                chunkTasks.Add(chunkTask);
+            }
+
+                // Wait for all chunks to complete
+                logger.LogInformation("🔄 [ENHANCED-ORCHESTRATOR] Waiting for {TotalChunks} chunks to complete for {EntityType}", 
+                    totalBatches, entityType);
+
+                var chunkResults = await Task.WhenAll(chunkTasks);
+
+                // Aggregate results from all chunks
+                parallelResult = new BigCommerce.Migration.Core.Interfaces.BatchProcessingResult
+                {
+                    TotalProcessed = chunkResults.Sum(r => r.TotalProcessed),
+                    SuccessfulEntities = chunkResults.Sum(r => r.SuccessfulEntities),
+                    FailedEntities = chunkResults.Sum(r => r.FailedEntities),
+                    ProcessingTime = chunkResults.Max(r => r.ProcessingTime), // Use max processing time
+                    Errors = chunkResults.SelectMany(r => r.Errors ?? new List<string>()).ToList()
+                };
+
+                logger.LogInformation("🎉 [CHUNKED-ORCHESTRATOR] All {TotalChunks} chunks completed for {EntityType}: " +
+                                    "{SuccessfulEntities} successful, {FailedEntities} failed, {TotalErrors} errors", 
+                    totalBatches, entityType, parallelResult.SuccessfulEntities, parallelResult.FailedEntities, 
+                    parallelResult.Errors?.Count ?? 0);
+            }
+            else
+            {
+                // ⚡ SMALL DATASET: Use direct activity processing for maximum speed (like original 28-second approach)
+                logger.LogInformation("⚡ FAST WORKFLOW: Processing {TotalEntities} {EntityType} entities using direct activity " +
+                                    "(≤{Threshold} entities - no chunking needed)", 
+                    totalEntities, entityType, CHUNKING_THRESHOLD);
+
+                // Create a single chunk request for all entities (fast processing)
+                var fastRequest = new ProcessEntityChunkRequest
+                {
+                    MigrationId = migrationId,
+                    EntityType = entityType,
+                    ChunkNumber = 0,
+                    TotalChunks = 1,
+                    StartIndex = 0,
+                    ChunkSize = totalEntities,
+                    EntityIds = entityIds,
+                    SourceStore = input.SourceStore ?? new StoreConfiguration(),
+                    DestinationStore = input.DestinationStore ?? new StoreConfiguration(),
+                    CategoryTreeContext = input.CategoryTreeContext ?? new CategoryTreeContext(),
+                    UseDirectPagination = useDirectPagination,
+                    PaginationMetadata = discoverResult?.PaginationMetadata,
+                    IsCancelled = input.IsCancelled,
+                    CancellationReason = input.CancellationReason ?? string.Empty,
+                    CancelledAt = input.CancelledAt
+                };
+
+                // Call the fast parallel processing activity directly (like the original approach)
+                parallelResult = await context.CallActivityAsync<BigCommerce.Migration.Core.Interfaces.BatchProcessingResult>(
+                    "ProcessEntityChunk", fastRequest);
+
+                logger.LogInformation("⚡ [FAST-ORCHESTRATOR] Direct activity completed for {EntityType}: " +
+                                    "{SuccessfulEntities} successful, {FailedEntities} failed, {TotalErrors} errors", 
+                    entityType, parallelResult.SuccessfulEntities, parallelResult.FailedEntities, 
+                    parallelResult.Errors?.Count ?? 0);
+            }
 
             logger.LogInformation("🎉 P2.5: PARALLEL processing completed for {EntityType} in {Duration}ms - {Processed}/{Total} entities", 
                 entityType, parallelResult.ProcessingTime.TotalMilliseconds, 

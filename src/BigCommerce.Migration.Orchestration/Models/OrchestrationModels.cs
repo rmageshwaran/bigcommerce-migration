@@ -836,14 +836,17 @@ public int ParentBatchNumber { get; set; }
 }
 
 /// <summary>
-/// Request model for processing multiple batches in parallel using 17.0x optimizations
+/// Request model for processing a chunk of entities (max 500 entities per sub-orchestrator)
+/// This replaces the monolithic ProcessParallelBatches to prevent Azure Functions timeouts
 /// </summary>
-public class ProcessParallelBatchesRequest
+public class ProcessEntityChunkRequest
 {
     public string MigrationId { get; set; } = string.Empty;
     public string EntityType { get; set; } = string.Empty;
-    public int TotalBatches { get; set; }
-    public int BatchSize { get; set; }
+    public int ChunkNumber { get; set; }
+    public int TotalChunks { get; set; }
+    public int StartIndex { get; set; }
+    public int ChunkSize { get; set; }
     public List<string> EntityIds { get; set; } = new();
     public StoreConfiguration SourceStore { get; set; } = new();
     public StoreConfiguration DestinationStore { get; set; } = new();

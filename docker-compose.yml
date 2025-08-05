@@ -24,6 +24,7 @@ services:
 
   # BigCommerce Migration Functions (Main API Service)
   bigcommerce-functions:
+    platform: linux/amd64
     build:
       context: .
       dockerfile: Dockerfile.functions.noanalyzers
@@ -117,6 +118,7 @@ services:
 
   # Migration Dashboard (React App)
   bigcommerce-dashboard:
+    platform: linux/amd64
     build:
       context: ./src/BigCommerce.Migration.Dashboard
       dockerfile: Dockerfile.dev

@@ -113,8 +113,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IEntityFetchStrategy, ProductFetchStrategy>();
         services.AddScoped<IEntityFetchStrategy, BrandFetchStrategy>();
         
-        // Register the main orchestrator (class-based) - Required for dependency injection into Functions project
-        services.AddSingleton<EntityMigrationOrchestrator>();
+        // Note: EntityMigrationDurableOrchestrator is now used in Functions project - no DI registration needed here
         
         return services;
     }

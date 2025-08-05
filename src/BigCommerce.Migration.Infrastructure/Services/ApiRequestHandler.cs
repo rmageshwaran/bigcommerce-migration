@@ -51,10 +51,46 @@ public class ApiRequestHandler : IApiRequestHandler
 
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         
+        
         try
         {
-            // Apply rate limiting before making the request
-            await _rateLimitService.CheckAndWaitAsync(request.StoreConfiguration.StoreId ?? string.Empty, cancellationToken);
+            // 🚀 INTELLIGENT RATE LIMITING: Use DynamicRateLimiter if available, fallback to basic
+            var storeId = request.StoreConfiguration.StoreId ?? string.Empty;
+            
+            if (_dynamicRateLimiter != null)
+            {
+                // Step 1: Check if we can make requests for this store (BigCommerce API health)
+                var canProceed = await _dynamicRateLimiter.CanMakeRequestAsync(storeId, cancellationToken);
+                if (!canProceed)
+                {
+                    // Step 2: Wait for rate limit clearance with intelligent backoff
+                    await _dynamicRateLimiter.CheckAndWaitAsync(storeId, cancellationToken);
+                    _logger.LogDebug("🚀 [DYNAMIC-RATE-LIMIT] Waited for intelligent rate limit clearance for store {StoreId}", storeId);
+                }
+
+                // Step 3: Get current API health for processing decisions
+                var apiHealth = await _dynamicRateLimiter.GetApiHealthAsync(storeId, cancellationToken);
+                var healthScore = apiHealth.GetHealthScore();
+                
+                // Step 4: Apply health-aware processing strategy
+                if (healthScore < 30) // Poor health - more conservative
+                {
+                    var backoffDelay = TimeSpan.FromMilliseconds(200 + (50 - healthScore) * 10);
+                    await Task.Delay(backoffDelay, cancellationToken);
+                    _logger.LogDebug("🚀 [DYNAMIC-RATE-LIMIT] Applied health-aware backoff ({BackoffMs}ms) due to poor API health ({HealthScore})", 
+                        backoffDelay.TotalMilliseconds, healthScore);
+                }
+                else if (healthScore > 80) // Excellent health - slight optimization
+                {
+                    _logger.LogDebug("🚀 [DYNAMIC-RATE-LIMIT] Excellent API health ({HealthScore}), proceeding optimally", healthScore);
+                }
+            }
+            else
+            {
+                // Fallback to basic rate limiting
+                await _rateLimitService.CheckAndWaitAsync(storeId, cancellationToken);
+                _logger.LogDebug("⚠️ [BASIC-RATE-LIMIT] Using basic rate limiter (DynamicRateLimiter not available)");
+            }
 
             // Create HTTP request message
             using var httpRequest = CreateHttpRequestMessage(request);
@@ -65,13 +101,28 @@ public class ApiRequestHandler : IApiRequestHandler
             // Check for cancellation after HTTP request but before processing
             cancellationToken.ThrowIfCancellationRequested();
 
-            // Record the API call for rate limiting tracking
+            // 🚀 INTELLIGENT API TRACKING: Record with both basic and dynamic rate limiters
+            var storeIdForRecording = request.StoreConfiguration.StoreId ?? string.Empty;
+            
+            // Always record with basic rate limiter for compatibility
             await _rateLimitService.RecordApiCallAsync(
-                request.StoreConfiguration.StoreId ?? string.Empty,
+                storeIdForRecording,
                 request.Url,
                 stopwatch.Elapsed.TotalMilliseconds,
                 response.IsSuccessStatusCode,
                 cancellationToken);
+            
+            // Also record with dynamic rate limiter for health monitoring
+            if (_dynamicRateLimiter != null)
+            {
+                await _dynamicRateLimiter.RecordApiCallAsync(
+                    storeIdForRecording,
+                    request.Url,
+                    stopwatch.Elapsed.TotalMilliseconds,
+                    response.IsSuccessStatusCode,
+                    cancellationToken);
+                _logger.LogDebug("🚀 [DYNAMIC-RATE-LIMIT] Recorded API call for health monitoring");
+            }
 
             // Handle the response
             return await ProcessResponseAsync<T>(response, request, stopwatch.Elapsed, cancellationToken);
@@ -89,6 +140,7 @@ public class ApiRequestHandler : IApiRequestHandler
             await LogErrorToOpenSearch(request, ex, stopwatch.Elapsed, CancellationToken.None);
             throw;
         }
+
     }
 
     /// <summary>
@@ -101,10 +153,46 @@ public class ApiRequestHandler : IApiRequestHandler
 
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         
+        
         try
         {
-            // Apply rate limiting before making the request
-            await _rateLimitService.CheckAndWaitAsync(request.StoreConfiguration.StoreId ?? string.Empty, cancellationToken);
+            // 🚀 INTELLIGENT RATE LIMITING: Use DynamicRateLimiter if available, fallback to basic
+            var storeId = request.StoreConfiguration.StoreId ?? string.Empty;
+            
+            if (_dynamicRateLimiter != null)
+            {
+                // Step 1: Check if we can make requests for this store (BigCommerce API health)
+                var canProceed = await _dynamicRateLimiter.CanMakeRequestAsync(storeId, cancellationToken);
+                if (!canProceed)
+                {
+                    // Step 2: Wait for rate limit clearance with intelligent backoff
+                    await _dynamicRateLimiter.CheckAndWaitAsync(storeId, cancellationToken);
+                    _logger.LogDebug("🚀 [DYNAMIC-RATE-LIMIT] Waited for intelligent rate limit clearance for store {StoreId}", storeId);
+                }
+
+                // Step 3: Get current API health for processing decisions
+                var apiHealth = await _dynamicRateLimiter.GetApiHealthAsync(storeId, cancellationToken);
+                var healthScore = apiHealth.GetHealthScore();
+                
+                // Step 4: Apply health-aware processing strategy
+                if (healthScore < 30) // Poor health - more conservative
+                {
+                    var backoffDelay = TimeSpan.FromMilliseconds(200 + (50 - healthScore) * 10);
+                    await Task.Delay(backoffDelay, cancellationToken);
+                    _logger.LogDebug("🚀 [DYNAMIC-RATE-LIMIT] Applied health-aware backoff ({BackoffMs}ms) due to poor API health ({HealthScore})", 
+                        backoffDelay.TotalMilliseconds, healthScore);
+                }
+                else if (healthScore > 80) // Excellent health - slight optimization
+                {
+                    _logger.LogDebug("🚀 [DYNAMIC-RATE-LIMIT] Excellent API health ({HealthScore}), proceeding optimally", healthScore);
+                }
+            }
+            else
+            {
+                // Fallback to basic rate limiting
+                await _rateLimitService.CheckAndWaitAsync(storeId, cancellationToken);
+                _logger.LogDebug("⚠️ [BASIC-RATE-LIMIT] Using basic rate limiter (DynamicRateLimiter not available)");
+            }
 
             // Create HTTP request message
             using var httpRequest = CreateHttpRequestMessage(request);
@@ -115,13 +203,28 @@ public class ApiRequestHandler : IApiRequestHandler
             // Check for cancellation after HTTP request but before processing
             cancellationToken.ThrowIfCancellationRequested();
 
-            // Record the API call for rate limiting tracking
+            // 🚀 INTELLIGENT API TRACKING: Record with both basic and dynamic rate limiters
+            var storeIdForRecording = request.StoreConfiguration.StoreId ?? string.Empty;
+            
+            // Always record with basic rate limiter for compatibility
             await _rateLimitService.RecordApiCallAsync(
-                request.StoreConfiguration.StoreId ?? string.Empty,
+                storeIdForRecording,
                 request.Url,
                 stopwatch.Elapsed.TotalMilliseconds,
                 response.IsSuccessStatusCode,
                 cancellationToken);
+            
+            // Also record with dynamic rate limiter for health monitoring
+            if (_dynamicRateLimiter != null)
+            {
+                await _dynamicRateLimiter.RecordApiCallAsync(
+                    storeIdForRecording,
+                    request.Url,
+                    stopwatch.Elapsed.TotalMilliseconds,
+                    response.IsSuccessStatusCode,
+                    cancellationToken);
+                _logger.LogDebug("🚀 [DYNAMIC-RATE-LIMIT] Recorded API call for health monitoring");
+            }
 
             // Handle the response - BigCommerce API specific logic
             if (response.StatusCode == HttpStatusCode.OK || 
@@ -196,6 +299,7 @@ public class ApiRequestHandler : IApiRequestHandler
             await LogErrorToOpenSearch(request, ex, stopwatch.Elapsed, CancellationToken.None);
             throw;
         }
+
     }
 
     /// <summary>

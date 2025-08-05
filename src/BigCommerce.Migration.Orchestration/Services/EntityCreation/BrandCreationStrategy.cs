@@ -60,59 +60,60 @@ public class BrandCreationStrategy : IEntityCreationStrategy
 
         try
         {
-            // Create brands individually (BigCommerce brands API doesn't support batch creation)
-            var createdBrands = new List<Dictionary<string, object>>();
-            
-            for (int i = 0; i < entities.Count; i++)
+            // 🚀 PARALLEL PROCESSING FIX: Process brands in parallel instead of sequential for-loop
+            _logger.LogInformation("🚀 [BRAND-{ExecutionId}] Starting PARALLEL creation of {BrandCount} brands for migration {MigrationId}", 
+                executionId, entities.Count, migrationId);
+
+            // Create tasks for parallel brand creation
+            var brandCreationTasks = entities.Select(async (brand, index) =>
             {
-                var brand = entities[i];
                 try
                 {
                     var brandName = brand.TryGetValue("name", out var name) ? name?.ToString() : "unknown";
-                    _logger.LogDebug("🏪 [BRAND-{ExecutionId}] Creating individual brand {Index}/{Total}: '{BrandName}' in migration {MigrationId}",
-                        executionId, i + 1, entities.Count, brandName, migrationId);
+                    _logger.LogDebug("🏪 [BRAND-{ExecutionId}] Creating brand {Index}/{Total}: '{BrandName}' (PARALLEL) in migration {MigrationId}",
+                        executionId, index + 1, entities.Count, brandName, migrationId);
 
                     var createdBrand = await CreateSingleBrandAsync(destinationStore, brand, cancellationToken);
+                    
                     if (createdBrand != null)
                     {
-                        createdBrands.Add(createdBrand);
+                        _logger.LogDebug("✅ [BRAND-{ExecutionId}] Successfully created brand {Index}/{Total}: '{BrandName}' (PARALLEL) in migration {MigrationId}",
+                            executionId, index + 1, entities.Count, brandName, migrationId);
                     }
+                    
+                    return createdBrand;
                 }
                 catch (Exception ex)
                 {
                     var brandName = brand.TryGetValue("name", out var name) ? name?.ToString() : "unknown";
                     var brandId = brand.TryGetValue("id", out var id) ? id?.ToString() : "unknown";
                     
-                    _logger.LogError(ex, "🏪 [BRAND-{ExecutionId}] ❌ Failed to create individual brand '{BrandName}' (ID: {BrandId}) in migration {MigrationId}",
+                    _logger.LogError(ex, "🏪 [BRAND-{ExecutionId}] ❌ Failed to create brand '{BrandName}' (ID: {BrandId}) (PARALLEL) in migration {MigrationId}",
                         executionId, brandName, brandId, migrationId);
 
-                    // ✅ Create enhanced exception with preserved API error details
-                    // This ensures the stack trace and response payload are preserved for error logging
-                    var detailedErrorMessage = ExtractDetailedErrorMessage(ex);
-                    var enhancedException = new InvalidOperationException(
-                        $"API Error creating brand '{brandName}' (ID: {brandId}): {detailedErrorMessage}", ex);
-                    
-                    // Add the original exception as inner exception to preserve stack trace
-                    // Add response payload and other details to the exception data
-                    var responsePayload = ExtractResponsePayloadFromException(ex);
-                    if (!string.IsNullOrEmpty(responsePayload))
-                    {
-                        enhancedException.Data["ResponsePayload"] = responsePayload;
-                    }
-                    enhancedException.Data["ApiErrorMessage"] = detailedErrorMessage;
-                    enhancedException.Data["OriginalStackTrace"] = ex.StackTrace ?? string.Empty;
-                    enhancedException.Data["EntityName"] = brandName;
-                    enhancedException.Data["EntityId"] = brandId;
-                    
-                    // Re-throw the enhanced exception to trigger proper error logging
-                    _logger.LogWarning("🏪 [BRAND-{ExecutionId}] Re-throwing enhanced exception for proper error logging for brand '{BrandName}' in migration {MigrationId}", 
-                        executionId, brandName, migrationId);
-                    
-                    throw enhancedException;
+                    // Handle errors gracefully in parallel processing - don't throw, return null
+                    // We'll filter out nulls later and log the overall failure count
+                    return null;
                 }
+            }).ToArray();
+
+            // Wait for all brand creation tasks to complete in parallel
+            _logger.LogInformation("⏳ [BRAND-{ExecutionId}] Awaiting {TaskCount} parallel brand creation tasks for migration {MigrationId}", 
+                executionId, brandCreationTasks.Length, migrationId);
+                
+            var createdBrandResults = await Task.WhenAll(brandCreationTasks);
+            
+            // Filter out null results (failed brands) and collect successful ones
+            var createdBrands = createdBrandResults.Where(brand => brand != null).ToList();
+            var failedCount = entities.Count - createdBrands.Count;
+            
+            if (failedCount > 0)
+            {
+                _logger.LogWarning("⚠️ [BRAND-{ExecutionId}] {FailedCount}/{TotalCount} brand creations failed during parallel processing for migration {MigrationId}", 
+                    executionId, failedCount, entities.Count, migrationId);
             }
 
-            _logger.LogInformation("✅ [BRAND-{ExecutionId}] Successfully created {CreatedCount}/{TotalCount} brands for migration {MigrationId}", 
+            _logger.LogInformation("✅ [BRAND-{ExecutionId}] PARALLEL processing completed: {CreatedCount}/{TotalCount} brands created successfully for migration {MigrationId}", 
                 executionId, createdBrands.Count, entities.Count, migrationId);
 
             return createdBrands;

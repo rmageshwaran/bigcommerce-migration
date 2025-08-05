@@ -65,6 +65,23 @@ public class BrandCreationStrategy : IEntityCreationStrategy
         // Use deterministic execution ID for logging (Durable Functions compliance)
         var executionId = $"{migrationId}-{entities.Count}".GetHashCode().ToString("X8");
         
+        _logger.LogError("🏪🏪🏪 [BRAND-CREATION-DEBUG] ===== BRAND CREATION STARTED =====");
+        _logger.LogError("🏪 [BRAND-CREATION-DEBUG] MigrationId={MigrationId}, EntityCount={EntityCount}, ExecutionId={ExecutionId}", 
+            migrationId, entities.Count, executionId);
+        
+        // Debug log tracking metadata for first few entities
+        for (int i = 0; i < Math.Min(3, entities.Count); i++)
+        {
+            var entity = entities[i];
+            var chunkNumber = entity.TryGetValue("_chunk_number", out var chunkVal) ? chunkVal?.ToString() : "unknown";
+            var apiPage = entity.TryGetValue("_api_page", out var pageVal) ? pageVal?.ToString() : "unknown";
+            var migId = entity.TryGetValue("_migration_id", out var migIdVal) ? migIdVal?.ToString() : "unknown";
+            var brandName = entity.TryGetValue("name", out var nameVal) ? nameVal?.ToString() : "unknown";
+            
+            _logger.LogError("🏪 [BRAND-CREATION-DEBUG] Entity[{Index}]: Name={BrandName}, ChunkNumber={ChunkNumber}, ApiPage={ApiPage}, MigrationId={MigrationId}", 
+                i, brandName, chunkNumber, apiPage, migId);
+        }
+        
         _logger.LogInformation("🏪 [BRAND-{ExecutionId}] 🚀 STARTING: Creating {BrandCount} brands for migration {MigrationId}", 
             executionId, entities.Count, migrationId);
         

@@ -9,6 +9,7 @@ using BigCommerce.Migration.Orchestration.Services;
 using BigCommerce.Migration.Orchestration.Strategies;
 using BigCommerce.Migration.Orchestration.Services.EntityCreation;
 using BigCommerce.Migration.Orchestration.Orchestrators;
+using BigCommerce.Migration.Orchestration.Activities;
 using System.Net.Http;
 
 namespace BigCommerce.Migration.Orchestration.Extensions;
@@ -88,6 +89,9 @@ public static class ServiceCollectionExtensions
         // 🚀 SUB-BATCH PROCESSING: Register sub-batch configuration and processing services
         services.AddSingleton<ISubBatchConfigurationService, SubBatchConfigurationService>();
         services.AddScoped<ISubBatchProcessor, SubBatchProcessor>();
+        
+        // 🎯 Register configuration activity for orchestrator use
+        services.AddScoped<GetEntityConfigurationActivity>();
         
         // Register entity discovery strategy pattern implementations (Task 2.3.3 - COMPLETED)
         services.AddSingleton<IEntityDiscoveryStrategyFactory, EntityDiscoveryStrategyFactory>();

@@ -285,6 +285,20 @@ public class SubBatchConfiguration
     public int PageSize { get; set; } = 50;
 
     /// <summary>
+    /// Chunk size for orchestrator-level chunking (how many entities per chunk)
+    /// Default: 50 entities per chunk for optimal rate limiting
+    /// </summary>
+    [JsonPropertyName("chunkSize")]
+    public int ChunkSize { get; set; } = 50;
+
+    /// <summary>
+    /// Fetch batch size for API calls (limit parameter for pagination)
+    /// Default: 250 for most entities, 50 for brands
+    /// </summary>
+    [JsonPropertyName("fetchBatchSize")]
+    public int FetchBatchSize { get; set; } = 250;
+
+    /// <summary>
     /// Number of entities per sub-batch (within each page)
     /// Default: 5 entities per sub-batch for balanced concurrency
     /// </summary>
@@ -336,6 +350,8 @@ public class SubBatchConfiguration
             {
                 EntityType = "brands",
                 PageSize = 50,
+                ChunkSize = 50,
+                FetchBatchSize = 50,
                 SubBatchSize = 5,
                 MaxConcurrency = 5,
                 EnableSubBatching = true,
@@ -346,6 +362,8 @@ public class SubBatchConfiguration
             {
                 EntityType = "products",
                 PageSize = 25, // Products are more complex, smaller pages
+                ChunkSize = 25,
+                FetchBatchSize = 250,
                 SubBatchSize = 3, // Fewer per sub-batch due to complexity
                 MaxConcurrency = 3,
                 EnableSubBatching = true,
@@ -356,6 +374,8 @@ public class SubBatchConfiguration
             {
                 EntityType = "variants",
                 PageSize = 100, // Variants are simpler, larger pages
+                ChunkSize = 100,
+                FetchBatchSize = 250,
                 SubBatchSize = 10,
                 MaxConcurrency = 8,
                 EnableSubBatching = true,
@@ -366,6 +386,8 @@ public class SubBatchConfiguration
             {
                 EntityType = "customers",
                 PageSize = 75,
+                ChunkSize = 75,
+                FetchBatchSize = 250,
                 SubBatchSize = 7,
                 MaxConcurrency = 6,
                 EnableSubBatching = true,

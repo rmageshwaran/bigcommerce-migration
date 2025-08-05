@@ -17,6 +17,7 @@ public class EntityFetchService : IEntityFetchService
 {
     private readonly IBigCommerceApiClient _apiClient;
     private readonly IEntityFetchStrategyFactory _strategyFactory;
+    private readonly ISubBatchConfigurationService _configService;
     private readonly ILogger<EntityFetchService> _logger;
     
     // Configuration for parallel processing (kept for backward compatibility)
@@ -25,10 +26,12 @@ public class EntityFetchService : IEntityFetchService
     public EntityFetchService(
         IBigCommerceApiClient apiClient, 
         IEntityFetchStrategyFactory strategyFactory,
+        ISubBatchConfigurationService configService,
         ILogger<EntityFetchService> logger)
     {
         _apiClient = apiClient ?? throw new ArgumentNullException(nameof(apiClient));
         _strategyFactory = strategyFactory ?? throw new ArgumentNullException(nameof(strategyFactory));
+        _configService = configService ?? throw new ArgumentNullException(nameof(configService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -36,6 +39,26 @@ public class EntityFetchService : IEntityFetchService
         BatchProcessingRequest request, 
         CancellationToken cancellationToken)
     {
+        _logger.LogError("📥📥📥 [FETCH-SERVICE-DEBUG] ===== FETCH REQUEST RECEIVED =====");
+        _logger.LogError("📥 [FETCH-SERVICE-DEBUG] EntityType={EntityType}, MigrationId={MigrationId}, BatchNumber={BatchNumber}", 
+            request.EntityType, request.MigrationId, request.BatchNumber);
+        _logger.LogError("📥 [FETCH-SERVICE-DEBUG] EntityIds.Count={EntityIdsCount}, UseDirectPagination={UseDirectPagination}", 
+            request.EntityIds?.Count ?? 0, request.UseDirectPagination);
+        _logger.LogError("📥 [FETCH-SERVICE-DEBUG] PaginationMetadata count: {PaginationMetadataCount}", 
+            request.PaginationMetadata?.Count ?? 0);
+            
+        if (request.PaginationMetadata != null && request.PaginationMetadata.Any())
+        {
+            foreach (var kvp in request.PaginationMetadata)
+            {
+                _logger.LogError("📥 [FETCH-SERVICE-DEBUG] PaginationMetadata[{Key}]={Value}", kvp.Key, kvp.Value);
+            }
+        }
+        
+        var config = _configService.GetConfiguration(request.EntityType);
+        _logger.LogError("🔧 [FETCH-SERVICE-DEBUG] Configuration retrieved: FetchBatchSize={FetchBatchSize}, ChunkSize={ChunkSize}, PageSize={PageSize}", 
+            config.FetchBatchSize, config.ChunkSize, config.PageSize);
+
         _logger.LogInformation("Fetching entities of type {EntityType} for batch {BatchNumber} in migration {MigrationId}", 
             request.EntityType, request.BatchNumber, request.MigrationId);
 
@@ -216,9 +239,21 @@ public class EntityFetchService : IEntityFetchService
         BatchProcessingRequest request, 
         CancellationToken cancellationToken)
     {
+        _logger.LogError("🚀🚀🚀 [DIRECT-PAGINATION-DEBUG] ===== DIRECT PAGINATION METHOD CALLED =====");
+        _logger.LogError("🚀 [DIRECT-PAGINATION-DEBUG] EntityType={EntityType}, MigrationId={MigrationId}, BatchNumber={BatchNumber}", 
+            request.EntityType, request.MigrationId, request.BatchNumber);
+        
+        // Get configuration again for this method scope
+        var methodConfig = _configService.GetConfiguration(request.EntityType);
+        _logger.LogError("🚀 [DIRECT-PAGINATION-DEBUG] Config in this method: FetchBatchSize={FetchBatchSize}, ChunkSize={ChunkSize}, PageSize={PageSize}", 
+            methodConfig.FetchBatchSize, methodConfig.ChunkSize, methodConfig.PageSize);
+            
         // 🚨 CRITICAL FIX: BigCommerce API pages are 1-based, but our batches are 0-based
         // Batch 0 should map to Page 1, Batch 1 to Page 2, etc.
         var pageNumber = request.BatchNumber + 1; // Convert 0-based batch to 1-based page
+        
+        _logger.LogError("🚨🚨🚨 [PAGINATION-DEBUG] DIRECT PAGINATION: BatchNumber={BatchNumber} → pageNumber={PageNumber} for {EntityType} in migration {MigrationId}", 
+            request.BatchNumber, pageNumber, request.EntityType, request.MigrationId);
         
         _logger.LogInformation("🔍 [FETCH-PAGINATION] CONVERSION: Batch={BatchNumber} → API Page={ApiPage} for {EntityType} in migration {MigrationId}", 
             request.BatchNumber, pageNumber, request.EntityType, request.MigrationId);
@@ -227,6 +262,9 @@ public class EntityFetchService : IEntityFetchService
         // For chunked orchestration, we need to fetch the full chunk size (up to 500 entities)
         var requestedChunkSize = request.EntityIds?.Count ?? 0;
         var isChunkedRequest = requestedChunkSize == 0 && request.PaginationMetadata?.ContainsKey("TotalCount") == true;
+        
+        _logger.LogInformation("🚨 [CHUNK-DEBUG] RequestedChunkSize={RequestedChunkSize}, IsChunkedRequest={IsChunkedRequest}, HasPaginationMetadata={HasMetadata} for {EntityType} batch {BatchNumber}",
+            requestedChunkSize, isChunkedRequest, request.PaginationMetadata != null, request.EntityType, request.BatchNumber);
         
         // 🚨 DEBUG: Log all pagination metadata to diagnose chunk duplication
         if (request.PaginationMetadata != null)
@@ -243,10 +281,11 @@ public class EntityFetchService : IEntityFetchService
                 request.EntityType, request.BatchNumber);
         }
         
-        // 🚨 FIXED: Use appropriate batch size based on entity type and configuration
-        var batchSize = request.EntityType.Equals("brands", StringComparison.OrdinalIgnoreCase) ? 50 : 250; // Brands use smaller chunks
+        // 🚨 FIXED: Use configuration-driven batch size
+        var config = _configService.GetConfiguration(request.EntityType);
+        var batchSize = config.FetchBatchSize; // ✅ NOW CONFIGURABLE!
         
-        _logger.LogInformation("🔍 [FETCH-BATCHSIZE] Initial: BatchSize={BatchSize} for {EntityType} (brands=50, others=250)", 
+        _logger.LogInformation("🔍 [FETCH-BATCHSIZE] Configuration-driven: BatchSize={BatchSize} for {EntityType} (from config.FetchBatchSize)", 
             batchSize, request.EntityType);
         
         if (isChunkedRequest && request.PaginationMetadata?.TryGetValue("TotalCount", out var totalCountObj) == true)
@@ -290,6 +329,14 @@ public class EntityFetchService : IEntityFetchService
                 {
                     startIndex = parsedStartInt;
                 }
+                
+                _logger.LogInformation("🚨 [STARTINDEX-DEBUG] Extracted StartIndex={StartIndex} from PaginationMetadata for {EntityType} batch {BatchNumber}",
+                    startIndex, request.EntityType, request.BatchNumber);
+            }
+            else
+            {
+                _logger.LogWarning("🚨 [STARTINDEX-DEBUG] NO StartIndex found in PaginationMetadata for {EntityType} batch {BatchNumber} - defaulting to 0",
+                    request.EntityType, request.BatchNumber);
             }
             
             if (request.PaginationMetadata.TryGetValue("ChunkSize", out var chunkSizeObj))
@@ -308,15 +355,15 @@ public class EntityFetchService : IEntityFetchService
                 }
             }
             
-            // Calculate the correct page for this chunk (already 1-based from startIndex calculation)
-            var calculatedPage = (startIndex / 50) + 1; // Assuming 50 entities per page (already 1-based)
+            // Calculate the correct page for this chunk (using consistent fetch batch size)
+            var calculatedPage = (startIndex / methodConfig.FetchBatchSize) + 1; // Using methodConfig.FetchBatchSize for consistency (already 1-based)
             pageNumber = calculatedPage;
-            // 🚨 CRITICAL FIX: Always use consistent limit=50 regardless of chunk size
+            // 🚨 CRITICAL FIX: Always use consistent limit regardless of chunk size
             // BigCommerce API pagination results change when limit changes, causing overlaps
-            batchSize = 50; // FIXED: Always use 50 to maintain pagination consistency
+            batchSize = methodConfig.FetchBatchSize; // ✅ FIXED: Use configurable consistent fetch batch size
             
-            _logger.LogInformation("🔍 [FETCH-CHUNKED] Page calculation: StartIndex={StartIndex} ÷ 50 + 1 = Page={CalculatedPage}, ChunkSize={ChunkSize}", 
-                startIndex, calculatedPage, chunkSize);
+            _logger.LogInformation("🔍 [FETCH-CHUNKED] Page calculation: StartIndex={StartIndex} ÷ {FetchBatchSize} + 1 = Page={CalculatedPage}, ChunkSize={ChunkSize}", 
+                startIndex, methodConfig.FetchBatchSize, calculatedPage, chunkSize);
         }
         
         _logger.LogDebug("🔧 [FETCH] Using page size {PageSize} for {EntityType} (ChunkedRequest: {IsChunked}, StartIndex: {StartIndex}, ChunkSize: {ChunkSize})", 

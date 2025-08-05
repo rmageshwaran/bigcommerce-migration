@@ -74,7 +74,30 @@ public static class EntityMigrationDurableOrchestrator
                     EntityType = entityType
                 });
 
-            // Step 3: Discover entities to migrate
+            // Step 3: Get Configuration - Load entity-specific settings from appsettings.json
+            logger.LogError("🔧🔧🔧 [ORCHESTRATOR-CONFIG-DEBUG] ===== CALLING GetEntityConfigurationActivity for '{EntityType}' =====", entityType);
+            var entityConfig = await context.CallActivityAsync<EntityConfiguration>("GetEntityConfigurationActivity", entityType);
+            
+            logger.LogError("🔧 [ORCHESTRATOR-CONFIG-DEBUG] RECEIVED EntityConfiguration from activity: " +
+                          "EntityType={EntityType}, ChunkSize={ChunkSize}, FetchBatchSize={FetchBatchSize}, PageSize={PageSize}, " +
+                          "SubBatchSize={SubBatchSize}, MaxConcurrency={MaxConcurrency}, ProcessSubBatchesSequentially={ProcessSubBatchesSequentially}",
+                          entityConfig.EntityType, entityConfig.ChunkSize, entityConfig.FetchBatchSize, entityConfig.PageSize,
+                          entityConfig.SubBatchSize, entityConfig.MaxConcurrency, entityConfig.ProcessSubBatchesSequentially);
+
+            // Validate configuration received
+            if (entityConfig == null)
+            {
+                logger.LogError("🚨 [ORCHESTRATOR-CONFIG-DEBUG] NULL EntityConfiguration received from activity!");
+                throw new InvalidOperationException($"Failed to get configuration for entity type: {entityType}");
+            }
+            
+            if (entityConfig.ChunkSize <= 0 || entityConfig.FetchBatchSize <= 0)
+            {
+                logger.LogError("🚨 [ORCHESTRATOR-CONFIG-DEBUG] INVALID configuration values: ChunkSize={ChunkSize}, FetchBatchSize={FetchBatchSize}", 
+                    entityConfig.ChunkSize, entityConfig.FetchBatchSize);
+            }
+
+            // Step 4: Discover entities to migrate
             logger.LogInformation("Discovering {EntityType} entities for MigrationId: {MigrationId}", 
                 entityType, migrationId);
 
@@ -83,7 +106,7 @@ public static class EntityMigrationDurableOrchestrator
                 MigrationId = migrationId,
                 EntityType = entityType,
                 SourceStore = input.SourceStore ?? new StoreConfiguration(),
-                EntityConfig = new EntityConfiguration(),
+                EntityConfig = entityConfig, // ✅ Use loaded configuration
                 CategoryTreeContext = input.CategoryTreeContext
             };
 
@@ -111,7 +134,7 @@ public static class EntityMigrationDurableOrchestrator
             logger.LogInformation("Discovered {EntityCount} {EntityType} entities for MigrationId: {MigrationId}", 
                 discoverResult.TotalCount, entityType, migrationId);
 
-            // Step 4: Start entity progress tracking
+            // Step 5: Start entity progress tracking
             await context.CallActivityAsync(
                 "StartEntityProcessingActivity",
                 new StartEntityProcessingRequest
@@ -125,7 +148,7 @@ public static class EntityMigrationDurableOrchestrator
                     CancelledAt = input.CancelledAt
                 });
 
-            // Step 5: Update initial progress
+            // Step 6: Update initial progress
             await context.CallActivityAsync(
                 "UpdateEntityProgressActivity",
                 new UpdateEntityProgressRequest
@@ -143,20 +166,28 @@ public static class EntityMigrationDurableOrchestrator
                     CancelledAt = input.CancelledAt
                 });
 
-            // 🚀 **STEP 6: SMART PROCESSING** - Hybrid approach for optimal performance
+            // 🚀 **STEP 7: SMART PROCESSING** - Hybrid approach for optimal performance
             var entityIds = discoverResult?.EntityIds ?? new List<string>();
             
             // Handle efficient pagination strategy (empty EntityIds but has TotalCount)
             var useDirectPagination = !entityIds.Any() && (discoverResult?.TotalCount ?? 0) > 0;
             var totalEntities = useDirectPagination ? (discoverResult?.TotalCount ?? 0) : entityIds.Count;
             
-            // 🎯 PERFORMANCE OPTIMIZATION: Use chunked orchestration for moderate+ datasets  
-            const int CHUNKING_THRESHOLD = 100; // Use chunking for 100+ entities (safe threshold)
-            const int OPTIMAL_CHUNK_SIZE = 50; // 🚀 RATE LIMIT SAFE: Small chunks prevent API overwhelm
+            // 🎯 PERFORMANCE OPTIMIZATION: Use configuration-driven chunking  
+            var chunkingThreshold = 100; // TODO: Make this configurable too
+            var chunkSize = entityConfig.ChunkSize; // ✅ NOW CONFIGURABLE!
             
-            var shouldUseChunking = totalEntities > CHUNKING_THRESHOLD;
-            var batchSize = shouldUseChunking ? OPTIMAL_CHUNK_SIZE : totalEntities;
-            var totalBatches = shouldUseChunking ? CalculateBatchCount(totalEntities, OPTIMAL_CHUNK_SIZE) : 1;
+            logger.LogError("🎯 [ORCHESTRATOR-CHUNKING-DEBUG] ===== CHUNKING CONFIGURATION =====");
+            logger.LogError("🎯 [ORCHESTRATOR-CHUNKING-DEBUG] EntityType='{EntityType}', TotalEntities={TotalEntities}", entityType, totalEntities);
+            logger.LogError("🎯 [ORCHESTRATOR-CHUNKING-DEBUG] ChunkingThreshold={ChunkingThreshold}, ConfiguredChunkSize={ConfiguredChunkSize}", chunkingThreshold, chunkSize);
+            logger.LogError("🎯 [ORCHESTRATOR-CHUNKING-DEBUG] UseDirectPagination={UseDirectPagination}", useDirectPagination);
+            
+            var shouldUseChunking = totalEntities > chunkingThreshold;
+            var batchSize = shouldUseChunking ? chunkSize : totalEntities;
+            var totalBatches = shouldUseChunking ? CalculateBatchCount(totalEntities, chunkSize) : 1;
+            
+            logger.LogError("🎯 [ORCHESTRATOR-CHUNKING-DEBUG] Calculated: ShouldUseChunking={ShouldUseChunking}, BatchSize={BatchSize}, TotalBatches={TotalBatches}", 
+                shouldUseChunking, batchSize, totalBatches);
             
             // Declare result variable at method scope to avoid compilation errors
             BigCommerce.Migration.Core.Interfaces.BatchProcessingResult parallelResult;
@@ -188,26 +219,45 @@ public static class EntityMigrationDurableOrchestrator
                 {
                     var startIndex = chunkNumber * batchSize;
                     var endIndex = Math.Min(startIndex + batchSize, totalEntities);
-                var actualChunkSize = endIndex - startIndex;
+                    var actualChunkSize = endIndex - startIndex;
                 
-                // Get entity IDs for this chunk
-                var chunkEntityIds = useDirectPagination 
-                    ? new List<string>() // Direct pagination doesn't use pre-fetched IDs
-                    : entityIds.Skip(startIndex).Take(actualChunkSize).ToList();
+                    logger.LogError("🔥 [ORCHESTRATOR-CHUNK-DEBUG] ===== CREATING CHUNK {ChunkNumber}/{TotalBatches} =====", chunkNumber, totalBatches);
+                    logger.LogError("🔥 [ORCHESTRATOR-CHUNK-DEBUG] ChunkNumber={ChunkNumber}, StartIndex={StartIndex}, EndIndex={EndIndex}, ActualChunkSize={ActualChunkSize}", 
+                        chunkNumber, startIndex, endIndex, actualChunkSize);
+                    logger.LogError("🔥 [ORCHESTRATOR-CHUNK-DEBUG] BatchSize={BatchSize}, UseDirectPagination={UseDirectPagination}", batchSize, useDirectPagination);
+                
+                    // Get entity IDs for this chunk
+                    var chunkEntityIds = useDirectPagination 
+                        ? new List<string>() // Direct pagination doesn't use pre-fetched IDs
+                        : entityIds.Skip(startIndex).Take(actualChunkSize).ToList();
+                    
+                    logger.LogError("🔥 [ORCHESTRATOR-CHUNK-DEBUG] ChunkEntityIds.Count={ChunkEntityIdsCount}", chunkEntityIds.Count);
                 
                 // 🚨 CRITICAL FIX: For direct pagination, adjust pagination metadata for chunk boundaries
                 var chunkPaginationMetadata = new Dictionary<string, object>();
                 if (useDirectPagination && discoverResult?.PaginationMetadata != null)
                 {
+                    logger.LogError("🔥 [ORCHESTRATOR-CHUNK-DEBUG] Setting up chunk pagination metadata for direct pagination...");
+                    logger.LogError("🔥 [ORCHESTRATOR-CHUNK-DEBUG] Original PaginationMetadata keys: [{OriginalKeys}]", 
+                        string.Join(", ", discoverResult.PaginationMetadata.Keys));
+                    
                     // Copy original metadata
                     foreach (var kvp in discoverResult.PaginationMetadata)
                     {
                         chunkPaginationMetadata[kvp.Key] = kvp.Value;
+                        logger.LogError("🔥 [ORCHESTRATOR-CHUNK-DEBUG] Copied: {Key}={Value}", kvp.Key, kvp.Value);
                     }
                     // Override with chunk-specific values
                     chunkPaginationMetadata["TotalCount"] = actualChunkSize; // Limit each chunk to its size
                     chunkPaginationMetadata["StartIndex"] = startIndex;
                     chunkPaginationMetadata["ChunkSize"] = actualChunkSize;
+                    
+                    logger.LogError("🔥 [ORCHESTRATOR-CHUNK-DEBUG] OVERRIDDEN values: TotalCount={TotalCount}, StartIndex={StartIndex}, ChunkSize={ChunkSize}", 
+                        actualChunkSize, startIndex, actualChunkSize);
+                }
+                else
+                {
+                    logger.LogError("🔥 [ORCHESTRATOR-CHUNK-DEBUG] NOT using direct pagination OR no original pagination metadata");
                 }
 
                 var chunkRequest = new ProcessEntityChunkRequest
@@ -228,6 +278,22 @@ public static class EntityMigrationDurableOrchestrator
                     CancellationReason = input.CancellationReason ?? string.Empty,
                     CancelledAt = input.CancelledAt
                 };
+                
+                logger.LogError("🚀 [ORCHESTRATOR-CHUNK-DEBUG] FINAL chunkRequest for chunk {ChunkNumber}: " +
+                              "MigrationId={MigrationId}, EntityType={EntityType}, ChunkNumber={ChunkNumber}, TotalChunks={TotalChunks}, " +
+                              "StartIndex={StartIndex}, ChunkSize={ChunkSize}, UseDirectPagination={UseDirectPagination}, EntityIds.Count={EntityIdsCount}, " +
+                              "PaginationMetadata.Count={PaginationMetadataCount}",
+                              chunkNumber, migrationId, entityType, chunkNumber, totalBatches, 
+                              startIndex, actualChunkSize, useDirectPagination, chunkEntityIds.Count, 
+                              (chunkRequest.PaginationMetadata?.Count ?? 0));
+                
+                if (chunkRequest.PaginationMetadata != null && chunkRequest.PaginationMetadata.Any())
+                {
+                    foreach (var kvp in chunkRequest.PaginationMetadata)
+                    {
+                        logger.LogError("🚀 [ORCHESTRATOR-CHUNK-DEBUG] PaginationMetadata[{Key}]={Value}", kvp.Key, kvp.Value);
+                    }
+                }
 
                 logger.LogInformation("🎯 [CHUNK-{ChunkNumber}] Queuing chunk processing: entities {StartIndex}-{EndIndex} " +
                                     "({ActualChunkSize} entities) for {EntityType}", 
@@ -267,7 +333,7 @@ public static class EntityMigrationDurableOrchestrator
                 // ⚡ SMALL DATASET: Use direct activity processing for maximum speed (like original 28-second approach)
                 logger.LogInformation("⚡ FAST WORKFLOW: Processing {TotalEntities} {EntityType} entities using direct activity " +
                                     "(≤{Threshold} entities - no chunking needed)", 
-                    totalEntities, entityType, CHUNKING_THRESHOLD);
+                    totalEntities, entityType, chunkingThreshold);
 
                 // Create a single chunk request for all entities (fast processing)
                 var fastRequest = new ProcessEntityChunkRequest

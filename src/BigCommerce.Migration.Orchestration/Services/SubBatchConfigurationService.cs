@@ -23,24 +23,43 @@ public class SubBatchConfigurationService : ISubBatchConfigurationService
 
     public SubBatchConfiguration GetConfiguration(string entityType)
     {
+        _logger.LogError("🔍🔍🔍 [CONFIG-SERVICE-DEBUG] REQUEST for entityType='{EntityType}'. Available configs: [{AvailableConfigs}]", 
+            entityType, string.Join(", ", _configurations.Keys));
+
         if (string.IsNullOrEmpty(entityType))
         {
-            _logger.LogWarning("⚠️ [SUB-BATCH] Empty entity type provided, using default configuration");
-            return GetDefaultConfiguration();
+            _logger.LogError("🚨 [CONFIG-SERVICE-DEBUG] Empty entity type provided, using default configuration");
+            var defaultConfig = GetDefaultConfiguration();
+            _logger.LogError("🔧 [CONFIG-SERVICE-DEBUG] DEFAULT config returned: " +
+                           "ChunkSize={ChunkSize}, FetchBatchSize={FetchBatchSize}, PageSize={PageSize}, " +
+                           "SubBatchSize={SubBatchSize}, MaxConcurrency={MaxConcurrency}, ProcessSubBatchesSequentially={ProcessSubBatchesSequentially}",
+                           defaultConfig.ChunkSize, defaultConfig.FetchBatchSize, defaultConfig.PageSize, 
+                           defaultConfig.SubBatchSize, defaultConfig.MaxConcurrency, defaultConfig.ProcessSubBatchesSequentially);
+            return defaultConfig;
         }
 
         var normalizedEntityType = entityType.ToLowerInvariant();
+        _logger.LogError("🔍 [CONFIG-SERVICE-DEBUG] Normalized entityType: '{OriginalEntityType}' → '{NormalizedEntityType}'", 
+            entityType, normalizedEntityType);
         
         if (_configurations.TryGetValue(normalizedEntityType, out var config))
         {
-            _logger.LogDebug("🎯 [SUB-BATCH] Found configuration for {EntityType}: " +
-                           "SubBatchSize={SubBatchSize}, MaxConcurrency={MaxConcurrency}, DelayMs={DelayMs}",
-                entityType, config.SubBatchSize, config.MaxConcurrency, config.SubBatchDelayMs);
+            _logger.LogError("✅ [CONFIG-SERVICE-DEBUG] FOUND specific config for '{EntityType}': " +
+                           "ChunkSize={ChunkSize}, FetchBatchSize={FetchBatchSize}, PageSize={PageSize}, " +
+                           "SubBatchSize={SubBatchSize}, MaxConcurrency={MaxConcurrency}, ProcessSubBatchesSequentially={ProcessSubBatchesSequentially}",
+                           entityType, config.ChunkSize, config.FetchBatchSize, config.PageSize, 
+                           config.SubBatchSize, config.MaxConcurrency, config.ProcessSubBatchesSequentially);
             return config;
         }
 
-        _logger.LogWarning("⚠️ [SUB-BATCH] No configuration found for entity type '{EntityType}', using default", entityType);
-        return GetDefaultConfiguration();
+        _logger.LogError("⚠️ [CONFIG-SERVICE-DEBUG] NO CONFIG FOUND for '{EntityType}', using default", entityType);
+        var fallbackConfig = GetDefaultConfiguration();
+        _logger.LogError("🔧 [CONFIG-SERVICE-DEBUG] FALLBACK config for '{EntityType}': " +
+                       "ChunkSize={ChunkSize}, FetchBatchSize={FetchBatchSize}, PageSize={PageSize}, " +
+                       "SubBatchSize={SubBatchSize}, MaxConcurrency={MaxConcurrency}, ProcessSubBatchesSequentially={ProcessSubBatchesSequentially}",
+                       entityType, fallbackConfig.ChunkSize, fallbackConfig.FetchBatchSize, fallbackConfig.PageSize, 
+                       fallbackConfig.SubBatchSize, fallbackConfig.MaxConcurrency, fallbackConfig.ProcessSubBatchesSequentially);
+        return fallbackConfig;
     }
 
     public Dictionary<string, SubBatchConfiguration> GetAllConfigurations()
@@ -71,6 +90,8 @@ public class SubBatchConfigurationService : ISubBatchConfigurationService
                     {
                         EntityType = entityType,
                         PageSize = entitySection.GetValue<int>("pageSize", 50),
+                        ChunkSize = entitySection.GetValue<int>("chunkSize", 50),
+                        FetchBatchSize = entitySection.GetValue<int>("fetchBatchSize", entityType == "brands" ? 50 : 250),
                         SubBatchSize = entitySection.GetValue<int>("subBatchSize", 5),
                         MaxConcurrency = entitySection.GetValue<int>("maxConcurrency", 5),
                         EnableSubBatching = entitySection.GetValue<bool>("enableSubBatching", true),
@@ -93,6 +114,8 @@ public class SubBatchConfigurationService : ISubBatchConfigurationService
                 {
                     EntityType = "default",
                     PageSize = defaultSection.GetValue<int>("pageSize", 50),
+                    ChunkSize = defaultSection.GetValue<int>("chunkSize", 50),
+                    FetchBatchSize = defaultSection.GetValue<int>("fetchBatchSize", 250),
                     SubBatchSize = defaultSection.GetValue<int>("subBatchSize", 5),
                     MaxConcurrency = defaultSection.GetValue<int>("maxConcurrency", 5),
                     EnableSubBatching = defaultSection.GetValue<bool>("enableSubBatching", true),
@@ -101,6 +124,12 @@ public class SubBatchConfigurationService : ISubBatchConfigurationService
                 };
 
                 configurations["default"] = defaultConfig;
+                
+                _logger.LogError("📋 [CONFIG-SERVICE-DEBUG] Loaded DEFAULT configuration: " +
+                               "ChunkSize={ChunkSize}, FetchBatchSize={FetchBatchSize}, PageSize={PageSize}, " +
+                               "SubBatchSize={SubBatchSize}, MaxConcurrency={MaxConcurrency}, ProcessSubBatchesSequentially={ProcessSubBatchesSequentially}",
+                               defaultConfig.ChunkSize, defaultConfig.FetchBatchSize, defaultConfig.PageSize, 
+                               defaultConfig.SubBatchSize, defaultConfig.MaxConcurrency, defaultConfig.ProcessSubBatchesSequentially);
             }
 
             _logger.LogInformation("✅ [SUB-BATCH] Successfully loaded {ConfigCount} configurations from appsettings.json", 
@@ -124,19 +153,31 @@ public class SubBatchConfigurationService : ISubBatchConfigurationService
     {
         if (_configurations.TryGetValue("default", out var defaultConfig))
         {
+            _logger.LogError("🔧 [CONFIG-SERVICE-DEBUG] Returning DEFAULT configuration from loaded configs");
             return defaultConfig;
         }
 
         // Ultimate fallback configuration
-        return new SubBatchConfiguration
+        _logger.LogError("🚨 [CONFIG-SERVICE-DEBUG] Creating ULTIMATE FALLBACK configuration");
+        var fallbackConfig = new SubBatchConfiguration
         {
             EntityType = "fallback",
             PageSize = 50,
+            ChunkSize = 50,
+            FetchBatchSize = 250,
             SubBatchSize = 5,
             MaxConcurrency = 5,
             EnableSubBatching = true,
             SubBatchDelayMs = 0,
             ProcessSubBatchesSequentially = true
         };
+        
+        _logger.LogError("🔧 [CONFIG-SERVICE-DEBUG] ULTIMATE FALLBACK config: " +
+                       "ChunkSize={ChunkSize}, FetchBatchSize={FetchBatchSize}, PageSize={PageSize}, " +
+                       "SubBatchSize={SubBatchSize}, MaxConcurrency={MaxConcurrency}, ProcessSubBatchesSequentially={ProcessSubBatchesSequentially}",
+                       fallbackConfig.ChunkSize, fallbackConfig.FetchBatchSize, fallbackConfig.PageSize, 
+                       fallbackConfig.SubBatchSize, fallbackConfig.MaxConcurrency, fallbackConfig.ProcessSubBatchesSequentially);
+        
+        return fallbackConfig;
     }
 }

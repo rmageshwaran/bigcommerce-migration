@@ -1,6 +1,7 @@
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
 using Microsoft.Extensions.Logging;
+using System;
 
 namespace BigCommerce.Migration.Orchestration.Strategies;
 
@@ -52,11 +53,17 @@ public class V3EfficientPaginationStrategy : IEntityDiscoveryStrategy
             _logger.LogInformation("🔍 V3 Efficient Discovery: Starting metadata-only discovery for {EntityType} in migration {MigrationId}", 
                 request.EntityType, request.MigrationId);
 
-            // ✅ CORRECT DESIGN: Fetch ONLY first page to get total count and pagination metadata
+            // 🚨 CRITICAL FIX: Use same limit as processing to ensure consistent pagination metadata
+            // Discovery must match processing chunk size to prevent pagination overlaps
+            var discoveryLimit = request.EntityType.Equals("brands", StringComparison.OrdinalIgnoreCase) ? 50 : 250;
+            
+            _logger.LogInformation("🔧 [PAGINATION-FIX] Using discoveryLimit={DiscoveryLimit} for {EntityType} to match processing chunk size (brands=50, others=250)", 
+                discoveryLimit, request.EntityType);
+            
             var paginationRequest = new BigCommercePaginationRequest
             {
                 Page = 1,
-                Limit = 250, // Use large limit for efficiency, but only fetch first page
+                Limit = discoveryLimit, // MUST match processing chunk size for pagination consistency
                 IncludeDeleted = request.EntityConfig.IncludeDeleted,
                 IncludeDrafts = request.EntityConfig.IncludeDrafts,
                 SortBy = "id",

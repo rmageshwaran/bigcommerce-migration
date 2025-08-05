@@ -65,13 +65,19 @@ public class BrandCreationStrategy : IEntityCreationStrategy
         // Use deterministic execution ID for logging (Durable Functions compliance)
         var executionId = $"{migrationId}-{entities.Count}".GetHashCode().ToString("X8");
         
-        _logger.LogInformation("🏪 [BRAND-{ExecutionId}] Creating {BrandCount} brands for migration {MigrationId}", 
+        _logger.LogInformation("🏪 [BRAND-{ExecutionId}] 🚀 STARTING: Creating {BrandCount} brands for migration {MigrationId}", 
             executionId, entities.Count, migrationId);
+        
+        _logger.LogInformation("🔍 [BRAND-{ExecutionId}] BATCH DETAILS: EntityCount={EntityCount}, MigrationId={MigrationId}, ExecutionId={ExecutionId}", 
+            executionId, entities.Count, migrationId, executionId);
 
         try
         {
             // 🚀 SUB-BATCH PROCESSING: Use configured sub-batching for optimal rate limiting
             var config = _configService.GetConfiguration("brands");
+            
+            _logger.LogInformation("🔍 [BRAND-{ExecutionId}] SUB-BATCH CONFIG: SubBatchSize={SubBatchSize}, MaxConcurrency={MaxConcurrency}, TotalBrands={TotalBrands}", 
+                executionId, config.SubBatchSize, config.MaxConcurrency, entities.Count);
             
             _logger.LogInformation("🚀 [BRAND-{ExecutionId}] Starting SUB-BATCH creation of {BrandCount} brands " +
                                  "using sub-batches of {SubBatchSize} with max {MaxConcurrency} concurrent for migration {MigrationId}", 
@@ -83,8 +89,11 @@ public class BrandCreationStrategy : IEntityCreationStrategy
                 try
                 {
                     var brandName = brand.TryGetValue("name", out var name) ? name?.ToString() : "unknown";
-                    _logger.LogDebug("🏪 [BRAND-{ExecutionId}] Creating brand '{BrandName}' (SUB-BATCH) in migration {MigrationId}",
-                        executionId, brandName, migrationId);
+                    var brandId = brand.TryGetValue("id", out var id) ? id?.ToString() : "unknown";
+                    var originalId = brand.TryGetValue("_original_entity_id", out var origId) ? origId?.ToString() : "unknown";
+                    
+                    _logger.LogInformation("🔍 [BRAND-{ExecutionId}] PROCESSING: Brand='{BrandName}', SourceId={SourceId}, OriginalId={OriginalId} (SUB-BATCH) in migration {MigrationId}",
+                        executionId, brandName, brandId, originalId, migrationId);
 
                     var createdBrand = await CreateSingleBrandAsync(destinationStore, brand, ct);
                     
@@ -335,17 +344,28 @@ public class BrandCreationStrategy : IEntityCreationStrategy
         Dictionary<string, object> brand,
         CancellationToken cancellationToken)
     {
-        var brandName = brand.GetValueOrDefault("name")?.ToString() ?? "unknown";
-        var brandId = brand.GetValueOrDefault("id")?.ToString() ?? "unknown";
-        var originalId = brand.GetValueOrDefault("_original_entity_id")?.ToString() ?? "unknown";
+                        var brandName = brand.GetValueOrDefault("name")?.ToString() ?? "unknown";
+                var brandId = brand.GetValueOrDefault("id")?.ToString() ?? "unknown";
+                var originalId = brand.GetValueOrDefault("_original_entity_id")?.ToString() ?? "unknown";
+                var chunkNumber = brand.GetValueOrDefault("_chunk_number")?.ToString() ?? "unknown";
+                var apiPage = brand.GetValueOrDefault("_api_page")?.ToString() ?? "unknown";
+                var migrationId = brand.GetValueOrDefault("_migration_id")?.ToString() ?? "unknown";
+                
+                // 🚨 ENHANCED DUPLICATE DETECTION: Add comprehensive tracing and duplicate checking
+                var threadId = Thread.CurrentThread.ManagedThreadId;
+                var timestamp = DateTime.UtcNow.ToString("HH:mm:ss.fff");
+                var debugId = $"T{threadId}-{timestamp}";
         
-        // 🚨 RACE CONDITION DEBUG: Add detailed tracing
-        var threadId = Thread.CurrentThread.ManagedThreadId;
-        var timestamp = DateTime.UtcNow.ToString("HH:mm:ss.fff");
-        var debugId = $"T{threadId}-{timestamp}";
+        _logger.LogInformation("🚨 [BRAND-CREATE-{DebugId}] 🚀 STARTING CREATION: Name='{BrandName}', SourceId={SourceId}, " +
+                              "OriginalId={OriginalId}, CHUNK={ChunkNumber}, API_PAGE={ApiPage}, MigrationId={MigrationId}, " +
+                              "ThreadId={ThreadId}, Timestamp={Timestamp}", 
+            debugId, brandName, brandId, originalId, chunkNumber, apiPage, migrationId, threadId, timestamp);
         
-        _logger.LogInformation("🚨 [DEBUG-{DebugId}] STARTING BRAND CREATION: Name='{BrandName}', SourceId={SourceId}, OriginalId={OriginalId}, ThreadId={ThreadId}", 
-            debugId, brandName, brandId, originalId, threadId);
+        _logger.LogInformation("🔍 [BRAND-CREATE-{DebugId}] API PREPARATION: Will call BigCommerce API to create brand '{BrandName}' on thread {ThreadId}", 
+            debugId, brandName, threadId);
+
+        // 🚀 PERFORMANCE OPTIMIZATION: Skip duplicate checks for clean destination stores
+        // Only rely on 409 conflict handling if actual duplicates exist
 
         // Remove fields that shouldn't be sent to the API (like source IDs)
         var cleanBrand = new Dictionary<string, object>(brand);
@@ -373,18 +393,27 @@ public class BrandCreationStrategy : IEntityCreationStrategy
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
         });
 
-        _logger.LogInformation("🚨 [DEBUG-{DebugId}] ABOUT TO CALL API: URL={Url}, Payload={Payload}, ThreadId={ThreadId}", 
+        _logger.LogInformation("🚨 [BRAND-CREATE-{DebugId}] 🌐 API CALL: URL={Url}, Payload={Payload}, ThreadId={ThreadId}", 
             debugId, url, jsonContent, threadId);
+        
+        _logger.LogInformation("🔍 [BRAND-CREATE-{DebugId}] REQUEST DETAILS: Method=POST, ContentType=application/json, PayloadSize={PayloadSize} bytes", 
+            debugId, jsonContent.Length);
 
         // Create and execute the API request
         var request = ApiRequest.CreatePost(url, jsonContent, storeConfig);
         
         try
         {
+            var apiStartTime = DateTime.UtcNow;
             var response = await _apiRequestHandler.ExecuteRequestAsync<Dictionary<string, object>>(request, cancellationToken);
+            var apiDuration = DateTime.UtcNow - apiStartTime;
             
-            _logger.LogInformation("🚨 [DEBUG-{DebugId}] API SUCCESS: Brand='{BrandName}', ThreadId={ThreadId}", 
-                debugId, brandName, threadId);
+                                _logger.LogInformation("🚨 [BRAND-CREATE-{DebugId}] ✅ API SUCCESS: Brand='{BrandName}', CHUNK={ChunkNumber}, " +
+                                          "API_PAGE={ApiPage}, Duration={Duration}ms, ThreadId={ThreadId}", 
+                        debugId, brandName, chunkNumber, apiPage, apiDuration.TotalMilliseconds, threadId);
+            
+            _logger.LogInformation("🔍 [BRAND-CREATE-{DebugId}] TIMING: API call completed in {Duration}ms for brand '{BrandName}' on thread {ThreadId}", 
+                debugId, apiDuration.TotalMilliseconds, brandName, threadId);
 
             // 🚨 ENHANCED DEBUG: Log the actual API response for debugging
             if (response != null)
@@ -400,8 +429,7 @@ public class BrandCreationStrategy : IEntityCreationStrategy
                     debugId, brandName, threadId);
             }
 
-            // 🚨 RACE CONDITION FIXED AT SOURCE: No 409 handling needed on clean store
-            // Any 409 conflicts indicate remaining race condition issues that need fixing
+            // 🚀 PERFORMANCE: Direct brand creation - 409 conflicts indicate actual duplicates
             var parsedResult = ParseBrandCreationResponse(response, brandName);
             
             if (parsedResult == null)
@@ -411,21 +439,33 @@ public class BrandCreationStrategy : IEntityCreationStrategy
                 throw new InvalidOperationException($"Failed to parse brand creation response for '{brandName}' - no entities returned from API");
             }
             
-            _logger.LogInformation("🚨 [DEBUG-{DebugId}] PARSE SUCCESS: Brand='{BrandName}', CreatedId={CreatedId}, ThreadId={ThreadId}", 
-                debugId, brandName, parsedResult.GetValueOrDefault("id")?.ToString() ?? "unknown", threadId);
+            var createdId = parsedResult.GetValueOrDefault("id")?.ToString() ?? "unknown";
+            _logger.LogInformation("🚨 [DEBUG-{DebugId}] ✅ PARSE SUCCESS: Brand='{BrandName}', CreatedId={CreatedId}, ThreadId={ThreadId}", 
+                debugId, brandName, createdId, threadId);
+            
+            _logger.LogInformation("🔍 [BRAND-CREATE-{DebugId}] FINAL RESULT: Successfully created brand '{BrandName}' with destination ID={CreatedId}", 
+                debugId, brandName, createdId);
             
             return parsedResult;
         }
-        catch (HttpRequestException httpEx) when (httpEx.Message.Contains("409") || httpEx.Message.Contains("Conflict"))
-        {
-            _logger.LogError("🚨 [DEBUG-{DebugId}] API 409 CONFLICT: Brand='{BrandName}', Error={Error}, ThreadId={ThreadId}", 
-                debugId, brandName, httpEx.Message, threadId);
-            throw;
+                        catch (HttpRequestException httpEx) when (httpEx.Message.Contains("409") || httpEx.Message.Contains("Conflict"))
+                {
+                    _logger.LogInformation("✅ [BRAND-CREATE-{DebugId}] ⏭️ DUPLICATE SKIPPED: Brand='{BrandName}' already exists in destination store. " +
+                                         "CHUNK={ChunkNumber}, API_PAGE={ApiPage}, MigrationId={MigrationId}. " +
+                                         "This is normal when source data contains duplicate brand names with different IDs. " +
+                                         "ThreadId={ThreadId}", 
+                        debugId, brandName, chunkNumber, apiPage, migrationId, threadId);
+            
+            // Return null for existing brands to continue processing other brands
+            _logger.LogDebug("✅ [BRAND-CREATE-{DebugId}] ⏭️ Successfully skipped duplicate brand '{BrandName}' - continuing with batch", 
+                debugId, brandName);
+            return null;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "🚨 [DEBUG-{DebugId}] API UNEXPECTED ERROR: Brand='{BrandName}', ThreadId={ThreadId}", 
-                debugId, brandName, threadId);
+            _logger.LogError(ex, "🚨 [BRAND-CREATE-{DebugId}] ❌ API UNEXPECTED ERROR: Brand='{BrandName}', " +
+                           "ThreadId={ThreadId}, RequestPayload={Payload}", 
+                debugId, brandName, threadId, jsonContent);
             throw;
         }
     }

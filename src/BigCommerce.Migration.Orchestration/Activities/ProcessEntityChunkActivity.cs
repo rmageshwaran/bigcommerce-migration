@@ -57,9 +57,15 @@ public class ProcessEntityChunkActivity
         var startTime = DateTime.UtcNow;
         var chunkId = $"chunk-{request.ChunkNumber}";
         
-        _logger.LogInformation("🎯 [CHUNK-{ChunkNumber}] Starting chunk processing: {ChunkSize} {EntityType} entities " +
-                             "for migration {MigrationId} (timeout-safe design)",
-            request.ChunkNumber, request.ChunkSize, request.EntityType, request.MigrationId);
+                _logger.LogInformation("🎯 [CHUNK-{ChunkNumber}] 🚀 STARTING: Processing {ChunkSize} {EntityType} entities " +
+                                     "for migration {MigrationId} (BatchNumber={BatchNumber}, TotalChunks={TotalChunks}, StartIndex={StartIndex})",
+            request.ChunkNumber, request.ChunkSize, request.EntityType, request.MigrationId, 
+            request.ChunkNumber, request.TotalChunks, request.StartIndex);
+            
+        _logger.LogInformation("🎯 [CHUNK-{ChunkNumber}] 📋 CHUNK DETAILS: UseDirectPagination={UseDirectPagination}, " +
+                              "EntityIds.Count={EntityIdsCount}, ChunkId=CHUNK-{ChunkNumber}-{EntityType}",
+            request.ChunkNumber, request.UseDirectPagination, request.EntityIds?.Count ?? 0, 
+            request.ChunkNumber, request.EntityType);
 
         try
         {

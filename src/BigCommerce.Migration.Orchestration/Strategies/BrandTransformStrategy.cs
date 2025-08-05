@@ -1,6 +1,7 @@
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
 using Microsoft.Extensions.Logging;
+using System.Threading;
 
 namespace BigCommerce.Migration.Orchestration.Strategies;
 
@@ -27,13 +28,24 @@ public class BrandTransformStrategy : IEntityTransformStrategy
         CategoryTreeContext? categoryTreeContext = null,
         CancellationToken cancellationToken = default)
     {
-        _logger.LogDebug("Transforming brand for migration {MigrationId}", migrationId);
+        // 🚨 ENHANCED DEBUG: Track individual brand transformations
+        var brandId = entity.TryGetValue("id", out var id) ? id?.ToString() : "unknown";
+        var originalId = entity.TryGetValue("_original_entity_id", out var origId) ? origId?.ToString() : "unknown";
+        var threadId = Thread.CurrentThread.ManagedThreadId;
+        var transformId = Guid.NewGuid().ToString("N")[..8];
+        
+        _logger.LogInformation("🔄 [TRANSFORM-{TransformId}] 🚀 STARTING: Brand transformation for SourceId={SourceId}, " +
+                              "OriginalId={OriginalId}, ThreadId={ThreadId}, MigrationId={MigrationId}", 
+            transformId, brandId, originalId, threadId, migrationId);
         
         var transformed = new Dictionary<string, object>();
 
         // Required field: name
         var brandName = GetStringValue(entity, "name") ?? GetStringValue(entity, "brand_name") ?? "Unnamed Brand";
         transformed["name"] = brandName;
+        
+        _logger.LogInformation("🔄 [TRANSFORM-{TransformId}] BRAND NAME: '{BrandName}' (SourceId={SourceId}, ThreadId={ThreadId})", 
+            transformId, brandName, brandId, threadId);
 
         if (brandName == "Unnamed Brand")
         {
@@ -84,8 +96,29 @@ public class BrandTransformStrategy : IEntityTransformStrategy
             transformed["custom_url"] = customUrl;
         }
 
-        _logger.LogDebug("Transformed brand '{BrandName}' with {FieldCount} fields for migration {MigrationId}", 
-            brandName, transformed.Count, migrationId);
+        // 🚨 CRITICAL FIX: Preserve chunk tracking metadata from fetch phase
+        // This metadata is essential for debugging race conditions and chunk overlap
+        if (entity.TryGetValue("_chunk_number", out var chunkNumber))
+        {
+            transformed["_chunk_number"] = chunkNumber;
+        }
+        if (entity.TryGetValue("_api_page", out var apiPage))
+        {
+            transformed["_api_page"] = apiPage;
+        }
+        if (entity.TryGetValue("_migration_id", out var migId))
+        {
+            transformed["_migration_id"] = migId;
+        }
+        if (entity.TryGetValue("_original_entity_id", out var origEntityId))
+        {
+            transformed["_original_entity_id"] = origEntityId;
+        }
+        
+        _logger.LogInformation("🔄 [TRANSFORM-{TransformId}] ✅ COMPLETED: Brand '{BrandName}' transformed with {FieldCount} fields " +
+                              "CHUNK={ChunkNumber}, API_PAGE={ApiPage} (SourceId={SourceId}, ThreadId={ThreadId}, MigrationId={MigrationId})", 
+            transformId, brandName, transformed.Count, chunkNumber?.ToString() ?? "unknown", 
+            apiPage?.ToString() ?? "unknown", brandId, threadId, migrationId);
 
         return await Task.FromResult(transformed);
     }

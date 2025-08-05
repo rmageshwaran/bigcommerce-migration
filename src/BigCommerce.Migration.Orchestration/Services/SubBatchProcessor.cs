@@ -38,10 +38,11 @@ public class SubBatchProcessor : ISubBatchProcessor
         }
 
         var executionId = migrationId.GetHashCode().ToString("X8");
+        var startTime = DateTime.UtcNow;
         
         _logger.LogInformation("🚀 [SUB-BATCH-{ExecutionId}] Starting sub-batch processing: {TotalCount} {EntityType} entities " +
-                             "in sub-batches of {SubBatchSize} with max {MaxConcurrency} concurrent",
-            executionId, entities.Count, entityType, config.SubBatchSize, config.MaxConcurrency);
+                             "in sub-batches of {SubBatchSize} with max {MaxConcurrency} concurrent at {StartTime}",
+            executionId, entities.Count, entityType, config.SubBatchSize, config.MaxConcurrency, startTime.ToString("HH:mm:ss.fff"));
 
         var results = new List<TOutput>();
         var semaphore = new SemaphoreSlim(config.MaxConcurrency, config.MaxConcurrency);
@@ -91,26 +92,44 @@ public class SubBatchProcessor : ISubBatchProcessor
         async Task<List<TOutput>> SubBatchProcessor(List<TInput> subBatch, CancellationToken ct)
         {
             var subBatchResults = new List<TOutput>();
+            var subBatchId = Guid.NewGuid().ToString("N")[..8];
+            var threadId = Thread.CurrentThread.ManagedThreadId;
             
-            foreach (var entity in subBatch)
+            _logger.LogDebug("🔧 [SUB-BATCH-{SubBatchId}] Processing sub-batch of {Count} {EntityType} entities on thread {ThreadId}",
+                subBatchId, subBatch.Count, entityType, threadId);
+            
+            for (int i = 0; i < subBatch.Count; i++)
             {
                 ct.ThrowIfCancellationRequested();
                 
                 try
                 {
-                    var result = await individualProcessor(entity, ct);
+                    var entityStartTime = DateTime.UtcNow;
+                    var result = await individualProcessor(subBatch[i], ct);
+                    var entityDuration = DateTime.UtcNow - entityStartTime;
+                    
                     if (result != null)
                     {
                         subBatchResults.Add(result);
+                        _logger.LogDebug("✅ [SUB-BATCH-{SubBatchId}] Entity {Index}/{Count} processed successfully in {Duration}ms on thread {ThreadId}",
+                            subBatchId, i + 1, subBatch.Count, entityDuration.TotalMilliseconds, threadId);
+                    }
+                    else
+                    {
+                        _logger.LogDebug("⚠️ [SUB-BATCH-{SubBatchId}] Entity {Index}/{Count} returned null (duplicate/skip) in {Duration}ms on thread {ThreadId}",
+                            subBatchId, i + 1, subBatch.Count, entityDuration.TotalMilliseconds, threadId);
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "⚠️ [SUB-BATCH] Failed to process individual {EntityType} entity: {ErrorMessage}",
-                        entityType, ex.Message);
+                    _logger.LogWarning(ex, "❌ [SUB-BATCH-{SubBatchId}] Entity {Index}/{Count} failed on thread {ThreadId}: {ErrorMessage}",
+                        subBatchId, i + 1, subBatch.Count, threadId, ex.Message);
                     // Continue processing other entities in the sub-batch
                 }
             }
+            
+            _logger.LogDebug("🔧 [SUB-BATCH-{SubBatchId}] Completed: {SuccessCount}/{TotalCount} entities processed successfully on thread {ThreadId}",
+                subBatchId, subBatchResults.Count, subBatch.Count, threadId);
             
             return subBatchResults;
         }

@@ -62,9 +62,9 @@ services:
       
       # Brand-Specific Production Settings (Conservative but Fast)
       - ParallelProcessing__subBatchConfigurations__brands__entityType=brands
-      - ParallelProcessing__subBatchConfigurations__brands__pageSize=50
-      - ParallelProcessing__subBatchConfigurations__brands__chunkSize=50
-      - ParallelProcessing__subBatchConfigurations__brands__fetchBatchSize=50
+      - ParallelProcessing__subBatchConfigurations__brands__pageSize=250
+      - ParallelProcessing__subBatchConfigurations__brands__chunkSize=250
+      - ParallelProcessing__subBatchConfigurations__brands__fetchBatchSize=250
       - ParallelProcessing__subBatchConfigurations__brands__subBatchSize=20
       - ParallelProcessing__subBatchConfigurations__brands__maxConcurrency=15
       - ParallelProcessing__subBatchConfigurations__brands__enableSubBatching=true
@@ -73,8 +73,8 @@ services:
       
       # Default Production Configuration for Other Entities
       - ParallelProcessing__defaultSubBatchConfiguration__entityType=default
-      - ParallelProcessing__defaultSubBatchConfiguration__pageSize=50
-      - ParallelProcessing__defaultSubBatchConfiguration__chunkSize=50
+      - ParallelProcessing__defaultSubBatchConfiguration__pageSize=250
+      - ParallelProcessing__defaultSubBatchConfiguration__chunkSize=250
       - ParallelProcessing__defaultSubBatchConfiguration__fetchBatchSize=250
       - ParallelProcessing__defaultSubBatchConfiguration__subBatchSize=15
       - ParallelProcessing__defaultSubBatchConfiguration__maxConcurrency=10

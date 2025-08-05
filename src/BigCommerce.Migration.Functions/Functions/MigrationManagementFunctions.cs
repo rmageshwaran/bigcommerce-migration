@@ -99,6 +99,8 @@ public class MigrationManagementFunctions : BaseFunction
                 return await CreateErrorResponseAsync(req, HttpStatusCode.BadRequest, validationResult.ErrorMessage, migrationId);
             }
 
+
+
             // Create migration entry for Azure Storage
             var migrationEntry = new Core.Models.MigrationEntry
             {

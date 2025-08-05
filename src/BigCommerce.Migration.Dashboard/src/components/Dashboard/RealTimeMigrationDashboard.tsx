@@ -329,9 +329,7 @@ export const RealTimeMigrationDashboard: React.FC<RealTimeMigrationDashboardProp
   useEffect(() => {
     if (progress?.status === 'completed' && onMigrationComplete) {
       onMigrationComplete(migrationId);
-      setSnackbarMessage('Migration completed successfully!');
-      setSnackbarSeverity('success');
-      setSnackbarOpen(true);
+      // ✅ FIX: Don't create duplicate notifications - DashboardContext already handles this via notificationService
     }
   }, [progress?.status, migrationId, onMigrationComplete]);
 
@@ -339,9 +337,7 @@ export const RealTimeMigrationDashboard: React.FC<RealTimeMigrationDashboardProp
   useEffect(() => {
     if (progress?.status === 'failed' && onMigrationError) {
       onMigrationError(migrationId, { status: 'failed' });
-      setSnackbarMessage('Migration failed. Check error details.');
-      setSnackbarSeverity('error');
-      setSnackbarOpen(true);
+      // ✅ FIX: Don't create duplicate notifications - DashboardContext already handles this via notificationService
     }
   }, [progress?.status, migrationId, onMigrationError]);
 

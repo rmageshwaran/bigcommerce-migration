@@ -73,7 +73,8 @@ public class OpenSearchService : IOpenSearchService
         }
         catch (OperationCanceledException)
         {
-            throw;
+            _logger.LogInformation("Migration event logging was cancelled for {EventType} and entity {EntityId}", eventType, entityId);
+            throw; // Infrastructure service - let caller handle cancellation appropriately
         }
         catch (Exception ex)
         {
@@ -121,7 +122,8 @@ public class OpenSearchService : IOpenSearchService
         }
         catch (OperationCanceledException)
         {
-            throw;
+            _logger.LogInformation("Performance metrics logging was cancelled for operation {OperationName}", operationName);
+            throw; // Infrastructure service - let caller handle cancellation appropriately
         }
         catch (Exception ex)
         {
@@ -213,7 +215,8 @@ public class OpenSearchService : IOpenSearchService
         }
         catch (OperationCanceledException)
         {
-            throw;
+            _logger.LogInformation("Error logging was cancelled for context '{Context}'", context);
+            throw; // Infrastructure service - let caller handle cancellation appropriately
         }
         catch (Exception ex)
         {
@@ -274,7 +277,8 @@ public class OpenSearchService : IOpenSearchService
         }
         catch (OperationCanceledException)
         {
-            throw;
+            _logger.LogInformation("Log search was cancelled for query '{SearchQuery}'", searchQuery);
+            throw; // Infrastructure service - let caller handle cancellation appropriately
         }
         catch (Exception ex)
         {
@@ -297,8 +301,8 @@ public class OpenSearchService : IOpenSearchService
         {
             // Use specific error index pattern for error queries, broader pattern for others
             var indexPattern = !string.IsNullOrEmpty(queryRequest.Level) && queryRequest.Level.Equals("Error", StringComparison.OrdinalIgnoreCase)
-                ? "bigcommerce-migration-logs-errors-*"  // Specific error index for error queries
-                : "bigcommerce-migration-*";             // Broader index for other queries
+                ? $"{_configuration.DefaultIndex}-errors-*"  // ✅ FIX: Match actual error index pattern (remove extra "logs")
+                : $"{_configuration.DefaultIndex}-*";        // Broader index for other queries
             
             // Build the actual query using descriptor pattern
             var queryDescriptor = BuildStructuredQueryDescriptor(new QueryContainerDescriptor<object>(), queryRequest);
@@ -328,7 +332,8 @@ public class OpenSearchService : IOpenSearchService
         }
         catch (OperationCanceledException)
         {
-            throw;
+            _logger.LogInformation("Optimized search was cancelled for query request {QueryRequest}", queryRequest);
+            throw; // Infrastructure service - let caller handle cancellation appropriately
         }
         catch (Exception ex)
         {
@@ -340,13 +345,13 @@ public class OpenSearchService : IOpenSearchService
     /// <summary>
     /// Builds optimized index pattern based on date range and query type to limit search scope
     /// </summary>
-    private string BuildOptimizedIndexPattern(DateTime fromDate, DateTime toDate, OpenSearchQuery queryRequest = null)
+    private string BuildOptimizedIndexPattern(DateTime fromDate, DateTime toDate, OpenSearchQuery? queryRequest = null)
     {
         // For error searches, use the specific error index pattern
         if (queryRequest != null && !string.IsNullOrEmpty(queryRequest.Level) && 
             queryRequest.Level.Equals("Error", StringComparison.OrdinalIgnoreCase))
         {
-            return $"{_configuration.DefaultIndex}-logs-errors-*";
+            return $"{_configuration.DefaultIndex}-errors-*"; // ✅ FIX: Match actual error index pattern (remove extra "logs")
         }
         
         // For compatibility with existing data, use wildcard pattern like legacy search
@@ -453,6 +458,11 @@ public class OpenSearchService : IOpenSearchService
 
             return response.Aggregations.ToDictionary(kvp => kvp.Key, kvp => (object)kvp.Value);
         }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Batch search was cancelled for migration IDs {MigrationIds}", string.Join(", ", migrationIds));
+            throw; // Infrastructure service - let caller handle cancellation appropriately
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error in batch search");
@@ -474,7 +484,8 @@ public class OpenSearchService : IOpenSearchService
         }
         catch (OperationCanceledException)
         {
-            throw;
+            _logger.LogInformation("OpenSearch health check was cancelled");
+            throw; // Infrastructure service - let caller handle cancellation appropriately
         }
         catch (Exception ex)
         {
@@ -534,7 +545,9 @@ public class OpenSearchService : IOpenSearchService
         }
         catch (OperationCanceledException)
         {
-            throw;
+            _logger.LogInformation("Batch processing event logging was cancelled for migration ID {MigrationId}, entity type {EntityType}, batch {BatchNumber}", 
+                migrationId, entityType, batchNumber);
+            throw; // Infrastructure service - let caller handle cancellation appropriately
         }
         catch (Exception ex)
         {

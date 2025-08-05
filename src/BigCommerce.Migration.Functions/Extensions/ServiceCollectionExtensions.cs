@@ -1,5 +1,6 @@
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
+using BigCommerce.Migration.Core.Services;
 using BigCommerce.Migration.Infrastructure.Services;
 using BigCommerce.Migration.Functions.Services;
 using BigCommerce.Migration.Functions.Middleware;
@@ -48,7 +49,7 @@ public static class ServiceCollectionExtensions
         services.AddHttpClients(configuration);
 
         // Add core services
-        services.AddCoreServices();
+        services.AddCoreServices(configuration);
 
         // Add orchestration services (Strategy Pattern and Activity implementations)
         services.AddOrchestrationServices();
@@ -101,6 +102,27 @@ public static class ServiceCollectionExtensions
 
         // Bind OpenSearch configuration using Options pattern
         services.Configure<OpenSearchConfiguration>(configuration.GetSection("OpenSearch"));
+
+        // 🎯 SUB-BATCH CONFIG: Bind ParallelProcessingConfiguration using Options pattern
+        services.Configure<ParallelProcessingConfiguration>(configuration.GetSection("ParallelProcessing"));
+        
+        // Register ParallelProcessingConfiguration as singleton with default values for backward compatibility
+        var parallelConfig = new ParallelProcessingConfiguration();
+        configuration.GetSection("ParallelProcessing").Bind(parallelConfig);
+        
+        // Initialize default sub-batch configurations if not provided
+        if (parallelConfig.SubBatchConfigurations.Count == 0)
+        {
+            parallelConfig.SubBatchConfigurations = SubBatchConfiguration.GetDefaultConfigurations();
+        }
+        
+        // Set default sub-batch configuration if not provided
+        if (string.IsNullOrEmpty(parallelConfig.DefaultSubBatchConfiguration.EntityType))
+        {
+            parallelConfig.DefaultSubBatchConfiguration = new SubBatchConfiguration();
+        }
+        
+        services.AddSingleton(parallelConfig);
 
         // Validate OpenSearch configuration (only if configuration is provided)
         var openSearchConfig = new OpenSearchConfiguration();
@@ -379,13 +401,13 @@ public static class ServiceCollectionExtensions
     /// <summary>
     /// Adds core business services with proper lifetimes
     /// </summary>
-    private static IServiceCollection AddCoreServices(this IServiceCollection services)
+    private static IServiceCollection AddCoreServices(this IServiceCollection services, IConfiguration configuration)
     {
         // Register services as singleton for better performance and test consistency
-        services.TryAddSingleton<ICategoryTreeResolver, CategoryTreeResolver>();
+        services.AddSingleton<ICategoryTreeResolver, CategoryTreeResolver>();
 
         // Register OpenSearch service - use no-op implementation when disabled
-        services.TryAddSingleton<IOpenSearchService>(serviceProvider =>
+        services.AddSingleton<IOpenSearchService>(serviceProvider =>
         {
             var openSearchConfig = serviceProvider.GetRequiredService<OpenSearchConfiguration>();
             var logger = serviceProvider.GetRequiredService<ILogger<OpenSearchService>>();
@@ -410,45 +432,90 @@ public static class ServiceCollectionExtensions
         });
 
         // Register Azure Storage services
-        services.TryAddSingleton<IBlobService, BlobService>();
-        services.TryAddSingleton<IQueueService, QueueService>();
-        services.TryAddScoped<IMigrationStorageService, MigrationStorageService>();
+        services.AddSingleton<IBlobService, BlobService>();
+        services.AddSingleton<IQueueService, QueueService>();
+        services.AddScoped<IMigrationStorageService, MigrationStorageService>();
 
         // Register API request handler for HTTP concerns (delegation pattern)
-        services.TryAddSingleton<IApiRequestHandler, ApiRequestHandler>();
+                    services.AddSingleton<IApiRequestHandler>(serviceProvider =>
+            {
+                var httpClient = serviceProvider.GetRequiredService<HttpClient>();
+                var rateLimitService = serviceProvider.GetRequiredService<IRateLimitService>();
+                var openSearchService = serviceProvider.GetRequiredService<IOpenSearchService>();
+                var logger = serviceProvider.GetRequiredService<ILogger<ApiRequestHandler>>();
+                var dynamicRateLimiter = serviceProvider.GetRequiredService<IDynamicRateLimiter>();
+                
+                return new ApiRequestHandler(httpClient, rateLimitService, openSearchService, logger, dynamicRateLimiter);
+            });
 
         // Register BigCommerce API client using delegation pattern
-        services.TryAddSingleton<IBigCommerceApiClient, BigCommerceApiClient>();
+        services.AddSingleton<IBigCommerceApiClient, BigCommerceApiClient>();
 
-        // Register orchestration services (from gap analysis - these were missing)
-        services.TryAddSingleton<IRateLimitService, RateLimitService>();
-        services.TryAddSingleton<IBatchSizeCalculator, BatchSizeCalculator>();
-        services.TryAddSingleton<IProgressTracker>(serviceProvider =>
+        // Register dynamic rate limiting configuration
+        services.Configure<DynamicRateLimitingConfiguration>(
+            configuration.GetSection("DynamicRateLimiting"));
+        
+        // Register dynamic rate limiting services (Phase 1 - Dynamic Rate Limiting)
+        services.AddSingleton<IDateTimeProvider, DateTimeProvider>();
+        services.AddSingleton<IApiHealthMonitor, ApiHealthMonitor>();
+        services.AddSingleton<IRateCalculator, BigCommerceAwareRateCalculator>();
+        
+        // Register base rate limiting service first
+        services.AddSingleton<RateLimitService>();
+        
+        // Register dynamic rate limiting service using decorator pattern
+        services.AddSingleton<IDynamicRateLimiter>(serviceProvider =>
+        {
+            var logger = serviceProvider.GetRequiredService<ILogger<DynamicRateLimitService>>();
+            var baseRateLimitService = serviceProvider.GetRequiredService<RateLimitService>();
+            var healthMonitor = serviceProvider.GetRequiredService<IApiHealthMonitor>();
+            var rateCalculator = serviceProvider.GetRequiredService<IRateCalculator>();
+            
+            return new DynamicRateLimitService(logger, baseRateLimitService, healthMonitor, rateCalculator);
+        });
+        
+        // Register IRateLimitService to use dynamic implementation for backward compatibility
+        services.AddSingleton<IRateLimitService>(serviceProvider => 
+            serviceProvider.GetRequiredService<IDynamicRateLimiter>());
+        
+        services.AddSingleton<IBatchSizeCalculator, BatchSizeCalculator>();
+        services.AddSingleton<IProgressTracker>(serviceProvider =>
         {
             var logger = serviceProvider.GetRequiredService<ILogger<ProgressTracker>>();
             var progressEventPublisher = serviceProvider.GetRequiredService<IProgressEventPublisher>();
+            var signalREventFactory = serviceProvider.GetRequiredService<ISignalREventFactory>(); // 🎯 CENTRALIZED SIGNALR: Factory for consistent event creation
             var storageService = serviceProvider.GetService<IMigrationStorageService>(); // Optional dependency
-            return new ProgressTracker(logger, progressEventPublisher, storageService);
+            return new ProgressTracker(logger, progressEventPublisher, signalREventFactory, storageService);
         });
 
         // Register entity processing services (newly created during refactoring)
-        services.TryAddSingleton<IEntityFetchService, EntityFetchService>();
-        services.TryAddSingleton<IEntityTransformService, EntityTransformService>();
-        services.TryAddSingleton<IEntityCreateService, EntityCreateService>();
-        services.TryAddSingleton<IEntityMappingService, EntityMappingService>();
-        services.TryAddSingleton<IEntityErrorHandlingService, EntityErrorHandlingService>();
+        services.AddSingleton<IEntityFetchService, EntityFetchService>();
+        services.AddSingleton<IEntityTransformService, EntityTransformService>();
+        services.AddSingleton<IEntityCreateService, EntityCreateService>();
+        services.AddSingleton<IEntityMappingService, EntityMappingService>();
+        services.AddSingleton<IEntityErrorHandlingService, EntityErrorHandlingService>();
 
         // Register API authentication services
-        services.TryAddSingleton<IApiKeyService, ApiKeyService>();
+        services.AddSingleton<IApiKeyService, ApiKeyService>();
 
         // Register API rate limiting services
-        services.TryAddSingleton<IApiRateLimitService, ApiRateLimitService>();
+        services.AddSingleton<IApiRateLimitService, ApiRateLimitService>();
 
         // Register progress event publisher for queue-based SignalR broadcasting
-        services.TryAddSingleton<IProgressEventPublisher, ProgressEventPublisher>();
+        services.AddSingleton<IProgressEventPublisher, ProgressEventPublisher>();
         
         // Register progress queue service for progress event publishing (separate from migration queues)
-        services.TryAddSingleton<IProgressQueueService, AzureProgressQueueService>();
+        services.AddSingleton<IProgressQueueService, AzureProgressQueueService>();
+        
+        // 🎯 **CENTRALIZED SIGNALR SERVICES** (Consistency & Validation)
+        // Single source of truth for all SignalR event creation and messaging
+        services.AddSingleton<ISignalREventFactory, SignalREventFactory>();
+        services.AddSingleton<ISignalRMessageConverter, SignalRMessageConverter>();
+
+        // ✅ **P2.5: Phase 2 Enhanced Parallel Processing Pipeline** (Required for 17.0x throughput)
+        // These services were moved from Orchestration project to ensure proper DI resolution
+        services.AddSingleton<IEnhancedParallelProcessor, EnhancedParallelProcessor>();
+        services.AddSingleton<IParallelBatchProcessingPipeline, ParallelBatchProcessingPipeline>();
 
         return services;
     }

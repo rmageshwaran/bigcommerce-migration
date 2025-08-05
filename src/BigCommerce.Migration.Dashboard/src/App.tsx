@@ -110,11 +110,11 @@ const EnhancedMigrationPage = () => {
       enableNotifications={true}
       onMigrationComplete={(id) => {
         console.log('Migration completed:', id);
-        navigate('/');
+        // ✅ FIX: Don't navigate away - let user stay on dashboard to see final results
       }}
       onMigrationError={(id, error) => {
         console.log('Migration failed:', id, error);
-        navigate('/');
+        // ✅ FIX: Don't navigate away - let user see error details on dashboard
       }}
     />
   );

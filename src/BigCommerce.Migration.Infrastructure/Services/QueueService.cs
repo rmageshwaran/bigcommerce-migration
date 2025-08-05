@@ -316,7 +316,7 @@ public class QueueService : IQueueService
             {
                 IsSuccess = false,
                 ErrorDetails = ex.Message,
-                ShouldRetry = true, // Retry on unexpected errors
+                ShouldRetry = false, // 🚨 DISABLED: No retries to avoid rate limit issues
                 ProcessedAt = DateTime.UtcNow
             };
         }
@@ -656,19 +656,18 @@ public class QueueService : IQueueService
             await Task.Delay(100); // Simulate processing
 
             // Determine if message should be retried based on error type and retry count
-            var shouldRetry = deadLetterMessage.RetryAttempts < 3 && 
-                             !deadLetterMessage.ErrorDetails.Contains("ValidationError");
+            var shouldRetry = false; // 🚨 DISABLED: No dead letter retries to avoid rate limit issues
 
             var result = new DeadLetterProcessingResult
             {
                 IsSuccess = true,
                 Message = "Dead letter message processed",
                 ShouldRetry = shouldRetry,
-                MaxRetryAttempts = 3,
+                MaxRetryAttempts = 0, // 🚨 DISABLED: No retries
                 CurrentRetryAttempt = deadLetterMessage.RetryAttempts,
                 ProcessedAt = DateTime.UtcNow,
-                ShouldDiscard = !shouldRetry && deadLetterMessage.RetryAttempts >= 3,
-                DiscardReason = shouldRetry ? null : "Maximum retry attempts exceeded"
+                ShouldDiscard = true, // 🚨 Always discard to prevent retries
+                DiscardReason = "Retries disabled to avoid rate limit issues"
             };
 
             if (shouldRetry)
@@ -706,9 +705,9 @@ public class QueueService : IQueueService
     /// </summary>
     /// <param name="queueName">Target queue name</param>
     /// <param name="queueMessage">Message to send</param>
-    /// <param name="retryCount">Number of retry attempts (default: 3)</param>
+    /// <param name="retryCount">Number of retry attempts (default: 0 - no retries)</param>
     /// <returns>Task representing the send operation</returns>
-    public async Task SendMessageAsync(string queueName, Core.Models.QueueMessage queueMessage, int retryCount = 3)
+    public async Task SendMessageAsync(string queueName, Core.Models.QueueMessage queueMessage, int retryCount = 0)
     {
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         

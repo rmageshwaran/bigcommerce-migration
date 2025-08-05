@@ -91,14 +91,15 @@ public class EntityDiscoveryStrategyFactory : IEntityDiscoveryStrategyFactory
     /// <returns>V3 strategy instance</returns>
     private IEntityDiscoveryStrategy CreateV3Strategy(string entityType)
     {
+        // 🎯 EXPLICIT STRATEGY SELECTION: Ensure correct processing approach
         if (IsHierarchicalEntity(entityType))
         {
-            _logger.LogDebug("Creating V3 hierarchical strategy for {EntityType}", entityType);
+            _logger.LogInformation("📋 Creating V3 hierarchical strategy for {EntityType} - will use ID-based batching with full data caching", entityType);
             return new V3HierarchicalStrategy(_apiClient, _v3HierarchicalLogger);
         }
         else
         {
-            _logger.LogDebug("Creating V3 efficient pagination strategy for {EntityType}", entityType);
+            _logger.LogInformation("📄 Creating V3 efficient pagination strategy for {EntityType} - will use page-by-page processing", entityType);
             return new V3EfficientPaginationStrategy(_apiClient, _v3EfficientLogger);
         }
     }
@@ -110,8 +111,10 @@ public class EntityDiscoveryStrategyFactory : IEntityDiscoveryStrategyFactory
     /// <returns>True if hierarchical, false otherwise</returns>
     private static bool IsHierarchicalEntity(string entityType)
     {
-        // Currently only categories require hierarchical processing
-        // This can be extended for other hierarchical entity types in the future
-        return entityType.Equals("categories", StringComparison.OrdinalIgnoreCase);
+        // 🎯 EXPLICIT HIERARCHICAL ENTITIES: Only categories require hierarchical processing
+        // All other entities (brands, products, etc.) use simple page-by-page processing
+        var isHierarchical = entityType.Equals("categories", StringComparison.OrdinalIgnoreCase);
+        
+        return isHierarchical;
     }
 } 

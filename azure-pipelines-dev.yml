@@ -52,8 +52,8 @@ stages:
       displayName: 'DotNet Unit Tests'
       inputs:
         command: 'test'
-        projects: '**/UnitTest/*.csproj'
-        arguments: '--configuration Release --no-build --collect:"XPlat Code Coverage" --settings $(System.DefaultWorkingDirectory)/tests/UnitTest/coverage.runsettings'
+        projects: 'tests/BigCommerce.Migration.UnitTests/BigCommerce.Migration.UnitTests.csproj tests/BigCommerce.Migration.OrchestrationTests/BigCommerce.Migration.OrchestrationTests.csproj'
+        arguments: '--configuration Release --no-build --collect:"XPlat Code Coverage"'
         publishTestResults: true
     - task: PublishCodeCoverageResults@2
       displayName: 'Publish Code Coverage'

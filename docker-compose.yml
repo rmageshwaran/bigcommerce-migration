@@ -89,10 +89,10 @@ services:
       - ParallelProcessing__subBatchConfigurations__brands__pageSize=50
       - ParallelProcessing__subBatchConfigurations__brands__chunkSize=50
       - ParallelProcessing__subBatchConfigurations__brands__fetchBatchSize=50
-      - ParallelProcessing__subBatchConfigurations__brands__subBatchSize=25
-      - ParallelProcessing__subBatchConfigurations__brands__maxConcurrency=20
+      - ParallelProcessing__subBatchConfigurations__brands__subBatchSize=30
+      - ParallelProcessing__subBatchConfigurations__brands__maxConcurrency=25
       - ParallelProcessing__subBatchConfigurations__brands__enableSubBatching=true
-      - ParallelProcessing__subBatchConfigurations__brands__subBatchDelayMs=0
+      - ParallelProcessing__subBatchConfigurations__brands__subBatchDelayMs=50
       - ParallelProcessing__subBatchConfigurations__brands__processSubBatchesSequentially=false
       
       # Default Configuration for Other Entities

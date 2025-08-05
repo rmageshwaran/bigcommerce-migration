@@ -196,14 +196,39 @@ public class DynamicRateLimitService : IDynamicRateLimiter
     // ===============================
 
     /// <summary>
-    /// Determines if a request can be made based on current rate limits
-    /// Delegates to existing service while potentially using dynamic rate information
+    /// Dynamic implementation of CanMakeRequestAsync using BigCommerce API data
+    /// Overrides base service to use real-time API capacity instead of hardcoded limits
     /// </summary>
     public async Task<bool> CanMakeRequestAsync(string storeId, CancellationToken cancellationToken = default)
     {
-        // For now, delegate to existing service
-        // Future enhancement: integrate optimal rate into decision making
-        return await _rateLimitService.CanMakeRequestAsync(storeId, cancellationToken);
+        try
+        {
+            // Get current API health with BigCommerce data
+            var apiHealth = await _healthMonitor.GetApiHealthAsync(storeId, cancellationToken);
+            
+            // If we have BigCommerce rate limit data, use it
+            if (apiHealth.BigCommerceRateLimit?.RequestsLeft > 0 && apiHealth.BigCommerceRateLimit?.RequestsQuota > 0)
+            {
+                var utilizationPercent = apiHealth.BigCommerceRateLimit.RequestsLeft / (double)apiHealth.BigCommerceRateLimit.RequestsQuota * 100;
+                
+                // Use BigCommerce data: allow requests if we have >5% capacity remaining
+                var canProceed = utilizationPercent > 5.0;
+                
+                _logger.LogDebug("🚀 [DYNAMIC-CAN-PROCEED] Store {StoreId}: {RequestsLeft}/{RequestsQuota} ({Utilization:F1}%) - CanProceed: {CanProceed}", 
+                    storeId, apiHealth.BigCommerceRateLimit.RequestsLeft, apiHealth.BigCommerceRateLimit.RequestsQuota, utilizationPercent, canProceed);
+                
+                return canProceed;
+            }
+            
+            // Fallback to base service if no BigCommerce data available
+            _logger.LogDebug("⚠️ [DYNAMIC-FALLBACK] No BigCommerce rate limit data for store {StoreId}, using base service", storeId);
+            return await _rateLimitService.CanMakeRequestAsync(storeId, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error in dynamic CanMakeRequestAsync for store {StoreId}, falling back to base service", storeId);
+            return await _rateLimitService.CanMakeRequestAsync(storeId, cancellationToken);
+        }
     }
 
     /// <summary>
@@ -247,17 +272,60 @@ public class DynamicRateLimitService : IDynamicRateLimiter
     }
 
     /// <summary>
-    /// Checks rate limit and waits if necessary before allowing the request
-    /// Delegates to existing service for now - future enhancement: use dynamic delays
+    /// Dynamic implementation of CheckAndWaitAsync using intelligent delays based on BigCommerce data
     /// </summary>
     public async Task CheckAndWaitAsync(string storeId, CancellationToken cancellationToken = default)
     {
-        await _rateLimitService.CheckAndWaitAsync(storeId, cancellationToken);
+        try
+        {
+            var canProceed = await CanMakeRequestAsync(storeId, cancellationToken);
+            
+            if (!canProceed)
+            {
+                // Get API health for intelligent delay calculation
+                var apiHealth = await _healthMonitor.GetApiHealthAsync(storeId, cancellationToken);
+                
+                // Calculate dynamic delay based on BigCommerce data
+                var delayMs = CalculateIntelligentDelay(apiHealth);
+                
+                _logger.LogInformation("🚀 [DYNAMIC-RATE-LIMIT] Store {StoreId} rate limited, waiting {DelayMs}ms (intelligent delay)", storeId, delayMs);
+                await Task.Delay(delayMs, cancellationToken);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error in dynamic CheckAndWaitAsync for store {StoreId}, falling back to base service", storeId);
+            await _rateLimitService.CheckAndWaitAsync(storeId, cancellationToken);
+        }
     }
 
     // ===============================
     // Private Helper Methods
     // ===============================
+
+    /// <summary>
+    /// Calculates intelligent delay based on BigCommerce API health data
+    /// </summary>
+    private int CalculateIntelligentDelay(ApiHealthMetrics apiHealth)
+    {
+        // If we have BigCommerce timing data, use it
+        if (apiHealth.BigCommerceRateLimit?.TimeResetMs > 0)
+        {
+            // Wait for a fraction of the reset time, minimum 100ms, maximum 5000ms
+            var delayMs = Math.Max(100, Math.Min(5000, (int)(apiHealth.BigCommerceRateLimit.TimeResetMs / 4)));
+            return delayMs;
+        }
+        
+        // If no BigCommerce data, use health-based delay
+        var healthScore = apiHealth.GetHealthScore();
+        return healthScore switch
+        {
+            < 30 => 2000,   // Poor health: longer wait
+            < 60 => 1000,   // Fair health: moderate wait  
+            < 80 => 500,    // Good health: short wait
+            _ => 200        // Excellent health: minimal wait
+        };
+    }
 
     /// <summary>
     /// Tracks rate and health changes to trigger events for significant changes

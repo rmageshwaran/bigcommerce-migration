@@ -462,6 +462,8 @@ public static class ServiceCollectionExtensions
         
         // Register base rate limiting service first
         services.AddSingleton<RateLimitService>();
+        services.AddSingleton<IRateLimitService>(serviceProvider => 
+            serviceProvider.GetRequiredService<RateLimitService>());
         
         // Register dynamic rate limiting service using decorator pattern
         services.AddSingleton<IDynamicRateLimiter>(serviceProvider =>
@@ -474,9 +476,8 @@ public static class ServiceCollectionExtensions
             return new DynamicRateLimitService(logger, baseRateLimitService, healthMonitor, rateCalculator);
         });
         
-        // Register IRateLimitService to use dynamic implementation for backward compatibility
-        services.AddSingleton<IRateLimitService>(serviceProvider => 
-            serviceProvider.GetRequiredService<IDynamicRateLimiter>());
+        // 🚨 FIX: Don't override IRateLimitService - let both coexist
+        // The ApiRequestHandler will use IDynamicRateLimiter when available
         
         services.AddSingleton<IBatchSizeCalculator, BatchSizeCalculator>();
         services.AddSingleton<IProgressTracker>(serviceProvider =>

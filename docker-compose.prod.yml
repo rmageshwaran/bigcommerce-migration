@@ -35,8 +35,8 @@ services:
       
       # ✅ UPDATED Production BigCommerce Configuration (Higher Performance)
       - BigCommerce__RateLimitRequestsPerSecond=25
-      - BigCommerce__DefaultRateLimit=25
-      - BigCommerce__ConcurrentRequests=20
+      - BigCommerce__DefaultRateLimit=20
+      - BigCommerce__ConcurrentRequests=15
       - BigCommerce__UserAgent=BigCommerce-Migration-System/1.0-Production
       - BigCommerce__BaseUrl=https://api.bigcommerce.com
       - BigCommerce__RequestTimeout=00:00:30
@@ -68,7 +68,7 @@ services:
       - ParallelProcessing__subBatchConfigurations__brands__subBatchSize=20
       - ParallelProcessing__subBatchConfigurations__brands__maxConcurrency=15
       - ParallelProcessing__subBatchConfigurations__brands__enableSubBatching=true
-      - ParallelProcessing__subBatchConfigurations__brands__subBatchDelayMs=50
+      - ParallelProcessing__subBatchConfigurations__brands__subBatchDelayMs=75
       - ParallelProcessing__subBatchConfigurations__brands__processSubBatchesSequentially=false
       
       # Default Production Configuration for Other Entities

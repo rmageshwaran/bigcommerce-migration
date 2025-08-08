@@ -3,45 +3,44 @@
 ## 🚀 **WHERE WE LEFT OFF**
 
 **Current System Status**: ✅ Products migration working perfectly (100% success rate)  
-**Task 1 Status**: ✅ COMPLETED - Hybrid approach implementation finished  
-**Next Phase**: Implement Options and Variants migration (Tasks 2-5)  
+**Task 1 Status**: 🔴 **NOT STARTED** - Hybrid approach implementation needed  
+**Next Phase**: Implement Options and Variants migration (Tasks 1-5)  
 **Architecture**: ✅ Finalized configurations and workflows defined
 
 ---
 
-## ✅ **TASK 1 COMPLETED - HYBRID APPROACH IMPLEMENTATION**
+## 🔴 **TASK 1 - HYBRID APPROACH IMPLEMENTATION - NOT STARTED**
 
-**Status**: ALL SUBTASKS COMPLETE ✅  
-**Result**: Product migration now captures channels and related_products metadata
+**Status**: 🔴 **NOT IMPLEMENTED**  
+**Result**: Product migration currently captures channels and related_products metadata only
 
-### **✅ Task 1.1: EntityMapping Model Update - COMPLETED**
+### **🔴 Task 1.1: EntityMapping Model Update - NOT IMPLEMENTED**
 ```csharp
 // File: src/BigCommerce.Migration.Core/Models/StorageModels.cs
-// CURRENT IMPLEMENTATION (Hybrid Approach):
+// CURRENT IMPLEMENTATION (Partial):
 public class EntityMapping
 {
     // Existing fields...
     public string? Metadata { get; set; }           // Backward compatibility
     
-    // ✅ CURRENT PHASE: Product migration metadata
+    // ✅ CURRENT PHASE: Product migration metadata (PARTIAL)
     public string? RelatedProductsData { get; set; } // JSON for related products
     public string? ChannelsData { get; set; }       // JSON for channels
     
-    // 🔮 FUTURE: Will add during options migration
+    // 🔴 MISSING: Options and modifiers fields
     // public string? OptionsData { get; set; }     // JSON for options
     // public string? ModifiersData { get; set; }   // JSON for modifiers  
 }
 ```
 
-### **✅ Task 1.2-1.6: All Implementation Tasks - COMPLETED**
+### **🔴 Task 1.2-1.6: All Implementation Tasks - NOT IMPLEMENTED**
 
-**What was implemented:**
-- ✅ **IProductApiClient interface** updated with `include` parameter
-- ✅ **BigCommerceApiClient implementation** supports `?include=custom_fields,channels`
-- ✅ **ProductFetchStrategy** calls API with `include=custom_fields,channels`
-- ✅ **ProductTransformStrategy** extracts and stores metadata in EntityMapping
-- ✅ **MigrationStorageService** handles new metadata fields (ChannelsData, RelatedProductsData)
-- ✅ **Removed channel_id filter** to get ALL products in store
+**What needs to be implemented:**
+- 🔴 **IProductApiClient interface** already supports `include` parameter ✅
+- 🔴 **BigCommerceApiClient implementation** already supports `?include=options,modifiers` ✅
+- 🔴 **ProductFetchStrategy** currently uses `"custom_fields,channels"` - needs to include options/modifiers
+- 🔴 **ProductTransformStrategy** needs to extract and store options/modifiers metadata
+- 🔴 **MigrationStorageService** needs to handle new metadata fields (OptionsData, ModifiersData)
 
 **Current Implementation:**
 ```csharp
@@ -50,55 +49,58 @@ var products = await _apiClient.GetProductsAsync(
     sourceStore, 
     page, 
     pageSize, 
-    "custom_fields,channels",  // ✅ HYBRID APPROACH
+    "custom_fields,channels",  // 🔴 NEEDS: "options,modifiers,custom_fields,channels"
     cancellationToken);
 
 // URL Generated: /catalog/products?page=1&limit=250&include=custom_fields,channels
 ```
 
-**Metadata Storage Result:**
-- `ChannelsData`: JSON from `include=channels` API response
-- `RelatedProductsData`: JSON from base product response  
-- `custom_fields`: Passed directly to product creation (not stored in EntityMapping)
+**Current Metadata Storage Result:**
+- `ChannelsData`: JSON from `include=channels` API response ✅
+- `RelatedProductsData`: JSON from base product response ✅
+- `OptionsData`: **MISSING** - not extracted or stored
+- `ModifiersData`: **MISSING** - not extracted or stored
 
 ---
 
-## 📋 **NEXT SESSION: TASK 2 - OPTIONS MIGRATION**
+## 📋 **NEXT SESSION: TASK 1 - HYBRID APPROACH IMPLEMENTATION**
 
 ### **🚀 START HERE WHEN RETURNING**
 
-**Status**: Ready to implement Task 2.1 - OptionsFetchStrategy.cs  
-**Context**: Task 1 (hybrid approach) completed successfully  
-**Next Goal**: Implement options migration using table storage strategy
+**Status**: Ready to implement Task 1.1 - Add OptionsData/ModifiersData fields  
+**Context**: Product migration working, API support exists, need metadata capture  
+**Next Goal**: Implement hybrid approach to capture options/modifiers during product migration
 
 ### **📋 IMMEDIATE NEXT STEPS - SESSION STARTUP CHECKLIST**
 
-1. **Add back OptionsData fields to EntityMapping** (removed during hybrid approach)
+1. **Add OptionsData and ModifiersData fields to EntityMapping** (Task 1.1)
    ```csharp
    // Add to src/BigCommerce.Migration.Core/Models/StorageModels.cs
    public string? OptionsData { get; set; }     // JSON for options
    public string? ModifiersData { get; set; }   // JSON for modifiers
    ```
 
-2. **Update MigrationStorageService CRUD operations** to handle options fields
+2. **Update MigrationStorageService CRUD operations** to handle options fields (Task 1.2)
 
-3. **START Task 2.1**: Create `OptionsFetchStrategy.cs`
-   - **Location**: `src/BigCommerce.Migration.Orchestration/Strategies/OptionsFetchStrategy.cs`
-   - **Strategy**: Table storage chunking (200 products per chunk)
-   - **Source**: Read from EntityMapping.OptionsData field
-   - **Pattern**: Follow existing fetch strategies but query table instead of API
+3. **Update ProductFetchStrategy** to include options/modifiers (Task 1.3)
+   ```csharp
+   // Change from "custom_fields,channels" to:
+   "options,modifiers,custom_fields,channels"
+   ```
+
+4. **Update ProductTransformStrategy** to extract and store options metadata (Task 1.4)
 
 ### **🔧 TECHNICAL CONTEXT FOR NEXT SESSION**
 
 **Current Architecture Status:**
-- ✅ **Product Migration**: Enhanced with hybrid approach - captures channels/related_products
-- ✅ **EntityMapping Model**: Contains `ChannelsData`, `RelatedProductsData` (options fields removed)
-- ✅ **API Integration**: Supports `include=custom_fields,channels` (no options/modifiers to maintain 250/request)
-- ✅ **Storage Services**: All CRUD operations updated for current metadata fields
+- ✅ **Product Migration**: Working with channels/related_products metadata
+- 🔴 **EntityMapping Model**: Missing `OptionsData`, `ModifiersData` fields
+- ✅ **API Integration**: Supports `include=options,modifiers,custom_fields,channels`
+- 🔴 **Storage Services**: Need updates for new metadata fields
 
 **Key Architecture Decisions Made:**
-- ✅ **Hybrid Approach**: Product migration captures metadata, options migration uses stored data
-- ✅ **Performance**: Remove options from product API to maintain 250 products/request vs 10/request
+- ✅ **Hybrid Approach**: Product migration will capture metadata, options migration will use stored data
+- ✅ **Performance**: Include options in product API to capture data efficiently
 - ✅ **No channel_id filter**: Get ALL products in store, handle channels separately
 - ✅ **Table Storage Source**: Options will read from EntityMapping table, not BigCommerce API
 
@@ -112,34 +114,32 @@ var products = await _apiClient.GetProductsAsync(
 "maxConcurrency": 10  // 10 concurrent API calls
 ```
 
-**Current Todo List for Task 2:**
-- ⏳ **T2.1**: Create OptionsFetchStrategy.cs with table storage queries
-- ⏳ **T2.2**: Create OptionsTransformStrategy.cs to process extracted options  
-- ⏳ **T2.3**: Create OptionsCreationStrategy.cs with parallel processing
-- ⏳ **T2.4**: Register options strategies in DI container
-- ⏳ **T2.5**: Add options configuration to appsettings.json
-- ⏳ **T2.6**: Add options to GetEntityDependencyOrder() method
+**Current Todo List for Task 1:**
+- 🔴 **T1.1**: Add OptionsData/ModifiersData fields to EntityMapping model
+- 🔴 **T1.2**: Update MigrationStorageService to handle new fields
+- 🔴 **T1.3**: Update ProductFetchStrategy to include options/modifiers
+- 🔴 **T1.4**: Update ProductTransformStrategy to extract and store metadata
 
-**Remember**: First re-add OptionsData/ModifiersData fields that were removed during hybrid approach implementation.
+**Remember**: Start with the hybrid approach foundation - add metadata fields and capture options during product migration.
 
 ## 🎯 **COMPLETED IMPLEMENTATION SEQUENCE**
 
 ### **Phase 1: Enhanced Products (Start Here)**
-1. ✅ **Interface**: Add `include` parameter to `IProductApiClient.GetProductsAsync()`
-2. ✅ **API Client**: Modify `BigCommerceApiClient.GetProductsAsync()` to support include
-3. ✅ **Service**: Update `ProductApiService.GetProductsAsync()` implementation  
-4. ✅ **Strategy**: Modify `ProductFetchStrategy` to pass `"options,modifiers"`
-5. ✅ **Transform**: Update `ProductTransformStrategy` to store options as metadata
+1. 🔴 **Interface**: Add `include` parameter to `IProductApiClient.GetProductsAsync()` ✅ **ALREADY DONE**
+2. 🔴 **API Client**: Modify `BigCommerceApiClient.GetProductsAsync()` to support include ✅ **ALREADY DONE**
+3. 🔴 **Service**: Update `ProductApiService.GetProductsAsync()` implementation ✅ **ALREADY DONE**
+4. 🔴 **Strategy**: Modify `ProductFetchStrategy` to pass `"options,modifiers"` ❌ **NOT DONE**
+5. 🔴 **Transform**: Update `ProductTransformStrategy` to store options as metadata ❌ **NOT DONE**
 
 ### **Phase 2: Options Entity**
-6. ✅ Create `OptionsFetchStrategy.cs` (reads from EntityMapping)
-7. ✅ Create `OptionsTransformStrategy.cs` (extracts from metadata)
-8. ✅ Create `OptionsCreationStrategy.cs` (individual processing)
+6. 🔴 Create `OptionsFetchStrategy.cs` (reads from EntityMapping) ❌ **NOT DONE**
+7. 🔴 Create `OptionsTransformStrategy.cs` (extracts from metadata) ❌ **NOT DONE**
+8. 🔴 Create `OptionsCreationStrategy.cs` (individual processing) ❌ **NOT DONE**
 
 ### **Phase 3: Variants Entity**
-9. ✅ Create `VariantsFetchStrategy.cs` (paginated API, limit=50)
-10. ✅ Create `VariantsTransformStrategy.cs` (lookup mappings)
-11. ✅ Create `VariantsCreationStrategy.cs` (batch processing, 50 per call)
+9. 🔴 Create `VariantsFetchStrategy.cs` (paginated API, limit=50) ✅ **BASIC STUB EXISTS**
+10. 🔴 Create `VariantsTransformStrategy.cs` (lookup mappings) ✅ **BASIC STUB EXISTS**
+11. 🔴 Create `VariantsCreationStrategy.cs` (batch processing, 50 per call) ✅ **BASIC STUB EXISTS**
 
 ---
 
@@ -149,10 +149,10 @@ var products = await _apiClient.GetProductsAsync(
 ```csharp
 public class OptionsFetchStrategy : IEntityFetchStrategy
 {
-    // ✅ FINALIZED: Reads from EntityMapping.OptionsData (JSON)
-    // ✅ Pagination: Table storage chunking (200 products per chunk)
-    // ✅ Parallel: SubBatchSize = 10 options per sub-batch
-    // ✅ Zero BigCommerce API calls (metadata only)
+    // 🔴 NOT IMPLEMENTED: Reads from EntityMapping.OptionsData (JSON)
+    // 🔴 NOT IMPLEMENTED: Pagination: Table storage chunking (200 products per chunk)
+    // 🔴 NOT IMPLEMENTED: Parallel: SubBatchSize = 10 options per sub-batch
+    // 🔴 NOT IMPLEMENTED: Zero BigCommerce API calls (metadata only)
 }
 ```
 
@@ -160,21 +160,22 @@ public class OptionsFetchStrategy : IEntityFetchStrategy
 ```csharp
 public class VariantsCreationStrategy : IEntityCreationStrategy
 {
-    // ✅ FINALIZED: Batch API (50 variants per call)
-    // ✅ ChunkSize: 200 variants → 4 parallel batches
-    // ✅ Error Handling: Create variants WITHOUT options if mappings missing
-    // ✅ MaxConcurrency: 4 (matches number of batches)
+    // ✅ BASIC STUB EXISTS: Entity type and interface implemented
+    // 🔴 NOT IMPLEMENTED: Batch API (50 variants per call)
+    // 🔴 NOT IMPLEMENTED: ChunkSize: 200 variants → 4 parallel batches
+    // 🔴 NOT IMPLEMENTED: Error Handling: Create variants WITHOUT options if mappings missing
+    // 🔴 NOT IMPLEMENTED: MaxConcurrency: 4 (matches number of batches)
 }
 ```
 
 ### **Finalized Error Handling**
 ```csharp
-// ✅ CONFIRMED: For variants with missing option mappings
+// 🔴 NOT IMPLEMENTED: For variants with missing option mappings
 if (optionMapping == null) {
     _logger.LogInformation("Creating variant {VariantId} without options - no mapping found", 
         variant.SourceId);
     variant.OptionValues = new List<object>(); // Empty array, continue processing
-    // ✅ This is NOT an error - create the variant anyway
+    // This is NOT an error - create the variant anyway
 }
 ```
 
@@ -241,40 +242,40 @@ environment:
 ## 📁 **FILE LOCATIONS**
 
 ### **Core Interfaces**
-- `src/BigCommerce.Migration.Core/Interfaces/IProductApiClient.cs`
+- `src/BigCommerce.Migration.Core/Interfaces/IProductApiClient.cs` ✅ **SUPPORTS INCLUDE**
 
 ### **API Layer**
-- `src/BigCommerce.Migration.Infrastructure/Services/BigCommerceApiClient.cs`
-- `src/BigCommerce.Migration.Infrastructure/Services/ProductApiService.cs`
+- `src/BigCommerce.Migration.Infrastructure/Services/BigCommerceApiClient.cs` ✅ **SUPPORTS INCLUDE**
+- `src/BigCommerce.Migration.Infrastructure/Services/ProductApiService.cs` ✅ **SUPPORTS INCLUDE**
 
 ### **Strategy Layer**
-- `src/BigCommerce.Migration.Orchestration/Strategies/ProductFetchStrategy.cs`
-- `src/BigCommerce.Migration.Orchestration/Strategies/ProductTransformStrategy.cs`
+- `src/BigCommerce.Migration.Orchestration/Strategies/ProductFetchStrategy.cs` 🔴 **NEEDS UPDATE**
+- `src/BigCommerce.Migration.Orchestration/Strategies/ProductTransformStrategy.cs` 🔴 **NEEDS UPDATE**
 
 ### **New Files to Create**
 ```
 src/BigCommerce.Migration.Orchestration/Strategies/
-├── OptionsFetchStrategy.cs       # ✅ Table storage queries (200 products/chunk)
-├── OptionsTransformStrategy.cs   # ✅ Extract from OptionsData JSON
-├── OptionsCreationStrategy.cs    # ✅ Individual API calls (SubBatch=10)
-├── VariantsFetchStrategy.cs      # ✅ BigCommerce API (50/page, 200/chunk)
-├── VariantsTransformStrategy.cs  # ✅ Lookup mappings + handle missing options
-└── VariantsCreationStrategy.cs   # ✅ Batch API calls (50/batch, MaxConcurrency=4)
+├── OptionsFetchStrategy.cs       // 🔴 NOT CREATED - Table storage queries (200 products/chunk)
+├── OptionsTransformStrategy.cs   // 🔴 NOT CREATED - Extract from OptionsData JSON
+├── OptionsCreationStrategy.cs    // 🔴 NOT CREATED - Individual API calls (SubBatch=10)
+├── VariantsFetchStrategy.cs      // ✅ EXISTS - Basic stub, needs enhancement
+├── VariantsTransformStrategy.cs  // ✅ EXISTS - Basic stub, needs enhancement
+└── VariantsCreationStrategy.cs   // ✅ EXISTS - Basic stub, needs enhancement
 ```
 
 ### **Files to Modify**
 ```
 src/BigCommerce.Migration.Core/Models/
-├── StorageModels.cs                    # ✅ Add OptionsData, ModifiersData, RelatedProductsData
+├── StorageModels.cs                    // 🔴 NEEDS: Add OptionsData, ModifiersData
 
 src/BigCommerce.Migration.Infrastructure/Services/
-├── MigrationStorageService.cs          # ✅ Support new metadata fields
+├── MigrationStorageService.cs          // 🔴 NEEDS: Support new metadata fields
 ```
 
 ### **Configuration**
-- `src/BigCommerce.Migration.Functions/Configuration/appsettings.json`
-- `docker-compose.yml`
-- `docker-compose.prod.yml`
+- `src/BigCommerce.Migration.Functions/Configuration/appsettings.json` 🔴 **NEEDS OPTIONS/VARIANTS CONFIG**
+- `docker-compose.yml` 🔴 **NEEDS ENVIRONMENT VARIABLES**
+- `docker-compose.prod.yml` 🔴 **NEEDS ENVIRONMENT VARIABLES**
 
 ---
 
@@ -287,7 +288,7 @@ src/BigCommerce.Migration.Infrastructure/Services/
 - Variants without options
 
 ### **Validation Points**
-1. **Options stored in metadata**: Check EntityMapping.Metadata field
+1. **Options stored in metadata**: Check EntityMapping.OptionsData field
 2. **Options created correctly**: Verify option and option_value mappings
 3. **Variants processed gracefully**: Test missing mapping scenarios
 4. **Batch efficiency**: Confirm 50 variants per API call
@@ -322,20 +323,27 @@ src/BigCommerce.Migration.Infrastructure/Services/
 Current: brands → products
 Target:  brands → products → options → variants
 
-✅ CONFIRMED: Options depend on products (metadata source)
-✅ CONFIRMED: Variants depend on options (mapping lookups)
+🔴 NOT IMPLEMENTED: Options depend on products (metadata source)
+🔴 NOT IMPLEMENTED: Variants depend on options (mapping lookups)
 ```
 
 **Update in**: `src/BigCommerce.Migration.Functions/Orchestrators/MigrationDurableOrchestrator.cs`
 
 ```csharp
-// Update GetEntityDependencyOrder method:
+// Current implementation (lines 446-450):
+var fullDependencyOrder = new[]
+{
+    "brands",      // Must be before products
+    "products"     // Focus on product migration performance and timeout testing
+};
+
+// Target implementation:
 var fullDependencyOrder = new[]
 {
     "brands",      // Must be before products
     "products",    // ✅ Store options/modifiers/related_products metadata  
-    "options",     // ✅ NEW: Process from product metadata
-    "variants"     // ✅ NEW: Process with option mappings
+    "options",     // 🔴 NEW: Process from product metadata
+    "variants"     // 🔴 NEW: Process with option mappings
 };
 ```
 
@@ -344,12 +352,13 @@ var fullDependencyOrder = new[]
 ## 📝 **COMMIT STRATEGY**
 
 ### **Suggested Commit Sequence**
-1. `feat: add include parameter support to product API`
-2. `feat: store options metadata during product migration`
-3. `feat: implement options entity migration`
-4. `feat: implement variants entity migration with batch processing`
-5. `feat: add variants configuration and dependency order`
-6. `test: comprehensive validation for options and variants`
+1. `feat: add OptionsData and ModifiersData fields to EntityMapping model`
+2. `feat: update ProductFetchStrategy to include options and modifiers`
+3. `feat: update ProductTransformStrategy to store options metadata`
+4. `feat: implement options entity migration strategies`
+5. `feat: implement variants entity migration with batch processing`
+6. `feat: add variants configuration and dependency order`
+7. `test: comprehensive validation for options and variants`
 
 ---
 

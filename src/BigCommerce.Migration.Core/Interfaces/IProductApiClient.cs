@@ -14,12 +14,14 @@ public interface IProductApiClient
     /// <param name="storeConfig">Store configuration with credentials</param>
     /// <param name="page">Page number for pagination</param>
     /// <param name="limit">Number of products per page</param>
+    /// <param name="include">Optional comma-separated list of fields to include. Supported values: bulk_pricing_rules, reviews, modifiers, options, parent_relations, custom_fields, channels, videos</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>List of products</returns>
     Task<List<Dictionary<string, object>>> GetProductsAsync(
         StoreConfiguration storeConfig, 
         int page = 1, 
         int limit = 50, 
+        string? include = null,
         CancellationToken cancellationToken = default);
 
     // NOTE: CreateProductsAsync method removed - individual product processing

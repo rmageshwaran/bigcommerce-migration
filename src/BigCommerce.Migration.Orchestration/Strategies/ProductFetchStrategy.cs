@@ -49,6 +49,7 @@ public class ProductFetchStrategy : IEntityFetchStrategy
                 sourceStore, 
                 page, 
                 pageSize, 
+                "custom_fields,channels",
                 cancellationToken);
 
             if (products == null || products.Count == 0)

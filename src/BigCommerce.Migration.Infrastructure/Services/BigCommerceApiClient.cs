@@ -167,11 +167,17 @@ public class BigCommerceApiClient : IBigCommerceApiClient
     /// <summary>
     /// Gets products for a specific store and channel with pagination
     /// </summary>
-    public async Task<List<Dictionary<string, object>>> GetProductsAsync(StoreConfiguration storeConfig, int page = 1, int limit = 50, CancellationToken cancellationToken = default)
+    public async Task<List<Dictionary<string, object>>> GetProductsAsync(StoreConfiguration storeConfig, int page = 1, int limit = 50, string? include = null, CancellationToken cancellationToken = default)
     {
         ValidateStoreConfiguration(storeConfig);
 
-        var url = $"{storeConfig.GetApiBaseUrl()}/catalog/products?page={page}&limit={limit}&channel_id={storeConfig.ChannelId}";
+        var url = $"{storeConfig.GetApiBaseUrl()}/catalog/products?page={page}&limit={limit}";
+        
+        // Add include parameter if provided
+        if (!string.IsNullOrEmpty(include))
+        {
+            url += $"&include={include}";
+        }
 
         try
         {

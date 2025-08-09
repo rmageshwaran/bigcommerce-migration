@@ -151,7 +151,7 @@ public class DynamicRateLimitService : IDynamicRateLimiter
     /// <param name="storeId">The ID of the store</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>Enhanced rate limit status with health data</returns>
-    public async Task<EnhancedRateLimitStatus> GetEnhancedRateLimitStatusAsync(string storeId, CancellationToken cancellationToken = default)
+    public async Task<BigCommerce.Migration.Core.Models.EnhancedRateLimitStatus> GetEnhancedRateLimitStatusAsync(string storeId, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -165,22 +165,8 @@ public class DynamicRateLimitService : IDynamicRateLimiter
             // Convert to requests per minute (EnhancedRateLimitStatus expects int)
             var optimalRateInt = (int)Math.Round(optimalRateDouble * 60); // Convert req/sec to req/min
 
-            // Combine into enhanced status
-            var enhancedStatus = new EnhancedRateLimitStatus
-            {
-                // Base properties from existing service
-                StoreId = baseStatus.StoreId,
-                RequestsPerMinute = baseStatus.RequestsPerMinute,
-                RequestsRemaining = baseStatus.RequestsRemaining,
-                WindowResetTime = baseStatus.WindowResetTime,
-                IsLimited = baseStatus.IsLimited,
-                RecommendedDelayMs = baseStatus.RecommendedDelayMs,
-                
-                // Enhanced properties from dynamic rate limiting
-                OptimalRate = optimalRateInt,
-                HealthScore = healthMetrics.GetHealthScore(),
-                BigCommerceRateLimit = healthMetrics.BigCommerceRateLimit
-            };
+            // Combine into enhanced status using Core model constructor
+            var enhancedStatus = new BigCommerce.Migration.Core.Models.EnhancedRateLimitStatus(baseStatus, healthMetrics, optimalRateInt);
 
             return enhancedStatus;
         }

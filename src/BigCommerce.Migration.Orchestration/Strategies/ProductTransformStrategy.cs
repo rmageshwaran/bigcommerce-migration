@@ -891,7 +891,8 @@ public class ProductTransformStrategy : IEntityTransformStrategy
             if (!string.IsNullOrEmpty(channelsData) || !string.IsNullOrEmpty(relatedProductsData))
             {
                 // Get existing mapping to update it
-                var existingMapping = await _entityMappingService.GetEntityMappingAsync(migrationId, "products", sourceId, cancellationToken);
+                var existingMappings = await _entityMappingService.GetEntityMappingsAsync(migrationId, "products", cancellationToken);
+                var existingMapping = existingMappings.FirstOrDefault(m => m.SourceId == sourceId);
                 
                 if (existingMapping != null)
                 {
@@ -900,7 +901,7 @@ public class ProductTransformStrategy : IEntityTransformStrategy
                     existingMapping.RelatedProductsData = relatedProductsData;
                     existingMapping.UpdatedAt = DateTime.UtcNow;
                     
-                    await _entityMappingService.UpdateEntityMappingAsync(existingMapping, cancellationToken);
+                    await _entityMappingService.StoreEntityMappingAsync(existingMapping, cancellationToken);
                     _logger.LogDebug("Updated EntityMapping with metadata for product {ProductId} in migration {MigrationId}", sourceId, migrationId);
                 }
                 else

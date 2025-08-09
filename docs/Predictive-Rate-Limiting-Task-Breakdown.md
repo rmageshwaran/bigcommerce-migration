@@ -1,31 +1,37 @@
 # Predictive Rate Limiting - Detailed Task Breakdown
 
-## 📋 Task Categories
+## 🎯 **System Guarantees**
+1. **✅ Zero 429 Errors**: 99.9% guarantee through distributed consensus and circuit breakers
+2. **✅ Universal Coordination**: All app instances participate in coordinated rate limiting
+3. **✅ Smart Detection**: Real-time BigCommerce quota tracking and adaptive responses  
+4. **✅ Transparent Operation**: Minimal application code changes required
 
-### 🏗️ Infrastructure Tasks (Foundation)
-### 🧠 Logic Tasks (Algorithms)
-### 🔗 Integration Tasks (System Connection)
-### 🧪 Testing Tasks (Quality Assurance)
-### 🚀 Deployment Tasks (Rollout)
+## 📋 **Revised Task Categories**
+
+### 🏗️ Foundation Tasks (Integration-First)
+### 🧠 Consensus Tasks (Distributed Algorithms) 
+### 🔗 Integration Tasks (Existing System Enhancement)
+### 🧪 Multi-Instance Testing (Coordination Validation)
+### 🚀 Health-Monitored Deployment (Circuit Breaker Rollout)
 
 ---
 
 ## 🏗️ Infrastructure Tasks
 
-### I-001: Azure Table Storage Setup
-**Effort**: 2 hours | **Priority**: High | **Dependencies**: None
+### I-001: Enhanced Table Storage Integration
+**Effort**: 3 hours | **Priority**: High | **Dependencies**: None
 
 **Tasks**:
-- [ ] Add `Azure.Data.Tables` package to `BigCommerce.Migration.Core`
-- [ ] Create connection string configuration in `appsettings.json`
-- [ ] Implement `ITableStorageClientFactory` interface
-- [ ] Create `TableStorageClientFactory` with auto-table creation
-- [ ] Add retry policies and timeout configuration
+- [ ] **Leverage existing infrastructure**: Extend `MigrationStorageService` patterns
+- [ ] **Reuse connection management**: Follow `AzureTableDistributedLockService` approach
+- [ ] **Integrate with existing config**: Use `AzureWebJobsStorage` connection string
+- [ ] **Create predictive tables**: `RateLimitQuotas`, `RateLimitInstances`, `RateLimitTokens`
+- [ ] **Auto-table creation**: Follow existing `MigrationStorageService` auto-setup patterns
 
 **Acceptance Criteria**:
-- Tables created automatically on first run
-- Connection pooling and retry logic working
-- Health check validates connectivity
+- ✅ **Zero new infrastructure**: Reuses existing Table Storage setup
+- ✅ **Consistent patterns**: Follows established connection and retry patterns
+- ✅ **Automatic setup**: Tables created on first predictive rate limiting activation
 
 **Files to Create/Modify**:
 - `src/BigCommerce.Migration.Core/BigCommerce.Migration.Core.csproj`
@@ -360,6 +366,57 @@ if (_quotaTracker != null && response.IsSuccessStatusCode)
 
 **Files to Create**:
 - `tests/BigCommerce.Migration.IntegrationTests/RateLimiting/TableStorageIntegrationTests.cs`
+
+---
+
+### T-002.1: Multi-Instance Coordination Demonstrations
+**Effort**: 2 hours | **Priority**: High | **Dependencies**: T-002
+
+**Tasks**:
+- [ ] Create comprehensive coordination demonstrations
+- [ ] Test normal operations (4 instances)
+- [ ] Test auto-scaling scenarios (2→4 instances)
+- [ ] Test instance failure recovery
+- [ ] Test critical quota protection
+- [ ] Document coordination examples
+
+**Coordination Scenarios**:
+
+**Normal Operations (4 Instances):**
+```
+Test Setup: 1000 quota, 800 remaining, 25% safety buffer
+Expected Result:
+🎯 WebApp-1: 150 tokens (25% share)
+🎯 WebApp-2: 150 tokens (25% share)  
+🎯 Worker-1: 150 tokens (25% share)
+🎯 Worker-2: 150 tokens (25% share)
+Total: 600 tokens (100% safe quota utilization)
+```
+
+**Auto-Scaling Scenario:**
+```
+Before (2 instances): 300 tokens each
+After (4 instances): 150 tokens each
+Verification: Fair redistribution, zero interruption
+```
+
+**Instance Failure Recovery:**
+```
+Before (3 instances): 150 tokens each
+After Failure (2 instances): 225 tokens each (+50%)
+Verification: Automatic failover, increased survivor capacity
+```
+
+**Critical Quota Protection:**
+```
+Setup: 50 tokens remaining (critical threshold)
+Expected: 8 tokens per instance (50% safety buffer)
+Total: 24 allocated, 26 reserved
+Verification: Enhanced protection, zero 429 errors
+```
+
+**Files to Create**:
+- `tests/BigCommerce.Migration.Tests/RateLimiting/MultiInstanceDemonstrationTests.cs`
 
 ---
 

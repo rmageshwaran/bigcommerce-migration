@@ -33,6 +33,12 @@ public class DynamicRateLimitingConfiguration
     public SafetySettings Safety { get; set; } = new();
 
     /// <summary>
+    /// Predictive distributed rate limiting configuration
+    /// NEW: Enhanced multi-instance coordination and quota tracking
+    /// </summary>
+    public PredictiveSettings Predictive { get; set; } = new();
+
+    /// <summary>
     /// Validates the configuration for correctness and consistency
     /// </summary>
     /// <returns>List of validation errors, empty if valid</returns>
@@ -113,6 +119,24 @@ public class FeatureFlags
     /// When false, only critical events are logged
     /// </summary>
     public bool EnableDetailedLogging { get; set; } = false;
+
+    /// <summary>
+    /// NEW: Enable predictive distributed rate limiting with multi-instance coordination
+    /// When false, uses existing in-memory rate limiting approach
+    /// </summary>
+    public bool EnablePredictiveDistribution { get; set; } = false;
+
+    /// <summary>
+    /// NEW: Enable multi-instance coordination via Azure Table Storage
+    /// Requires EnablePredictiveDistribution to be true
+    /// </summary>
+    public bool EnableInstanceCoordination { get; set; } = true;
+
+    /// <summary>
+    /// NEW: Enable real-time BigCommerce quota tracking from API response headers
+    /// When false, uses static rate assumptions
+    /// </summary>
+    public bool EnableQuotaTracking { get; set; } = true;
 }
 
 /// <summary>
@@ -319,4 +343,95 @@ public class SafetySettings
     /// When true, continues with internal metrics only
     /// </summary>
     public bool EnableGracefulDegradation { get; set; } = true;
+}
+
+/// <summary>
+/// NEW: Configuration for predictive distributed rate limiting
+/// Controls multi-instance coordination, quota tracking, and consensus algorithms
+/// </summary>
+public class PredictiveSettings
+{
+    /// <summary>
+    /// Safety buffer percentage for quota allocation (0.0 to 1.0)
+    /// 0.15 = 15% safety margin for normal operations
+    /// </summary>
+    public double SafetyBufferPercentage { get; set; } = 0.15;
+
+    /// <summary>
+    /// Quota utilization threshold above which system is considered healthy (0.0 to 1.0)
+    /// Above this threshold, normal 15% safety buffer is used
+    /// </summary>
+    public double HealthyQuotaThreshold { get; set; } = 0.3;
+
+    /// <summary>
+    /// Quota utilization threshold below which system is considered critical (0.0 to 1.0)
+    /// Below this threshold, emergency 50% safety buffer is used
+    /// </summary>
+    public double CriticalQuotaThreshold { get; set; } = 0.1;
+
+    /// <summary>
+    /// Token expiry time in seconds for preventing token hoarding
+    /// Adaptive: 15-45 seconds based on migration velocity
+    /// </summary>
+    public int TokenExpirySeconds { get; set; } = 30;
+
+    /// <summary>
+    /// Instance timeout in seconds for phantom cleanup
+    /// Instances not seen within this time are considered dead
+    /// </summary>
+    public int InstanceTimeoutSeconds { get; set; } = 90;
+
+    /// <summary>
+    /// Heartbeat interval in seconds for instance discovery
+    /// How often instances send "I'm alive" signals
+    /// </summary>
+    public int HeartbeatIntervalSeconds { get; set; } = 60;
+
+    /// <summary>
+    /// Maximum ETag conflict retry attempts
+    /// Prevents infinite retry loops in high-contention scenarios
+    /// </summary>
+    public int MaxETagRetries { get; set; } = 5;
+
+    /// <summary>
+    /// Coordination health check interval in seconds
+    /// How often to validate distributed coordination health
+    /// </summary>
+    public int CoordinationHealthCheckSeconds { get; set; } = 30;
+
+    /// <summary>
+    /// Table Storage configuration for predictive rate limiting
+    /// </summary>
+    public TableStorageSettings TableStorage { get; set; } = new();
+}
+
+/// <summary>
+/// NEW: Table Storage configuration for predictive rate limiting
+/// Defines table names and connection settings
+/// </summary>
+public class TableStorageSettings
+{
+    /// <summary>
+    /// Table name for real-time quota state per store
+    /// Stores current quota, remaining tokens, and reset times
+    /// </summary>
+    public string QuotaTableName { get; set; } = "RateLimitQuotas";
+
+    /// <summary>
+    /// Table name for instance coordination and heartbeats
+    /// Tracks active instances per store for token distribution
+    /// </summary>
+    public string InstanceTableName { get; set; } = "RateLimitInstances";
+
+    /// <summary>
+    /// Table name for distributed token allocation
+    /// Manages atomic token reservations across instances
+    /// </summary>
+    public string TokenTableName { get; set; } = "RateLimitTokens";
+
+    /// <summary>
+    /// Automatically create tables if they don't exist
+    /// Follows existing MigrationStorageService patterns
+    /// </summary>
+    public bool AutoCreateTables { get; set; } = true;
 } 

@@ -57,6 +57,21 @@ namespace BigCommerce.Migration.Core.Services
         /// Creates a SubBatchMigrationProgressEvent with consistent properties and validation
         /// </summary>
         SubBatchMigrationProgressEvent CreateSubBatchProgress(string migrationId, SubBatchProgressOptions options);
+        
+        /// <summary>
+        /// Creates a QuotaUpdateEvent for real-time quota tracking visibility
+        /// </summary>
+        QuotaUpdateEvent CreateQuotaUpdate(string storeId, QuotaUpdateOptions options);
+        
+        /// <summary>
+        /// Creates a PredictiveRateLimitEvent for system health and token allocation visibility
+        /// </summary>
+        PredictiveRateLimitEvent CreatePredictiveRateLimit(string storeId, PredictiveRateLimitOptions options);
+        
+        /// <summary>
+        /// Creates a SystemHealthEvent for coordination health monitoring
+        /// </summary>
+        SystemHealthEvent CreateSystemHealth(string storeId, SystemHealthOptions options);
     }
 
     /// <summary>
@@ -417,6 +432,95 @@ namespace BigCommerce.Migration.Core.Services
             // Calculate time remaining: remaining entities / entities per second
             var estimatedSecondsRemaining = remainingEntities / entitiesPerSecond.Value;
             return TimeSpan.FromSeconds(estimatedSecondsRemaining);
+        }
+
+        #endregion
+
+        #region Predictive Rate Limiting Events
+
+        /// <summary>
+        /// Creates a QuotaUpdateEvent for real-time quota tracking visibility
+        /// </summary>
+        public QuotaUpdateEvent CreateQuotaUpdate(string storeId, QuotaUpdateOptions options)
+        {
+            ValidateRequired(storeId, nameof(storeId));
+            ValidateRequired(options, nameof(options));
+
+            return new QuotaUpdateEvent
+            {
+                // Base properties (auto-populated)
+                StoreId = storeId,
+                Timestamp = _dateTimeProvider.UtcNow,
+                EventType = "QuotaUpdate",
+                
+                // Quota-specific properties
+                TotalQuota = options.TotalQuota,
+                RemainingTokens = options.RemainingTokens,
+                UtilizationPercent = options.UtilizationPercent,
+                HealthStatus = options.HealthStatus ?? "Unknown",
+                QuotaResetTime = options.QuotaResetTime,
+                LastUpdated = options.LastUpdated,
+                SafeTokens = options.SafeTokens,
+                DataAge = options.DataAge
+            };
+        }
+
+        /// <summary>
+        /// Creates a PredictiveRateLimitEvent for system health and token allocation visibility
+        /// </summary>
+        public PredictiveRateLimitEvent CreatePredictiveRateLimit(string storeId, PredictiveRateLimitOptions options)
+        {
+            ValidateRequired(storeId, nameof(storeId));
+            ValidateRequired(options, nameof(options));
+
+            return new PredictiveRateLimitEvent
+            {
+                // Base properties (auto-populated)
+                StoreId = storeId,
+                Timestamp = _dateTimeProvider.UtcNow,
+                EventType = "PredictiveRateLimit",
+                
+                // Predictive rate limiting properties
+                InstanceId = options.InstanceId ?? "Unknown",
+                AllocatedTokens = options.AllocatedTokens,
+                AvailableTokens = options.AvailableTokens,
+                TokensConsumed = options.TokensConsumed,
+                AllocationEfficiency = options.AllocationEfficiency,
+                TokenExpiresAt = options.TokenExpiresAt,
+                ActiveInstanceCount = options.ActiveInstanceCount,
+                CoordinationHealthStatus = options.CoordinationHealthStatus ?? "Unknown",
+                CircuitBreakerStatus = options.CircuitBreakerStatus ?? "Unknown",
+                OverallHealthScore = options.OverallHealthScore,
+                CanProcessRequests = options.CanProcessRequests
+            };
+        }
+
+        /// <summary>
+        /// Creates a SystemHealthEvent for coordination health monitoring
+        /// </summary>
+        public SystemHealthEvent CreateSystemHealth(string storeId, SystemHealthOptions options)
+        {
+            ValidateRequired(storeId, nameof(storeId));
+            ValidateRequired(options, nameof(options));
+
+            return new SystemHealthEvent
+            {
+                // Base properties (auto-populated)
+                StoreId = storeId,
+                Timestamp = _dateTimeProvider.UtcNow,
+                EventType = "SystemHealth",
+                
+                // System health properties
+                OverallHealthStatus = options.OverallHealthStatus ?? "Unknown",
+                OverallHealthScore = options.OverallHealthScore,
+                QuotaHealthStatus = options.QuotaHealthStatus ?? "Unknown",
+                CoordinationEfficiency = options.CoordinationEfficiency,
+                ActiveInstanceCount = options.ActiveInstanceCount,
+                IsInFallbackMode = options.IsInFallbackMode,
+                FallbackReason = options.FallbackReason,
+                HealthTrend = options.HealthTrend ?? "Unknown",
+                RecommendedActions = options.RecommendedActions ?? new List<string>()
+            };
         }
 
         #endregion

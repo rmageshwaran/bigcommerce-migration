@@ -18,6 +18,9 @@ namespace BigCommerce.Migration.Core.Models
     [JsonDerivedType(typeof(SubBatchStartedEvent), "subbatch-started")]
     [JsonDerivedType(typeof(SubBatchCompletedEvent), "subbatch-completed")]
     [JsonDerivedType(typeof(SubBatchMigrationProgressEvent), "subbatch-progress")]
+    [JsonDerivedType(typeof(QuotaUpdateEvent), "quota-update")]
+    [JsonDerivedType(typeof(PredictiveRateLimitEvent), "predictive-rate-limit")]
+    [JsonDerivedType(typeof(SystemHealthEvent), "system-health")]
     public abstract class ProgressEvent
     {
         /// <summary>

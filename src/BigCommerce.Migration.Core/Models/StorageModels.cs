@@ -46,6 +46,16 @@ public class EntityMapping
     public string? Metadata { get; set; }
 
     /// <summary>
+    /// Related products data stored as JSON (for products with related products)
+    /// </summary>
+    public string? RelatedProductsData { get; set; }
+
+    /// <summary>
+    /// Channels data stored as JSON (for products with channel assignments)
+    /// </summary>
+    public string? ChannelsData { get; set; }
+
+    /// <summary>
     /// When the mapping was created
     /// </summary>
     public DateTime CreatedAt { get; set; }

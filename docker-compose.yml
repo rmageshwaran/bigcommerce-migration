@@ -24,6 +24,7 @@ services:
 
   # BigCommerce Migration Functions (Main API Service)
   bigcommerce-functions:
+    platform: linux/amd64
     build:
       context: .
       dockerfile: Dockerfile.functions.noanalyzers
@@ -53,8 +54,10 @@ services:
       - DeadLetterQueueName=dead-letter
       - RetryQueueName=retry
       
-      # BigCommerce Configuration
-      - BigCommerce__RateLimitRequestsPerSecond=14
+      # ✅ UPDATED BigCommerce Configuration (Higher Performance)
+      - BigCommerce__RateLimitRequestsPerSecond=25
+      - BigCommerce__DefaultRateLimit=25
+      - BigCommerce__ConcurrentRequests=20
       - BigCommerce__UserAgent=BigCommerce-Migration-System/1.0-Docker
       - BigCommerce__BaseUrl=https://api.bigcommerce.com
       - BigCommerce__RequestTimeout=00:00:30
@@ -73,10 +76,35 @@ services:
       # Blob Storage Configuration
       - ExternalBlobUrl=http://localhost:10000/devstoreaccount1
       
-      # Processing Configuration
-      - AppSettings__BatchSize=10
-      - AppSettings__MaxConcurrency=3
-      - AppSettings__RetryAttempts=3
+      # ✅ NEW PERFORMANCE CONFIGURATION (Replaces old AppSettings)
+      # Global Parallel Processing Settings
+      - ParallelProcessing__maxConcurrentBatches=4
+      - ParallelProcessing__chunkingThreshold=100
+      - ParallelProcessing__defaultChunkSize=50
+      - ParallelProcessing__enableSubBatchOptimization=true
+      - ParallelProcessing__signalRUpdateIntervalMs=250
+      
+      # Brand-Specific High Performance Settings (Target: ~30 second migrations)
+      - ParallelProcessing__subBatchConfigurations__brands__entityType=brands
+      - ParallelProcessing__subBatchConfigurations__brands__pageSize=250
+      - ParallelProcessing__subBatchConfigurations__brands__chunkSize=250
+      - ParallelProcessing__subBatchConfigurations__brands__fetchBatchSize=250
+      - ParallelProcessing__subBatchConfigurations__brands__subBatchSize=30
+      - ParallelProcessing__subBatchConfigurations__brands__maxConcurrency=25
+      - ParallelProcessing__subBatchConfigurations__brands__enableSubBatching=true
+      - ParallelProcessing__subBatchConfigurations__brands__subBatchDelayMs=50
+      - ParallelProcessing__subBatchConfigurations__brands__processSubBatchesSequentially=false
+      
+      # Default Configuration for Other Entities
+      - ParallelProcessing__defaultSubBatchConfiguration__entityType=default
+      - ParallelProcessing__defaultSubBatchConfiguration__pageSize=250
+      - ParallelProcessing__defaultSubBatchConfiguration__chunkSize=250
+      - ParallelProcessing__defaultSubBatchConfiguration__fetchBatchSize=250
+      - ParallelProcessing__defaultSubBatchConfiguration__subBatchSize=25
+      - ParallelProcessing__defaultSubBatchConfiguration__maxConcurrency=20
+      - ParallelProcessing__defaultSubBatchConfiguration__enableSubBatching=true
+      - ParallelProcessing__defaultSubBatchConfiguration__subBatchDelayMs=0
+      - ParallelProcessing__defaultSubBatchConfiguration__processSubBatchesSequentially=false
       
       # SignalR Configuration (using Azure SignalR service)
       - AzureSignalRConnectionString=Endpoint=https://vortexiq-migration-signalr-dev.service.signalr.net;AccessKey=5LdRJbZb7Mq7Es4urlymsqw70FBjWHdqcJ7NALcGPRFrf67639RGJQQJ99BGACYeBjFXJ3w3AAAAASRSlVgW;Version=1.0;
@@ -108,15 +136,17 @@ services:
       - functions-logs:/tmp/functions-logs
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost/api/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
+      interval: 15s      # ✅ Reduced interval for faster monitoring
+      timeout: 10s       # ✅ Extended timeout for concurrent operations
+      retries: 3         # ✅ Reduced retries for faster recovery
+      start_period: 30s  # ✅ Extended startup time for initialization
     restart: unless-stopped
     networks:
       - bigcommerce-network
 
   # Migration Dashboard (React App)
   bigcommerce-dashboard:
+    platform: linux/amd64
     build:
       context: ./src/BigCommerce.Migration.Dashboard
       dockerfile: Dockerfile.dev

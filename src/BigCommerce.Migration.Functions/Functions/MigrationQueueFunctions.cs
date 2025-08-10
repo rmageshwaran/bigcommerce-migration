@@ -65,7 +65,9 @@ public class MigrationQueueFunctions
         {
             _logger.LogError(ex, "ProcessMigrationStartMessage failed for MessageId: {MessageId}: {ErrorMessage}", 
                 azureQueueMessage.MessageId, ex.Message);
-            throw; // Re-throw to ensure proper retry behavior
+            
+            // 🚨 DISABLED: Don't re-throw to prevent Azure Functions retry behavior
+            // throw; // Re-throw to ensure proper retry behavior
         }
     }
 

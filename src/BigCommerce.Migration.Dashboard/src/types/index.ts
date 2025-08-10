@@ -348,6 +348,10 @@ export interface BatchEvent {
   timestamp: Date;
 }
 
+// 🚨 GLOBAL COORDINATION CLEANUP: Sub-batch event types removed
+// These interfaces are no longer needed since we use coordinated MigrationProgress events
+// from the global ParallelProgressAggregator instead of individual sub-batch events
+
 export interface EntityPhaseTransition {
   migrationId: string;
   entityType: string;

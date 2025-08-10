@@ -95,7 +95,15 @@ public class CheckExternalCancellationActivity
         catch (OperationCanceledException)
         {
             _logger.LogInformation("External cancellation check was cancelled for migration {MigrationId}", migrationId);
-            throw;
+            
+            // Activity should return proper result, not throw - assume not cancelled if check fails
+            return new CheckExternalCancellationResponse
+            {
+                IsCancelled = false,
+                CancellationReason = "Cancellation check was interrupted",
+                CancelledAt = null,
+                IsProcessed = false
+            };
         }
         catch (Exception ex)
         {

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
 using Microsoft.Extensions.Logging;
@@ -133,12 +134,26 @@ public class BigCommerceApiClient : IBigCommerceApiClient
             var request = ApiRequest.CreatePost(url, jsonContent, storeConfig);
             var response = await _apiRequestHandler.ExecuteRequestAsync<Dictionary<string, object>>(request, cancellationToken);
             
+            // 🔍 DEBUG: Log the complete API response structure
+            if (response != null)
+            {
+                var responseJson = JsonSerializer.Serialize(response);
+                _logger.LogInformation("🔍 [API-RESPONSE-DEBUG] Complete BigCommerce API response: {ResponseJson}", responseJson);
+                _logger.LogInformation("🔍 [API-RESPONSE-DEBUG] Response keys: {Keys}", string.Join(", ", response.Keys));
+            }
+            else
+            {
+                _logger.LogWarning("🔍 [API-RESPONSE-DEBUG] Response is null!");
+            }
+            
             if (response?.TryGetValue("data", out var dataValue) == true && dataValue is JsonElement dataElement)
             {
                 var createdCategories = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(dataElement.GetRawText()) ?? new List<Dictionary<string, object>>();
+                _logger.LogInformation("🔍 [API-RESPONSE-DEBUG] Successfully parsed {Count} categories from 'data' field", createdCategories.Count);
                 return createdCategories;
             }
 
+            _logger.LogWarning("🔍 [API-RESPONSE-DEBUG] No 'data' field found in response - returning empty list!");
             return new List<Dictionary<string, object>>();
         }
         catch (Exception ex)
@@ -152,11 +167,17 @@ public class BigCommerceApiClient : IBigCommerceApiClient
     /// <summary>
     /// Gets products for a specific store and channel with pagination
     /// </summary>
-    public async Task<List<Dictionary<string, object>>> GetProductsAsync(StoreConfiguration storeConfig, int page = 1, int limit = 50, CancellationToken cancellationToken = default)
+    public async Task<List<Dictionary<string, object>>> GetProductsAsync(StoreConfiguration storeConfig, int page = 1, int limit = 50, string? include = null, CancellationToken cancellationToken = default)
     {
         ValidateStoreConfiguration(storeConfig);
 
-        var url = $"{storeConfig.GetApiBaseUrl()}/catalog/products?page={page}&limit={limit}&channel_id={storeConfig.ChannelId}";
+        var url = $"{storeConfig.GetApiBaseUrl()}/catalog/products?page={page}&limit={limit}";
+        
+        // Add include parameter if provided
+        if (!string.IsNullOrEmpty(include))
+        {
+            url += $"&include={include}";
+        }
 
         try
         {
@@ -179,36 +200,8 @@ public class BigCommerceApiClient : IBigCommerceApiClient
         }
     }
 
-    /// <summary>
-    /// Creates products in a specific store and channel
-    /// </summary>
-    public async Task<List<Dictionary<string, object>>> CreateProductsAsync(StoreConfiguration storeConfig, List<Dictionary<string, object>> products, CancellationToken cancellationToken = default)
-    {
-        ValidateStoreConfiguration(storeConfig);
-
-        var url = $"{storeConfig.GetApiBaseUrl()}/catalog/products?channel_id={storeConfig.ChannelId}";
-        var jsonContent = JsonSerializer.Serialize(products);
-
-        try
-        {
-            var request = ApiRequest.CreatePost(url, jsonContent, storeConfig);
-            var response = await _apiRequestHandler.ExecuteRequestAsync<Dictionary<string, object>>(request, cancellationToken);
-            
-            if (response?.TryGetValue("data", out var dataValue) == true && dataValue is JsonElement dataElement)
-            {
-                var createdProducts = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(dataElement.GetRawText()) ?? new List<Dictionary<string, object>>();
-                return createdProducts;
-            }
-
-            return new List<Dictionary<string, object>>();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to create products for store {StoreId}, channel {ChannelId}", 
-                storeConfig.StoreId, storeConfig.ChannelId);
-            throw;
-        }
-    }
+    // NOTE: CreateProductsAsync batch method removed - replaced with individual processing
+    // in ProductCreationStrategy.CreateSingleProductAsync for better error isolation
 
     /// <summary>
     /// Checks if the API client can communicate with BigCommerce for a specific store
@@ -634,6 +627,15 @@ public class BigCommerceApiClient : IBigCommerceApiClient
             case "brands":
                 // Brands API doesn't support channel_id or tree_id parameters
                 break;
+        }
+        
+        // Add any additional parameters from the request
+        if (request.AdditionalParams != null && request.AdditionalParams.Any())
+        {
+            foreach (var param in request.AdditionalParams)
+            {
+                queryParams.Add($"{param.Key}={param.Value}");
+            }
         }
         
         return $"{baseUrl}/{endpoint}?{string.Join("&", queryParams)}";

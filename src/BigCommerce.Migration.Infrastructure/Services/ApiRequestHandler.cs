@@ -17,6 +17,7 @@ public class ApiRequestHandler : IApiRequestHandler
     private readonly IRateLimitService _rateLimitService;
     private readonly IOpenSearchService _openSearchService;
     private readonly ILogger<ApiRequestHandler> _logger;
+    private readonly IDynamicRateLimiter? _dynamicRateLimiter;
 
     /// <summary>
     /// Initializes a new instance of the ApiRequestHandler
@@ -25,16 +26,19 @@ public class ApiRequestHandler : IApiRequestHandler
     /// <param name="rateLimitService">Rate limit service for request throttling</param>
     /// <param name="openSearchService">OpenSearch service for logging</param>
     /// <param name="logger">Logger instance</param>
+    /// <param name="dynamicRateLimiter">Optional dynamic rate limiter for BigCommerce health updates</param>
     public ApiRequestHandler(
         HttpClient httpClient,
         IRateLimitService rateLimitService,
         IOpenSearchService openSearchService,
-        ILogger<ApiRequestHandler> logger)
+        ILogger<ApiRequestHandler> logger,
+        IDynamicRateLimiter? dynamicRateLimiter = null)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _rateLimitService = rateLimitService ?? throw new ArgumentNullException(nameof(rateLimitService));
         _openSearchService = openSearchService ?? throw new ArgumentNullException(nameof(openSearchService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _dynamicRateLimiter = dynamicRateLimiter;
     }
 
     /// <summary>
@@ -47,10 +51,46 @@ public class ApiRequestHandler : IApiRequestHandler
 
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         
+        
         try
         {
-            // Apply rate limiting before making the request
-            await _rateLimitService.CheckAndWaitAsync(request.StoreConfiguration.StoreId ?? string.Empty, cancellationToken);
+            // 🚀 INTELLIGENT RATE LIMITING: Use DynamicRateLimiter if available, fallback to basic
+            var storeId = request.StoreConfiguration.StoreId ?? string.Empty;
+            
+            if (_dynamicRateLimiter != null)
+            {
+                // Step 1: Check if we can make requests for this store (BigCommerce API health)
+                var canProceed = await _dynamicRateLimiter.CanMakeRequestAsync(storeId, cancellationToken);
+                if (!canProceed)
+                {
+                    // Step 2: Wait for rate limit clearance with intelligent backoff
+                    await _dynamicRateLimiter.CheckAndWaitAsync(storeId, cancellationToken);
+                    _logger.LogDebug("🚀 [DYNAMIC-RATE-LIMIT] Waited for intelligent rate limit clearance for store {StoreId}", storeId);
+                }
+
+                // Step 3: Get current API health for processing decisions
+                var apiHealth = await _dynamicRateLimiter.GetApiHealthAsync(storeId, cancellationToken);
+                var healthScore = apiHealth.GetHealthScore();
+                
+                // Step 4: Apply health-aware processing strategy
+                if (healthScore < 30) // Poor health - more conservative
+                {
+                    var backoffDelay = TimeSpan.FromMilliseconds(200 + (50 - healthScore) * 10);
+                    await Task.Delay(backoffDelay, cancellationToken);
+                    _logger.LogDebug("🚀 [DYNAMIC-RATE-LIMIT] Applied health-aware backoff ({BackoffMs}ms) due to poor API health ({HealthScore})", 
+                        backoffDelay.TotalMilliseconds, healthScore);
+                }
+                else if (healthScore > 80) // Excellent health - slight optimization
+                {
+                    _logger.LogDebug("🚀 [DYNAMIC-RATE-LIMIT] Excellent API health ({HealthScore}), proceeding optimally", healthScore);
+                }
+            }
+            else
+            {
+                // Fallback to basic rate limiting
+                await _rateLimitService.CheckAndWaitAsync(storeId, cancellationToken);
+                _logger.LogDebug("⚠️ [BASIC-RATE-LIMIT] Using basic rate limiter (DynamicRateLimiter not available)");
+            }
 
             // Create HTTP request message
             using var httpRequest = CreateHttpRequestMessage(request);
@@ -61,21 +101,36 @@ public class ApiRequestHandler : IApiRequestHandler
             // Check for cancellation after HTTP request but before processing
             cancellationToken.ThrowIfCancellationRequested();
 
-            // Record the API call for rate limiting tracking
+            // 🚀 INTELLIGENT API TRACKING: Record with both basic and dynamic rate limiters
+            var storeIdForRecording = request.StoreConfiguration.StoreId ?? string.Empty;
+            
+            // Always record with basic rate limiter for compatibility
             await _rateLimitService.RecordApiCallAsync(
-                request.StoreConfiguration.StoreId ?? string.Empty,
+                storeIdForRecording,
                 request.Url,
                 stopwatch.Elapsed.TotalMilliseconds,
                 response.IsSuccessStatusCode,
                 cancellationToken);
+            
+            // Also record with dynamic rate limiter for health monitoring
+            if (_dynamicRateLimiter != null)
+            {
+                await _dynamicRateLimiter.RecordApiCallAsync(
+                    storeIdForRecording,
+                    request.Url,
+                    stopwatch.Elapsed.TotalMilliseconds,
+                    response.IsSuccessStatusCode,
+                    cancellationToken);
+                _logger.LogDebug("🚀 [DYNAMIC-RATE-LIMIT] Recorded API call for health monitoring");
+            }
 
             // Handle the response
             return await ProcessResponseAsync<T>(response, request, stopwatch.Elapsed, cancellationToken);
         }
         catch (OperationCanceledException)
         {
-            _logger.LogInformation("Request was cancelled for URL: {Url}", request.Url);
-            throw;
+            _logger.LogInformation("API request was cancelled for URL: {Url}", request.Url);
+            throw; // Infrastructure service - let caller handle cancellation appropriately
         }
         catch (Exception ex)
         {
@@ -85,6 +140,7 @@ public class ApiRequestHandler : IApiRequestHandler
             await LogErrorToOpenSearch(request, ex, stopwatch.Elapsed, CancellationToken.None);
             throw;
         }
+
     }
 
     /// <summary>
@@ -97,10 +153,46 @@ public class ApiRequestHandler : IApiRequestHandler
 
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         
+        
         try
         {
-            // Apply rate limiting before making the request
-            await _rateLimitService.CheckAndWaitAsync(request.StoreConfiguration.StoreId ?? string.Empty, cancellationToken);
+            // 🚀 INTELLIGENT RATE LIMITING: Use DynamicRateLimiter if available, fallback to basic
+            var storeId = request.StoreConfiguration.StoreId ?? string.Empty;
+            
+            if (_dynamicRateLimiter != null)
+            {
+                // Step 1: Check if we can make requests for this store (BigCommerce API health)
+                var canProceed = await _dynamicRateLimiter.CanMakeRequestAsync(storeId, cancellationToken);
+                if (!canProceed)
+                {
+                    // Step 2: Wait for rate limit clearance with intelligent backoff
+                    await _dynamicRateLimiter.CheckAndWaitAsync(storeId, cancellationToken);
+                    _logger.LogDebug("🚀 [DYNAMIC-RATE-LIMIT] Waited for intelligent rate limit clearance for store {StoreId}", storeId);
+                }
+
+                // Step 3: Get current API health for processing decisions
+                var apiHealth = await _dynamicRateLimiter.GetApiHealthAsync(storeId, cancellationToken);
+                var healthScore = apiHealth.GetHealthScore();
+                
+                // Step 4: Apply health-aware processing strategy
+                if (healthScore < 30) // Poor health - more conservative
+                {
+                    var backoffDelay = TimeSpan.FromMilliseconds(200 + (50 - healthScore) * 10);
+                    await Task.Delay(backoffDelay, cancellationToken);
+                    _logger.LogDebug("🚀 [DYNAMIC-RATE-LIMIT] Applied health-aware backoff ({BackoffMs}ms) due to poor API health ({HealthScore})", 
+                        backoffDelay.TotalMilliseconds, healthScore);
+                }
+                else if (healthScore > 80) // Excellent health - slight optimization
+                {
+                    _logger.LogDebug("🚀 [DYNAMIC-RATE-LIMIT] Excellent API health ({HealthScore}), proceeding optimally", healthScore);
+                }
+            }
+            else
+            {
+                // Fallback to basic rate limiting
+                await _rateLimitService.CheckAndWaitAsync(storeId, cancellationToken);
+                _logger.LogDebug("⚠️ [BASIC-RATE-LIMIT] Using basic rate limiter (DynamicRateLimiter not available)");
+            }
 
             // Create HTTP request message
             using var httpRequest = CreateHttpRequestMessage(request);
@@ -111,18 +203,84 @@ public class ApiRequestHandler : IApiRequestHandler
             // Check for cancellation after HTTP request but before processing
             cancellationToken.ThrowIfCancellationRequested();
 
-            // Record the API call for rate limiting tracking
+            // 🚀 INTELLIGENT API TRACKING: Record with both basic and dynamic rate limiters
+            var storeIdForRecording = request.StoreConfiguration.StoreId ?? string.Empty;
+            
+            // Always record with basic rate limiter for compatibility
             await _rateLimitService.RecordApiCallAsync(
-                request.StoreConfiguration.StoreId ?? string.Empty,
+                storeIdForRecording,
                 request.Url,
                 stopwatch.Elapsed.TotalMilliseconds,
                 response.IsSuccessStatusCode,
                 cancellationToken);
-
-            // Handle the response
-            if (response.IsSuccessStatusCode)
+            
+            // Also record with dynamic rate limiter for health monitoring
+            if (_dynamicRateLimiter != null)
             {
+                await _dynamicRateLimiter.RecordApiCallAsync(
+                    storeIdForRecording,
+                    request.Url,
+                    stopwatch.Elapsed.TotalMilliseconds,
+                    response.IsSuccessStatusCode,
+                    cancellationToken);
+                _logger.LogDebug("🚀 [DYNAMIC-RATE-LIMIT] Recorded API call for health monitoring");
+            }
+
+            // Handle the response - BigCommerce API specific logic
+            if (response.StatusCode == HttpStatusCode.OK || 
+                response.StatusCode == HttpStatusCode.Created || 
+                response.StatusCode == HttpStatusCode.Accepted)
+            {
+                // Full success - all items processed successfully
                 return await response.Content.ReadAsStringAsync(cancellationToken);
+            }
+            else if (response.StatusCode == HttpStatusCode.MultiStatus) // 207
+            {
+                // Partial success - some items succeeded, some failed
+                // BigCommerce returns 207 when batch operations have mixed results
+                var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
+                
+                _logger.LogWarning("⚠️ [API-207] PARTIAL SUCCESS: Received 207 Multi-Status response for URL: {Url}", request.Url);
+                _logger.LogWarning("📊 [API-207] RESPONSE CONTENT: {ResponseContent}", responseContent);
+                
+                // Try to parse the response to get success/failure counts
+                try
+                {
+                    var jsonResponse = JsonSerializer.Deserialize<Dictionary<string, object>>(responseContent);
+                    if (jsonResponse != null)
+                    {
+                        // Look for meta information that shows success/failure counts
+                        if (jsonResponse.TryGetValue("meta", out var metaValue))
+                        {
+                            var metaString = metaValue?.ToString() ?? "";
+                            _logger.LogWarning("📈 [API-207] META INFO: {MetaInfo}", metaString);
+                        }
+                        
+                        // Look for data array to see what was actually created
+                        if (jsonResponse.TryGetValue("data", out var dataValue))
+                        {
+                            if (dataValue is JsonElement dataElement && dataElement.ValueKind == JsonValueKind.Array)
+                            {
+                                var createdCount = dataElement.GetArrayLength();
+                                _logger.LogWarning("📋 [API-207] CREATED COUNT: {CreatedCount} entities were successfully created", createdCount);
+                            }
+                        }
+                        
+                        // Look for errors array to see what failed
+                        if (jsonResponse.TryGetValue("errors", out var errorsValue))
+                        {
+                            var errorsString = errorsValue?.ToString() ?? "";
+                            _logger.LogWarning("❌ [API-207] ERRORS: {ErrorInfo}", errorsString);
+                        }
+                    }
+                }
+                catch (Exception parseEx)
+                {
+                    _logger.LogWarning(parseEx, "⚠️ [API-207] Failed to parse 207 response for detailed analysis");
+                }
+                
+                // Return the content so calling code can parse successes vs failures
+                return responseContent;
             }
 
             var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -141,6 +299,7 @@ public class ApiRequestHandler : IApiRequestHandler
             await LogErrorToOpenSearch(request, ex, stopwatch.Elapsed, CancellationToken.None);
             throw;
         }
+
     }
 
     /// <summary>
@@ -196,6 +355,30 @@ public class ApiRequestHandler : IApiRequestHandler
     /// </summary>
     private async Task<T> ProcessResponseAsync<T>(HttpResponseMessage response, ApiRequest request, TimeSpan elapsed, CancellationToken cancellationToken = default)
     {
+        // Extract BigCommerce rate limit headers for dynamic rate limiting
+        var rateLimitInfo = ExtractBigCommerceRateLimitHeaders(response, request.StoreConfiguration.StoreId ?? string.Empty);
+
+        // Update dynamic rate limiter with BigCommerce health data if available
+        if (rateLimitInfo != null && _dynamicRateLimiter != null)
+        {
+            try
+            {
+                await _dynamicRateLimiter.UpdateApiHealthAsync(
+                    request.StoreConfiguration.StoreId ?? string.Empty, 
+                    rateLimitInfo, 
+                    cancellationToken);
+                
+                _logger.LogTrace("Updated dynamic rate limiter with BigCommerce health data for store {StoreId}", 
+                    request.StoreConfiguration.StoreId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to update dynamic rate limiter health data for store {StoreId}", 
+                    request.StoreConfiguration.StoreId);
+                // Don't rethrow - health updates shouldn't break the main request flow
+            }
+        }
+
         if (response.IsSuccessStatusCode)
         {
             var content = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -203,8 +386,8 @@ public class ApiRequestHandler : IApiRequestHandler
             // Check for cancellation before expensive deserialization
             cancellationToken.ThrowIfCancellationRequested();
             
-            // Log performance metrics
-            await LogPerformanceMetrics(request, elapsed, true, cancellationToken);
+            // Log enhanced performance metrics with BigCommerce rate limit data
+            await LogEnhancedPerformanceMetrics(request, elapsed, true, rateLimitInfo, cancellationToken);
 
             // Handle different response types
             if (typeof(T) == typeof(string))
@@ -233,7 +416,7 @@ public class ApiRequestHandler : IApiRequestHandler
 
         // Handle error responses
         var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
-        await LogPerformanceMetrics(request, elapsed, false, cancellationToken);
+        await LogEnhancedPerformanceMetrics(request, elapsed, false, rateLimitInfo, cancellationToken);
         
         throw CreateHttpException(response.StatusCode, errorContent, request.Url);
     }
@@ -243,7 +426,7 @@ public class ApiRequestHandler : IApiRequestHandler
     /// </summary>
     private HttpRequestException CreateHttpException(HttpStatusCode statusCode, string content, string url)
     {
-        return statusCode switch
+        HttpRequestException exception = statusCode switch
         {
             HttpStatusCode.Unauthorized => new HttpRequestException($"Authentication failed for {url}"),
             HttpStatusCode.Forbidden => new HttpRequestException($"Access forbidden for {url}"),
@@ -252,6 +435,17 @@ public class ApiRequestHandler : IApiRequestHandler
             HttpStatusCode.BadRequest => new HttpRequestException($"Bad request to {url}: {content}"),
             _ => new HttpRequestException($"API request failed with status {statusCode} for {url}: {content}")
         };
+
+        // ✅ FIX: Store response payload in exception data for later extraction by EntityErrorHandlingService
+        if (!string.IsNullOrEmpty(content))
+        {
+            exception.Data["ResponsePayload"] = content;
+            exception.Data["ResponseContent"] = content; // Also store as ResponseContent for compatibility
+            exception.Data["StatusCode"] = statusCode.ToString();
+            exception.Data["RequestUrl"] = url;
+        }
+
+        return exception;
     }
 
     /// <summary>
@@ -302,6 +496,148 @@ public class ApiRequestHandler : IApiRequestHandler
         catch (Exception loggingEx)
         {
             _logger.LogWarning(loggingEx, "Failed to log error to OpenSearch for {Url}", request.Url);
+        }
+    }
+
+    /// <summary>
+    /// Extracts BigCommerce rate limit information from HTTP response headers
+    /// Maps X-Rate-Limit-* headers to BigCommerceRateLimitInfo for dynamic rate limiting
+    /// Follows Single Responsibility Principle - only handles header extraction
+    /// </summary>
+    /// <param name="response">HTTP response containing potential rate limit headers</param>
+    /// <param name="storeId">Store identifier for context</param>
+    /// <returns>BigCommerceRateLimitInfo if all required headers are present and valid, null otherwise</returns>
+    /// <exception cref="ArgumentNullException">Thrown when response is null</exception>
+    /// <exception cref="ArgumentException">Thrown when storeId is null or empty</exception>
+    public BigCommerceRateLimitInfo? ExtractBigCommerceRateLimitHeaders(HttpResponseMessage response, string storeId)
+    {
+        if (response == null)
+            throw new ArgumentNullException(nameof(response));
+        
+        if (string.IsNullOrEmpty(storeId))
+            throw new ArgumentException("Store ID cannot be null or empty", nameof(storeId));
+
+        try
+        {
+            // Check if all required BigCommerce rate limit headers are present
+            var requestsLeftHeader = response.Headers.GetValues("X-Rate-Limit-Requests-Left").FirstOrDefault();
+            var requestsQuotaHeader = response.Headers.GetValues("X-Rate-Limit-Requests-Quota").FirstOrDefault();
+            var timeResetMsHeader = response.Headers.GetValues("X-Rate-Limit-Time-Reset-Ms").FirstOrDefault();
+            var timeWindowMsHeader = response.Headers.GetValues("X-Rate-Limit-Time-Window-Ms").FirstOrDefault();
+
+            // Return null if any required header is missing
+            if (string.IsNullOrEmpty(requestsLeftHeader) || 
+                string.IsNullOrEmpty(requestsQuotaHeader) ||
+                string.IsNullOrEmpty(timeResetMsHeader) || 
+                string.IsNullOrEmpty(timeWindowMsHeader))
+            {
+                return null;
+            }
+
+            // Parse header values with validation
+            if (!int.TryParse(requestsLeftHeader, out var requestsLeft) ||
+                !int.TryParse(requestsQuotaHeader, out var requestsQuota) ||
+                !long.TryParse(timeResetMsHeader, out var timeResetMs) ||
+                !long.TryParse(timeWindowMsHeader, out var timeWindowMs))
+            {
+                _logger.LogWarning("Failed to parse BigCommerce rate limit headers for store {StoreId}. " +
+                                   "RequestsLeft: {RequestsLeft}, RequestsQuota: {RequestsQuota}, " +
+                                   "TimeResetMs: {TimeResetMs}, TimeWindowMs: {TimeWindowMs}",
+                                   storeId, requestsLeftHeader, requestsQuotaHeader, timeResetMsHeader, timeWindowMsHeader);
+                return null;
+            }
+
+            // Create and validate BigCommerceRateLimitInfo
+            var rateLimitInfo = new BigCommerceRateLimitInfo(storeId, requestsLeft, requestsQuota, timeResetMs, timeWindowMs);
+
+            if (!rateLimitInfo.IsValid())
+            {
+                _logger.LogWarning("Invalid BigCommerce rate limit info extracted for store {StoreId}: {RateLimitInfo}",
+                                   storeId, rateLimitInfo);
+                return null;
+            }
+
+            _logger.LogDebug("Successfully extracted BigCommerce rate limit headers for store {StoreId}: {RateLimitInfo}",
+                             storeId, rateLimitInfo);
+
+            return rateLimitInfo;
+        }
+        catch (InvalidOperationException)
+        {
+            // Headers collection doesn't contain the requested headers
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error extracting BigCommerce rate limit headers for store {StoreId}", storeId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Logs enhanced performance metrics including BigCommerce rate limit information
+    /// Extends base performance logging with dynamic rate limiting data
+    /// </summary>
+    /// <param name="request">Original API request</param>
+    /// <param name="elapsed">Request execution time</param>
+    /// <param name="isSuccess">Whether the request was successful</param>
+    /// <param name="rateLimitInfo">BigCommerce rate limit information if available</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    private async Task LogEnhancedPerformanceMetrics(
+        ApiRequest request, 
+        TimeSpan elapsed, 
+        bool isSuccess, 
+        BigCommerceRateLimitInfo? rateLimitInfo, 
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            // Always log base performance metrics
+            await LogPerformanceMetrics(request, elapsed, isSuccess, cancellationToken);
+
+            // Log enhanced metrics if BigCommerce rate limit info is available
+            if (rateLimitInfo != null)
+            {
+                var enhancedMetrics = new
+                {
+                    StoreId = request.StoreConfiguration.StoreId,
+                    Url = request.Url,
+                    Method = request.Method.ToString(),
+                    ElapsedMs = elapsed.TotalMilliseconds,
+                    IsSuccess = isSuccess,
+                    RateLimit = new
+                    {
+                        RequestsLeft = rateLimitInfo.RequestsLeft,
+                        RequestsQuota = rateLimitInfo.RequestsQuota,
+                        UtilizationPercentage = rateLimitInfo.GetUtilizationPercentage() * 100,
+                        IsCritical = rateLimitInfo.IsCritical(),
+                        TimeResetMs = rateLimitInfo.TimeResetMs,
+                        TimeWindowMs = rateLimitInfo.TimeWindowMs,
+                        EffectiveRateLimit = rateLimitInfo.GetEffectiveRateLimit()
+                    },
+                    Timestamp = DateTime.UtcNow
+                };
+
+                // Log to OpenSearch for advanced analytics
+                await _openSearchService.LogPerformanceMetricsAsync(
+                    "EnhancedApiPerformance",
+                    elapsed,
+                    enhancedMetrics,
+                    cancellationToken);
+
+                // Log summary to structured logging
+                _logger.LogInformation("Enhanced API performance: {Method} {Url} completed in {ElapsedMs}ms. " +
+                                       "BigCommerce Rate Limit: {RequestsLeft}/{RequestsQuota} " +
+                                       "({UtilizationPercentage:F1}% used, Critical: {IsCritical})",
+                                       request.Method, request.Url, elapsed.TotalMilliseconds,
+                                       rateLimitInfo.RequestsLeft, rateLimitInfo.RequestsQuota,
+                                       rateLimitInfo.GetUtilizationPercentage() * 100, rateLimitInfo.IsCritical());
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error logging enhanced performance metrics for {Url}", request.Url);
+            // Don't rethrow - logging errors shouldn't break the main request flow
         }
     }
 } 

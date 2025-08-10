@@ -36,6 +36,36 @@ public class EntityConfiguration
     public bool CreateMappings { get; set; } = true;
     
     /// <summary>
+    /// Chunk size for orchestrator-level chunking (how many entities per chunk)
+    /// </summary>
+    public int ChunkSize { get; set; } = 50;
+
+    /// <summary>
+    /// Fetch batch size for API calls (limit parameter for pagination)
+    /// </summary>
+    public int FetchBatchSize { get; set; } = 250;
+
+    /// <summary>
+    /// Page size for initial batch creation (how many entities per page)
+    /// </summary>
+    public int PageSize { get; set; } = 50;
+
+    /// <summary>
+    /// Number of entities per sub-batch (within each page)
+    /// </summary>
+    public int SubBatchSize { get; set; } = 5;
+
+    /// <summary>
+    /// Maximum number of entities to process concurrently within a sub-batch
+    /// </summary>
+    public int MaxConcurrency { get; set; } = 5;
+
+    /// <summary>
+    /// Whether sub-batches should be processed sequentially (true) or in parallel (false)
+    /// </summary>
+    public bool ProcessSubBatchesSequentially { get; set; } = true;
+    
+    /// <summary>
     /// Custom field mappings
     /// </summary>
     public Dictionary<string, string> FieldMappings { get; set; } = new();

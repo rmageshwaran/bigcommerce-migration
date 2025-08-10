@@ -1,6 +1,7 @@
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
 using Microsoft.Extensions.Logging;
+using System.Threading;
 
 namespace BigCommerce.Migration.Orchestration.Strategies;
 
@@ -27,13 +28,24 @@ public class BrandTransformStrategy : IEntityTransformStrategy
         CategoryTreeContext? categoryTreeContext = null,
         CancellationToken cancellationToken = default)
     {
-        _logger.LogDebug("Transforming brand for migration {MigrationId}", migrationId);
+        // 🚨 ENHANCED DEBUG: Track individual brand transformations
+        var brandId = entity.TryGetValue("id", out var id) ? id?.ToString() : "unknown";
+        var originalId = entity.TryGetValue("_original_entity_id", out var origId) ? origId?.ToString() : "unknown";
+        var threadId = Thread.CurrentThread.ManagedThreadId;
+        var transformId = Guid.NewGuid().ToString("N")[..8];
+        
+        _logger.LogInformation("🔄 [TRANSFORM-{TransformId}] 🚀 STARTING: Brand transformation for SourceId={SourceId}, " +
+                              "OriginalId={OriginalId}, ThreadId={ThreadId}, MigrationId={MigrationId}", 
+            transformId, brandId, originalId, threadId, migrationId);
         
         var transformed = new Dictionary<string, object>();
 
         // Required field: name
         var brandName = GetStringValue(entity, "name") ?? GetStringValue(entity, "brand_name") ?? "Unnamed Brand";
         transformed["name"] = brandName;
+        
+        _logger.LogInformation("🔄 [TRANSFORM-{TransformId}] BRAND NAME: '{BrandName}' (SourceId={SourceId}, ThreadId={ThreadId})", 
+            transformId, brandName, brandId, threadId);
 
         if (brandName == "Unnamed Brand")
         {
@@ -84,8 +96,29 @@ public class BrandTransformStrategy : IEntityTransformStrategy
             transformed["custom_url"] = customUrl;
         }
 
-        _logger.LogDebug("Transformed brand '{BrandName}' with {FieldCount} fields for migration {MigrationId}", 
-            brandName, transformed.Count, migrationId);
+        // 🚨 CRITICAL FIX: Preserve chunk tracking metadata from fetch phase
+        // This metadata is essential for debugging race conditions and chunk overlap
+        if (entity.TryGetValue("_chunk_number", out var chunkNumber))
+        {
+            transformed["_chunk_number"] = chunkNumber;
+        }
+        if (entity.TryGetValue("_api_page", out var apiPage))
+        {
+            transformed["_api_page"] = apiPage;
+        }
+        if (entity.TryGetValue("_migration_id", out var migId))
+        {
+            transformed["_migration_id"] = migId;
+        }
+        if (entity.TryGetValue("_original_entity_id", out var origEntityId))
+        {
+            transformed["_original_entity_id"] = origEntityId;
+        }
+        
+        _logger.LogInformation("🔄 [TRANSFORM-{TransformId}] ✅ COMPLETED: Brand '{BrandName}' transformed with {FieldCount} fields " +
+                              "CHUNK={ChunkNumber}, API_PAGE={ApiPage} (SourceId={SourceId}, ThreadId={ThreadId}, MigrationId={MigrationId})", 
+            transformId, brandName, transformed.Count, chunkNumber?.ToString() ?? "unknown", 
+            apiPage?.ToString() ?? "unknown", brandId, threadId, migrationId);
 
         return await Task.FromResult(transformed);
     }
@@ -104,13 +137,44 @@ public class BrandTransformStrategy : IEntityTransformStrategy
 
     /// <summary>
     /// Extracts meta keywords as array, handling both array and string formats
+    /// Properly handles empty arrays and JSON serialization artifacts
     /// </summary>
     private static List<string>? GetMetaKeywords(Dictionary<string, object> entity)
     {
         // Try meta_keywords first
         if (entity.TryGetValue("meta_keywords", out var metaKeywords))
         {
-            if (metaKeywords is IEnumerable<object> keywordArray)
+            // Handle JsonElement (from JSON deserialization)
+            if (metaKeywords is System.Text.Json.JsonElement jsonElement)
+            {
+                if (jsonElement.ValueKind == System.Text.Json.JsonValueKind.Array)
+                {
+                    var keywords = new List<string>();
+                    foreach (var item in jsonElement.EnumerateArray())
+                    {
+                        var keyword = item.GetString()?.Trim();
+                        if (!string.IsNullOrWhiteSpace(keyword))
+                        {
+                            keywords.Add(keyword);
+                        }
+                    }
+                    return keywords.Count > 0 ? keywords : null;
+                }
+                else if (jsonElement.ValueKind == System.Text.Json.JsonValueKind.String)
+                {
+                    var keywordString = jsonElement.GetString();
+                    if (!string.IsNullOrWhiteSpace(keywordString) && keywordString != "[]")
+                    {
+                        var keywords = keywordString.Split(',', ';')
+                                                   .Select(k => k.Trim())
+                                                   .Where(k => !string.IsNullOrWhiteSpace(k))
+                                                   .ToList();
+                        return keywords.Count > 0 ? keywords : null;
+                    }
+                }
+            }
+            // Handle native array types
+            else if (metaKeywords is IEnumerable<object> keywordArray)
             {
                 var keywords = keywordArray.Select(k => k?.ToString()?.Trim())
                                          .Where(k => !string.IsNullOrWhiteSpace(k))
@@ -118,8 +182,8 @@ public class BrandTransformStrategy : IEntityTransformStrategy
                                          .ToList();
                 return keywords.Count > 0 ? keywords : null;
             }
-            
-            if (metaKeywords is string keywordString && !string.IsNullOrWhiteSpace(keywordString))
+            // Handle string format (but avoid "[]" artifact)
+            else if (metaKeywords is string keywordString && !string.IsNullOrWhiteSpace(keywordString) && keywordString != "[]")
             {
                 var keywords = keywordString.Split(',', ';')
                                            .Select(k => k.Trim())
@@ -133,7 +197,7 @@ public class BrandTransformStrategy : IEntityTransformStrategy
         var alternateFields = new[] { "keywords", "tags", "meta_tags" };
         foreach (var field in alternateFields)
         {
-            if (entity.TryGetValue(field, out var value) && value is string strValue && !string.IsNullOrWhiteSpace(strValue))
+            if (entity.TryGetValue(field, out var value) && value is string strValue && !string.IsNullOrWhiteSpace(strValue) && strValue != "[]")
             {
                 var keywords = strValue.Split(',', ';')
                                       .Select(k => k.Trim())
@@ -148,28 +212,78 @@ public class BrandTransformStrategy : IEntityTransformStrategy
 
     /// <summary>
     /// Extracts or generates custom URL structure
+    /// Handles JSON deserialization and various object types
     /// </summary>
     private static Dictionary<string, object>? GetCustomUrl(Dictionary<string, object> entity)
     {
-        // Check if custom_url already exists as an object
-        if (entity.TryGetValue("custom_url", out var customUrlObj) && customUrlObj is Dictionary<string, object> existingCustomUrl)
+        // Check if custom_url already exists
+        if (entity.TryGetValue("custom_url", out var customUrlObj))
+        {
+            // Handle JsonElement (from JSON deserialization)
+            if (customUrlObj is System.Text.Json.JsonElement jsonElement)
+            {
+                if (jsonElement.ValueKind == System.Text.Json.JsonValueKind.Object)
+                {
+                    var customUrl = new Dictionary<string, object>();
+                    
+                    if (jsonElement.TryGetProperty("url", out var urlElement))
+                    {
+                        var urlValue = urlElement.GetString();
+                        if (!string.IsNullOrWhiteSpace(urlValue))
+                        {
+                            customUrl["url"] = urlValue;
+                        }
+                    }
+                    
+                    if (jsonElement.TryGetProperty("is_customized", out var isCustomizedElement))
+                    {
+                        customUrl["is_customized"] = isCustomizedElement.GetBoolean();
+                    }
+                    else
+                    {
+                        customUrl["is_customized"] = true; // Default for migrated URLs
+                    }
+                    
+                    return customUrl.ContainsKey("url") ? customUrl : null;
+                }
+                else if (jsonElement.ValueKind == System.Text.Json.JsonValueKind.String)
+                {
+                    var urlString = jsonElement.GetString();
+                    if (!string.IsNullOrWhiteSpace(urlString))
+                    {
+                        return new Dictionary<string, object>
+                        {
+                            ["url"] = urlString.StartsWith('/') ? urlString : '/' + urlString,
+                            ["is_customized"] = true
+                        };
+                    }
+                }
+            }
+            // Handle native Dictionary<string, object>
+            else if (customUrlObj is Dictionary<string, object> existingCustomUrl)
         {
             return existingCustomUrl;
+            }
+            // Handle other dictionary types
+            else if (customUrlObj is IDictionary<string, object> dictCustomUrl)
+            {
+                return new Dictionary<string, object>(dictCustomUrl);
+            }
         }
 
         // Try to construct from url and slug fields
-        var url = GetStringValue(entity, "url") ?? GetStringValue(entity, "slug") ?? GetStringValue(entity, "custom_url");
-        if (!string.IsNullOrWhiteSpace(url))
+        var finalUrl = GetStringValue(entity, "url") ?? GetStringValue(entity, "slug");
+        if (!string.IsNullOrWhiteSpace(finalUrl))
         {
             // Ensure URL starts with /
-            if (!url.StartsWith('/'))
+            if (!finalUrl.StartsWith('/'))
             {
-                url = '/' + url;
+                finalUrl = '/' + finalUrl;
             }
 
             return new Dictionary<string, object>
             {
-                ["url"] = url,
+                ["url"] = finalUrl,
                 ["is_customized"] = true
             };
         }

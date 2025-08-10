@@ -16,6 +16,7 @@
   <ItemGroup>
     <ProjectReference Include="..\BigCommerce.Migration.Core\BigCommerce.Migration.Core.csproj" />
     <ProjectReference Include="..\BigCommerce.Migration.Infrastructure\BigCommerce.Migration.Infrastructure.csproj" />
+    <ProjectReference Include="..\BigCommerce.Migration.CodeAnalysis\BigCommerce.Migration.CodeAnalysis.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
 </Project>

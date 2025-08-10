@@ -36,6 +36,25 @@ export interface ProcessingContext {
   currentActivity: string;
   currentBatchStartTime: Date;
   estimatedBatchCompletion: Date;
+  // 🎯 NEW SUB-BATCH TRACKING: Enhanced with sub-batch details
+  currentSubBatch?: CurrentSubBatchDetails;
+}
+
+// 🎯 NEW INTERFACE: Sub-batch state tracking for current batch processing
+export interface CurrentSubBatchDetails {
+  subBatchNumber: number;
+  totalSubBatches: number;
+  parentBatchNumber: number;
+  subBatchSize: number;
+  processedInSubBatch: number;
+  successfulInSubBatch: number;
+  failedInSubBatch: number;
+  subBatchProgressPercentage: number;
+  subBatchProcessingSpeed: number;
+  subBatchElapsedTime: number;
+  estimatedSubBatchTimeRemaining: number;
+  subBatchStartTime: Date;
+  isSubBatchActive: boolean;
 }
 
 export interface CurrentBatchDetails {
@@ -240,10 +259,113 @@ export const useDetailedMigrationProgress = (
       return;
     }
 
+    // 🚨 FIX: Add event deduplication and progress validation to prevent erratic UI behavior
+    setState(prev => {
+      const currentProgress = prev.progress?.overallProgressPercentage || 0;
+      const newProgress = progress.overallProgressPercentage || 0;
+      const currentProcessedEntities = prev.progress?.processedEntities || 0;
+      const newProcessedEntities = progress.processedEntities || 0;
+      const currentTotalEntities = prev.progress?.totalEntities || 0;
+      const newTotalEntities = progress.totalEntities || 0;
+      const progressTimestamp = new Date(progress.timestamp || progress.updatedAt || Date.now());
+      const lastUpdateTime = prev.lastUpdated || new Date(0);
+      
+      // 🎯 DEDUPLICATION: Skip ONLY if this is significantly older data (more permissive for incremental updates)
+      const timeDiffMs = progressTimestamp.getTime() - lastUpdateTime.getTime();
+      const isIncrementalEntityUpdate = newProcessedEntities > currentProcessedEntities && 
+                                       (newProcessedEntities - currentProcessedEntities) <= 10; // Allow incremental increases up to 10 entities
+      
+      if (progressTimestamp <= lastUpdateTime && 
+          Math.abs(newProgress - currentProgress) < 0.1 &&
+          Math.abs(newProcessedEntities - currentProcessedEntities) < 1 &&
+          !isIncrementalEntityUpdate) {
+        console.log('🎯 SKIPPING: Older or duplicate progress/count data', {
+          currentProgress,
+          newProgress, 
+          currentProcessedEntities,
+          newProcessedEntities,
+          timeDiffMs,
+          progressTimestamp: progressTimestamp.toISOString(),
+          lastUpdateTime: lastUpdateTime.toISOString()
+        });
+        return prev;
+      }
+      
+      // 🎯 SPECIAL CASE: Allow incremental entity updates even with slightly older timestamps (sub-batch events)
+      if (isIncrementalEntityUpdate && timeDiffMs > -5000) { // Allow 5 second tolerance for incremental updates
+        console.log('🎯 ALLOWING: Incremental entity update (sub-batch)', {
+          currentProcessedEntities,
+          newProcessedEntities,
+          increment: newProcessedEntities - currentProcessedEntities,
+          timeDiffMs
+        });
+      }
+      
+      // 🎯 PROGRESS VALIDATION: Only allow progress to move backward if it's significantly newer data
+      if (newProgress < currentProgress && progressTimestamp <= lastUpdateTime) {
+        console.log('🎯 BLOCKING: Progress moving backward with old timestamp', {
+          currentProgress,
+          newProgress,
+          timeDiff: progressTimestamp.getTime() - lastUpdateTime.getTime()
+        });
+        return prev;
+      }
+      
+      // 🚨 ENTITY COUNT VALIDATION: Only allow processed entities to decrease if it's significantly newer data
+      // BUT: Allow incremental sub-batch updates even with slightly older timestamps
+      if (newProcessedEntities < currentProcessedEntities && 
+          progressTimestamp <= lastUpdateTime && 
+          !isIncrementalEntityUpdate &&
+          timeDiffMs < -5000) { // Only block if it's more than 5 seconds old
+        console.log('🎯 BLOCKING: Processed entities moving backward with old timestamp', {
+          currentProcessedEntities,
+          newProcessedEntities,
+          timeDiffMs
+        });
+        return prev;
+      }
+      
+      // 🚨 TOTAL ENTITIES VALIDATION: Total entities should generally not decrease during migration
+      if (newTotalEntities < currentTotalEntities && currentTotalEntities > 0) {
+        console.log('🎯 BLOCKING: Total entities decreased (unusual)', {
+          currentTotalEntities,
+          newTotalEntities
+        });
+        return prev;
+      }
+      
+      console.log('🎯 ACCEPTING: Valid progress/count update', {
+        currentProgress,
+        newProgress,
+        currentProcessedEntities,
+        newProcessedEntities,
+        direction: newProgress >= currentProgress ? '↗️ Forward' : '↙️ Backward (newer data)',
+        entityDirection: newProcessedEntities >= currentProcessedEntities ? '⬆️ Increasing' : '⬇️ Decreasing (newer data)',
+        isIncremental: isIncrementalEntityUpdate,
+        increment: newProcessedEntities - currentProcessedEntities,
+        timeDiffMs,
+        progressTimestamp: progressTimestamp.toISOString()
+      });
+      
+      // 📊 FRONTEND BINDING VERIFICATION: Confirm UI is doing pure data binding, no calculations
+      console.log('📊 [UI-BINDING] FRONTEND DISPLAY DATA (pure binding - no calculations): ' + 
+        `ProgressBar: ${newProgress.toFixed(1)}%, ` +
+        `EntityCounts: ${newProcessedEntities}/${progress.totalEntities}, ` +
+        `Source: Backend overallProgressPercentage=${progress.overallProgressPercentage || 'MISSING'}`);
+      
+      // 🚨 ARCHITECTURE VERIFICATION: Ensure frontend does NOT calculate - backend provides ready-to-display values
+      if (progress.totalEntities > 0) {
+        const backendCalculatedProgress = newProgress;
+        const frontendCalculatedProgress = (newProcessedEntities / progress.totalEntities * 100);
+        if (Math.abs(backendCalculatedProgress - frontendCalculatedProgress) > 0.1) {
+          console.warn('⚠️ [SYNC-WARNING] Backend progress percentage does not match entity count ratio! ' +
+            `Backend: ${backendCalculatedProgress.toFixed(2)}%, Calculated: ${frontendCalculatedProgress.toFixed(2)}%`);
+        }
+      }
+
     console.log('🎯 Setting progress state:', progress);
     
     // Data is already transformed by SignalR service, just use it directly
-    setState(prev => {
       const newState = {
         ...prev,
         progress: {
@@ -255,7 +377,7 @@ export const useDetailedMigrationProgress = (
           performance: progress.performance || {}
         },
         isLoading: false,
-        lastUpdated: new Date(),
+        lastUpdated: progressTimestamp,
         lastHeartbeat: new Date()
       };
       console.log('🎯 New state will be:', newState);
@@ -264,9 +386,8 @@ export const useDetailedMigrationProgress = (
 
     addEvent('DetailedProgress', progress, `Detailed progress: ${(progress.overallProgressPercentage || 0).toFixed(1)}%`);
 
-    if (enableNotifications && progress.status === 'completed') {
-      notificationService.success('Migration Complete', `Migration ${migrationId} completed successfully!`);
-    }
+    // ✅ FIX: Don't show completion notification here - DashboardContext handles this centrally
+    // This prevents duplicate notifications when migration completes
   }, [migrationId, addEvent, enableNotifications]);
 
   // Handle processing context updates
@@ -297,37 +418,133 @@ export const useDetailedMigrationProgress = (
     const entityType = event.EntityType || event.entityType;
     const batchNumber = event.BatchNumber || event.batchNumber || event.BatchDetails?.batchNumber;
 
-    setState(prev => ({
-      ...prev,
-      lastUpdated: new Date(),
-      lastHeartbeat: new Date()
-    }));
+    // 🎯 NEW SUB-BATCH STATE MANAGEMENT: Extract sub-batch details for enhanced tracking
+    const isSubBatchEvent = event.subBatchNumber !== undefined || event.parentBatchNumber !== undefined;
+    const subBatchNumber = event.subBatchNumber || 0;
+    const totalSubBatches = event.totalSubBatches || 0;
+    const parentBatchNumber = event.parentBatchNumber || batchNumber;
+
+    setState(prev => {
+      const currentProgress = prev.progress;
+      let updatedProgress = currentProgress;
+
+      // 🎯 SUB-BATCH STATE TRACKING: Update current batch and sub-batch details
+      if (isSubBatchEvent && currentProgress) {
+        const currentTime = new Date();
+        
+        // Create updated current batch details from sub-batch data
+        const updatedCurrentBatch: CurrentBatchDetails = {
+          batchNumber: parentBatchNumber,
+          batchSize: event.totalEntities || currentProgress.currentProcessing?.currentBatch?.batchSize || 50,
+          processedInBatch: subBatchNumber * (event.totalEntities || 5), // Approximate processed in batch
+          batchProgressPercentage: totalSubBatches > 0 ? (subBatchNumber / totalSubBatches * 100) : 0,
+          batchProcessingSpeed: event.entitiesPerSecond || 0,
+          batchElapsedTime: event.elapsedTime || 0,
+          estimatedBatchTimeRemaining: event.estimatedTimeRemaining || 0
+        };
+
+        // Create current sub-batch details
+        const currentSubBatch: CurrentSubBatchDetails = {
+          subBatchNumber,
+          totalSubBatches,
+          parentBatchNumber,
+          subBatchSize: event.totalEntities || 5,
+          processedInSubBatch: eventType === 'BatchCompleted' ? (event.totalEntities || 0) : 0,
+          successfulInSubBatch: event.successfulEntities || 0,
+          failedInSubBatch: event.failedEntities || 0,
+          subBatchProgressPercentage: eventType === 'BatchCompleted' ? 100 : (eventType === 'BatchProgress' ? 50 : 0),
+          subBatchProcessingSpeed: event.entitiesPerSecond || 0,
+          subBatchElapsedTime: event.elapsedTime || 0,
+          estimatedSubBatchTimeRemaining: event.estimatedTimeRemaining || 0,
+          subBatchStartTime: event.startedAt ? new Date(event.startedAt) : currentTime,
+          isSubBatchActive: eventType !== 'BatchCompleted'
+        };
+
+        // Update processing context with current batch and sub-batch details
+        const updatedCurrentProcessing: ProcessingContext = {
+          ...currentProgress.currentProcessing,
+          currentEntity: entityType,
+          currentBatchNumber: parentBatchNumber,
+          currentBatch: updatedCurrentBatch,
+          currentActivity: eventType === 'BatchStarted' ? 'Starting sub-batch' : 
+                          eventType === 'BatchProgress' ? 'Processing sub-batch' : 'Completing sub-batch',
+          currentPhase: 'Processing',
+          currentBatchStartTime: currentProgress.currentProcessing?.currentBatchStartTime || currentTime,
+          estimatedBatchCompletion: new Date(currentTime.getTime() + (updatedCurrentBatch.estimatedBatchTimeRemaining * 1000)),
+          currentSubBatch
+        };
+
+        updatedProgress = {
+          ...currentProgress,
+          currentProcessing: updatedCurrentProcessing,
+          lastUpdated: currentTime
+        };
+      }
+
+      return {
+        ...prev,
+        progress: updatedProgress,
+        lastUpdated: new Date(),
+        lastHeartbeat: new Date()
+      };
+    });
 
     let message = '';
-    switch (eventType) {
-      case 'BatchStarted':
-        message = `Started ${entityType} batch ${batchNumber}`;
-        break;
-      case 'BatchProgress':
-        const progressPct = event.BatchProgress?.batchProgressPercentage || event.Summary?.progressPercentage || 0;
-        message = `${entityType} batch ${batchNumber}: ${progressPct.toFixed(1)}% complete`;
-        break;
-      case 'BatchCompleted':
-        const successful = event.Summary?.successfulEntities || 0;
-        const total = event.Summary?.entitiesProcessed || 0;
-        message = `Completed ${entityType} batch ${batchNumber}: ${successful}/${total} successful`;
-        break;
+    if (isSubBatchEvent) {
+      // Enhanced messaging for sub-batch events
+      switch (eventType) {
+        case 'BatchStarted':
+          message = `Started ${entityType} sub-batch ${subBatchNumber}/${totalSubBatches} (batch ${parentBatchNumber})`;
+          break;
+        case 'BatchProgress':
+          const progressPct = totalSubBatches > 0 ? (subBatchNumber / totalSubBatches * 100) : 0;
+          message = `${entityType} sub-batch ${subBatchNumber}/${totalSubBatches}: ${progressPct.toFixed(1)}% complete`;
+          break;
+        case 'BatchCompleted':
+          const successful = event.successfulEntities || 0;
+          const total = event.totalEntities || 0;
+          message = `Completed ${entityType} sub-batch ${subBatchNumber}/${totalSubBatches}: ${successful}/${total} successful`;
+          break;
+      }
+    } else {
+      // Standard batch event messaging
+      switch (eventType) {
+        case 'BatchStarted':
+          message = `Started ${entityType} batch ${batchNumber}`;
+          break;
+        case 'BatchProgress':
+          const progressPct = event.BatchProgress?.batchProgressPercentage || event.Summary?.progressPercentage || 0;
+          message = `${entityType} batch ${batchNumber}: ${progressPct.toFixed(1)}% complete`;
+          break;
+        case 'BatchCompleted':
+          const successful = event.Summary?.successfulEntities || 0;
+          const total = event.Summary?.entitiesProcessed || 0;
+          message = `Completed ${entityType} batch ${batchNumber}: ${successful}/${total} successful`;
+          break;
+      }
     }
 
     addEvent(eventType as any, event, message);
 
+    // Enhanced notifications for sub-batch completion
     if (enableNotifications && eventType === 'BatchCompleted') {
-      const summary = event.Summary;
-      if (summary && summary.successfulEntities === summary.entitiesProcessed) {
-        notificationService.success('Batch Complete', message);
-      } else if (summary && summary.failedEntities > 0) {
-        notificationService.warning('Batch Complete with Errors', 
-          `${message} (${summary.failedEntities} failed)`);
+      if (isSubBatchEvent) {
+        const successful = event.successfulEntities || 0;
+        const total = event.totalEntities || 0;
+        if (successful === total) {
+          notificationService.success('Sub-batch Complete', message);
+        } else if ((event.failedEntities || 0) > 0) {
+          notificationService.warning('Sub-batch Complete with Errors', 
+            `${message} (${event.failedEntities} failed)`);
+        }
+      } else {
+        const summary = event.Summary;
+        if (summary && summary.successfulEntities === summary.entitiesProcessed) {
+          notificationService.success('Batch Complete', message);
+        } else if (summary && summary.failedEntities > 0) {
+          notificationService.warning('Batch Complete with Errors', 
+            `${message} (${summary.failedEntities} failed)`);
+        }
       }
     }
   }, [migrationId, addEvent, enableNotifications]);
@@ -493,6 +710,44 @@ export const useDetailedMigrationProgress = (
         const unsubscribeEntityProgress = signalRService.current.on('EntityProgressUpdated', handleEntityUpdate);
         const unsubscribeErrors = signalRService.current.on('ErrorOccurred', handleErrorEvent);
         const unsubscribeConnectionState = signalRService.current.on('connectionStateChanged', handleConnectionStateChange);
+
+              // 🎯 CENTRALIZED SIGNALR: Subscribe to DetailedProgress events from sub-batch operations
+      const unsubscribeDetailedProgress = signalRService.current.on('DetailedProgress', (event: any) => {
+        console.log('🎯 DEBUG: Received DetailedProgress event (autoConnect):', event);
+        
+        // Check if this event contains progress data that should update the overall progress
+        if (event && (event.MigrationId === migrationId || event.migrationId === migrationId)) {
+          // If the event has overall progress data, use it to update the progress state
+          if (event.overallProgressPercentage !== undefined || event.overallProgress !== undefined || 
+              event.processedEntities !== undefined || event.totalEntities !== undefined) {
+            
+            console.log('🎯 DEBUG: DetailedProgress contains progress data, updating state (autoConnect)');
+            
+            // Create a progress object from the event data
+            const progressData = {
+              migrationId: event.migrationId || migrationId,
+              status: event.status || 'in_progress',
+              overallProgressPercentage: event.overallProgressPercentage || event.overallProgress || 0,
+              totalEntities: event.totalEntities || 0,
+              processedEntities: event.processedEntities || 0,
+              successfulEntities: event.successfulEntities || 0,
+              failedEntities: event.failedEntities || 0,
+              currentEntity: event.entityType || event.currentEntity || 'entities',
+              entitiesPerSecond: event.entitiesPerSecond || 0,
+              errorRate: event.errorRate || 0,
+              elapsedTime: event.elapsedTime || 0,
+              estimatedTimeRemaining: event.estimatedTimeRemaining || 0,
+              // Preserve existing nested structures or create minimal ones
+              currentProcessing: event.currentProcessing || {},
+              batchProgress: event.batchProgress || {},
+              remainingWork: event.remainingWork || {},
+              performance: event.performance || {}
+            };
+            
+            handleDetailedProgress(progressData);
+          }
+        }
+      });
         
         unsubscribeCallbacks.current = [
           unsubscribeProgress,
@@ -500,7 +755,8 @@ export const useDetailedMigrationProgress = (
           unsubscribeBatchProgress,
           unsubscribeEntityProgress,
           unsubscribeErrors,
-          unsubscribeConnectionState
+          unsubscribeConnectionState,
+          unsubscribeDetailedProgress
         ];
         
         // Update state to connected and not loading
@@ -563,11 +819,33 @@ export const useDetailedMigrationProgress = (
                 currentEntity: data.CurrentEntity || 'Unknown',
                 currentActivity: data.CurrentPhase || 'Processing...',
                 currentBatchNumber: Math.ceil((data.ProcessedEntities || 0) / 50) || 1,
+                currentPhase: data.CurrentPhase || 'Processing',
+                currentBatchStartTime: data.StartTime ? new Date(data.StartTime) : new Date(),
+                estimatedBatchCompletion: new Date(Date.now() + parseTimeStringToSeconds(data.EstimatedTimeRemaining) * 1000),
                 currentBatch: {
+                  batchNumber: Math.ceil((data.ProcessedEntities || 0) / 50) || 1,
                   batchProgressPercentage: ((data.OverallProgress || 0) % 10) * 10,
                   batchSize: 50,
                   processedInBatch: (data.ProcessedEntities || 0) % 50,
-                  batchProcessingSpeed: data.EntitiesPerSecond || 0
+                  batchProcessingSpeed: data.EntitiesPerSecond || 0,
+                  batchElapsedTime: parseTimeStringToSeconds(data.ElapsedTime),
+                  estimatedBatchTimeRemaining: parseTimeStringToSeconds(data.EstimatedTimeRemaining)
+                },
+                // 🎯 NEW SUB-BATCH TRACKING: Initialize sub-batch state for current processing
+                currentSubBatch: {
+                  subBatchNumber: 1,
+                  totalSubBatches: 10, // Approximate sub-batches per batch (50 entities / 5 per sub-batch)
+                  parentBatchNumber: Math.ceil((data.ProcessedEntities || 0) / 50) || 1,
+                  subBatchSize: 5,
+                  processedInSubBatch: Math.min((data.ProcessedEntities || 0) % 5, 5),
+                  successfulInSubBatch: Math.min((data.ProcessedEntities || 0) % 5, 5),
+                  failedInSubBatch: 0,
+                  subBatchProgressPercentage: ((data.ProcessedEntities || 0) % 5) * 20, // Progress within current sub-batch
+                  subBatchProcessingSpeed: data.EntitiesPerSecond || 0,
+                  subBatchElapsedTime: parseTimeStringToSeconds(data.ElapsedTime),
+                  estimatedSubBatchTimeRemaining: parseTimeStringToSeconds(data.EstimatedTimeRemaining) / 10,
+                  subBatchStartTime: data.StartTime ? new Date(data.StartTime) : new Date(),
+                  isSubBatchActive: (data.Status || '').toLowerCase() === 'in_progress'
                 }
               },
               batchProgress: {
@@ -616,6 +894,44 @@ export const useDetailedMigrationProgress = (
       const unsubscribeEntityProgress = signalRService.current.on('EntityProgressUpdated', handleEntityUpdate);
       const unsubscribeErrors = signalRService.current.on('ErrorOccurred', handleErrorEvent);
       const unsubscribeConnectionState = signalRService.current.on('connectionStateChanged', handleConnectionStateChange);
+
+      // 🎯 CENTRALIZED SIGNALR: Subscribe to DetailedProgress events from sub-batch operations
+      const unsubscribeDetailedProgress = signalRService.current.on('DetailedProgress', (event: any) => {
+        console.log('🎯 DEBUG: Received DetailedProgress event:', event);
+        
+        // Check if this event contains progress data that should update the overall progress
+        if (event && (event.MigrationId === migrationId || event.migrationId === migrationId)) {
+          // If the event has overall progress data, use it to update the progress state
+          if (event.overallProgressPercentage !== undefined || event.overallProgress !== undefined || 
+              event.processedEntities !== undefined || event.totalEntities !== undefined) {
+            
+            console.log('🎯 DEBUG: DetailedProgress contains progress data, updating state');
+            
+            // Create a progress object from the event data
+            const progressData = {
+              migrationId: event.migrationId || migrationId,
+              status: event.status || 'in_progress',
+              overallProgressPercentage: event.overallProgressPercentage || event.overallProgress || 0,
+              totalEntities: event.totalEntities || 0,
+              processedEntities: event.processedEntities || 0,
+              successfulEntities: event.successfulEntities || 0,
+              failedEntities: event.failedEntities || 0,
+              currentEntity: event.entityType || event.currentEntity || 'entities',
+              entitiesPerSecond: event.entitiesPerSecond || 0,
+              errorRate: event.errorRate || 0,
+              elapsedTime: event.elapsedTime || 0,
+              estimatedTimeRemaining: event.estimatedTimeRemaining || 0,
+              // Preserve existing nested structures or create minimal ones
+              currentProcessing: event.currentProcessing || {},
+              batchProgress: event.batchProgress || {},
+              remainingWork: event.remainingWork || {},
+              performance: event.performance || {}
+            };
+            
+            handleDetailedProgress(progressData);
+          }
+        }
+      });
       
       unsubscribeCallbacks.current = [
         unsubscribeProgress,
@@ -623,7 +939,8 @@ export const useDetailedMigrationProgress = (
         unsubscribeBatchProgress,
         unsubscribeEntityProgress,
         unsubscribeErrors,
-        unsubscribeConnectionState
+        unsubscribeConnectionState,
+        unsubscribeDetailedProgress
       ];
       
       // Update connection state to connected
@@ -685,11 +1002,33 @@ export const useDetailedMigrationProgress = (
               currentEntity: data.CurrentEntity || 'Unknown',
               currentActivity: data.CurrentPhase || 'Processing...',
               currentBatchNumber: Math.ceil((data.ProcessedEntities || 0) / 50) || 1,
+              currentPhase: data.CurrentPhase || 'Processing',
+              currentBatchStartTime: data.StartTime ? new Date(data.StartTime) : new Date(),
+              estimatedBatchCompletion: new Date(Date.now() + parseTimeStringToSeconds(data.EstimatedTimeRemaining) * 1000),
               currentBatch: {
+                batchNumber: Math.ceil((data.ProcessedEntities || 0) / 50) || 1,
                 batchProgressPercentage: ((data.OverallProgress || 0) % 10) * 10,
                 batchSize: 50,
                 processedInBatch: (data.ProcessedEntities || 0) % 50,
-                batchProcessingSpeed: data.EntitiesPerSecond || 0
+                batchProcessingSpeed: data.EntitiesPerSecond || 0,
+                batchElapsedTime: parseTimeStringToSeconds(data.ElapsedTime),
+                estimatedBatchTimeRemaining: parseTimeStringToSeconds(data.EstimatedTimeRemaining)
+              },
+              // 🎯 NEW SUB-BATCH TRACKING: Initialize sub-batch state for current processing
+              currentSubBatch: {
+                subBatchNumber: 1,
+                totalSubBatches: 10, // Approximate sub-batches per batch (50 entities / 5 per sub-batch)
+                parentBatchNumber: Math.ceil((data.ProcessedEntities || 0) / 50) || 1,
+                subBatchSize: 5,
+                processedInSubBatch: Math.min((data.ProcessedEntities || 0) % 5, 5),
+                successfulInSubBatch: Math.min((data.ProcessedEntities || 0) % 5, 5),
+                failedInSubBatch: 0,
+                subBatchProgressPercentage: ((data.ProcessedEntities || 0) % 5) * 20, // Progress within current sub-batch
+                subBatchProcessingSpeed: data.EntitiesPerSecond || 0,
+                subBatchElapsedTime: parseTimeStringToSeconds(data.ElapsedTime),
+                estimatedSubBatchTimeRemaining: parseTimeStringToSeconds(data.EstimatedTimeRemaining) / 10,
+                subBatchStartTime: data.StartTime ? new Date(data.StartTime) : new Date(),
+                isSubBatchActive: (data.Status || '').toLowerCase() === 'in_progress'
               }
             },
             batchProgress: {
@@ -814,11 +1153,33 @@ export const useDetailedMigrationProgress = (
           currentEntity: data.CurrentEntity || 'Unknown',
           currentActivity: data.CurrentPhase || 'Processing...',
           currentBatchNumber: Math.ceil((data.ProcessedEntities || 0) / 50) || 1,
+          currentPhase: data.CurrentPhase || 'Processing',
+          currentBatchStartTime: data.StartTime ? new Date(data.StartTime) : new Date(),
+          estimatedBatchCompletion: new Date(Date.now() + parseTimeStringToSeconds(data.EstimatedTimeRemaining) * 1000),
           currentBatch: {
+            batchNumber: Math.ceil((data.ProcessedEntities || 0) / 50) || 1,
             batchProgressPercentage: ((data.OverallProgress || 0) % 10) * 10,
             batchSize: 50,
             processedInBatch: (data.ProcessedEntities || 0) % 50,
-            batchProcessingSpeed: data.EntitiesPerSecond || 0
+            batchProcessingSpeed: data.EntitiesPerSecond || 0,
+            batchElapsedTime: parseTimeStringToSeconds(data.ElapsedTime),
+            estimatedBatchTimeRemaining: parseTimeStringToSeconds(data.EstimatedTimeRemaining)
+          },
+          // 🎯 NEW SUB-BATCH TRACKING: Initialize sub-batch state for current processing
+          currentSubBatch: {
+            subBatchNumber: 1,
+            totalSubBatches: 10, // Approximate sub-batches per batch (50 entities / 5 per sub-batch)
+            parentBatchNumber: Math.ceil((data.ProcessedEntities || 0) / 50) || 1,
+            subBatchSize: 5,
+            processedInSubBatch: Math.min((data.ProcessedEntities || 0) % 5, 5),
+            successfulInSubBatch: Math.min((data.ProcessedEntities || 0) % 5, 5),
+            failedInSubBatch: 0,
+            subBatchProgressPercentage: ((data.ProcessedEntities || 0) % 5) * 20, // Progress within current sub-batch
+            subBatchProcessingSpeed: data.EntitiesPerSecond || 0,
+            subBatchElapsedTime: parseTimeStringToSeconds(data.ElapsedTime),
+            estimatedSubBatchTimeRemaining: parseTimeStringToSeconds(data.EstimatedTimeRemaining) / 10,
+            subBatchStartTime: data.StartTime ? new Date(data.StartTime) : new Date(),
+            isSubBatchActive: (data.Status || '').toLowerCase() === 'in_progress'
           }
         },
         batchProgress: {

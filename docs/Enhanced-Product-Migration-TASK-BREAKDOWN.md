@@ -30,11 +30,11 @@ mapping   mapping            ON-THE-FLY CREATION        mapping    update     up
 **Priority**: HIGHEST | **Effort**: 6 hours | **Dependencies**: None
 
 **Issue**: Brand and product migrations have SignalR code but real-time updates aren't working
-**Root Cause**: Integration gaps between migration activities and ParallelBatchProcessingPipeline
+**Root Cause**: ProcessEntityChunkActivity uses basic IProgressEventPublisher instead of ISignalREventFactory
 
 **Sub-tasks:**
 1. **P0-T1.1**: Investigate SignalR integration flow for brands/products
-2. **P0-T1.2**: Fix ParallelBatchProcessingPipeline usage in brand/product migrations  
+2. **P0-T1.2**: Add SignalR events to ProcessEntityChunkActivity for real-time updates  
 3. **P0-T1.3**: Fix small dataset workflows that bypass parallel processing
 4. **P0-T1.4**: Verify SignalR events reach dashboard for brands/products
 5. **P0-T1.5**: Test batch-level and cumulative progress updates
@@ -214,65 +214,157 @@ mapping   mapping            ON-THE-FLY CREATION        mapping    update     up
 
 ---
 
-## 🧠 **PHASE 2: COMPREHENSIVE ENTITY MIGRATION (ON-THE-FLY)**
+## 🧠 **PHASE 2: COMPREHENSIVE ENTITY MIGRATION (SEAMLESS INTEGRATION)**
 
-### **P2-T1: Create Comprehensive Entity Migration Strategy** ⭐
+### **P2-T1: Configuration-Driven Enhanced Products Integration** ⭐
 **Priority**: Critical | **Effort**: 8 hours | **Dependencies**: P0-T1, P0-T2 (MUST complete infrastructure fixes first)
 
-**Overview**: Implement single phase that fetches and creates ALL entities (options, modifiers, images, reviews) on-the-fly with real-time SignalR updates and individual error handling.
+**Overview**: Seamlessly integrate enhanced products processing with **dual-tier progress aggregation** using existing orchestration infrastructure. No orchestrator changes needed - only configuration and strategy updates.
+
+**Integration Strategy:**
+```
+EntityMigrationOrchestrator → ProcessEntityChunkActivity → ComprehensiveEntityMigrationPipeline
+     ↓ (existing)                   ↓ (enhanced)              ↓ (new)
+Configuration-driven         Detects enhanced-products    Parallel Sub-Entity Processing
+   pageSize: 10             routes to comprehensive         [Options, Modifiers, Images, Reviews]
+```
 
 **Sub-tasks:**
-1. **P2-T1.1**: Update EntityMapping for essential metadata only (keep table clean)
-   ```csharp
-   public class EntityMapping
-   {
-       // Existing fields (unchanged)...
-       public string? RelatedProductsData { get; set; }        // ✅ EXISTS
-       public string? ChannelsData { get; set; }              // ✅ EXISTS
-       
-       // ❌ NO PHASE 1 METADATA STORAGE NEEDED
-       // bulk_pricing_rules, videos, custom_fields included directly in product create payload
-       
-       // NEW: Only option mappings for variants (Phase 2) - NESTED STRUCTURE
-       public string? OptionsMappingData { get; set; }        // 🆕 JSON: Nested option/value mappings
-       // Structure: {"options": [{"source_option_id": "123", "dest_option_id": "456", "option_values": [...]}]}
+1. **P2-T1.1**: Add Enhanced Products Configuration
+   ```json
+   // appsettings.json - ParallelProcessing section
+   "enhanced-products": {
+     "entityType": "enhanced-products",
+     "pageSize": 10,                    // API LIMIT: Max 10 with includes
+     "chunkSize": 10,
+     "fetchBatchSize": 10,
+     "subBatchSize": 2,
+     "maxConcurrency": 5,
+     "enableSubBatching": true,
+     "enableParallelSubEntities": true  // NEW FLAG
    }
-   
-   // ✅ COUNTS & STATUS: Use existing EntityProgressEntry table instead
-   // - EntityProgressEntry for "options" 
-   // - EntityProgressEntry for "modifiers"
-   // - EntityProgressEntry for "images" 
-   // - EntityProgressEntry for "reviews"
    ```
 
-2. **P2-T1.2**: Create ComprehensiveEntityMigrationActivity (Enhanced Architecture)
-   
-   **🏗️ Reuse Existing Infrastructure Components:**
-   - ✅ **ParallelBatchProcessingPipeline**: Proven batch orchestration (timeout-safe)
-   - ✅ **ProgressTracker**: Entity count tracking with persistence
-   - ✅ **SignalREventFactory**: Real-time updates
-   - ✅ **EntityErrorHandlingService**: Individual entity error logging
-   - 🆕 **ComprehensiveEntityFetchStrategy**: options,modifiers,images,reviews fetching
-   - 🆕 **ComprehensiveEntityTransformStrategy**: on-the-fly entity creation
-   
-   **⚡ Enhanced Parallel Processing Strategy:**
+2. **P2-T1.2**: Create EnhancedProductFetchStrategy
    ```csharp
-   // Smart count source (no API calls)
-   var totalProducts = await _progressTracker.GetEntityCountAsync(migrationId, "products");
-   var batchSize = 10; // Due to include limitations
-   var totalBatches = Math.Ceiling(totalProducts / 10.0);
+   public class EnhancedProductFetchStrategy : IEntityFetchStrategy
+   {
+       public async Task<List<Dictionary<string, object>>> FetchEntitiesAsync(...)
+       {
+           // Enhanced includes with API limit
+           return await _apiClient.GetProductsAsync(
+               sourceStore, page, 10,  // API LIMIT: Max 10
+               "custom_fields,channels,bulk_pricing_rules,videos,options,modifiers",
+               cancellationToken);
+       }
+   }
+   ```
+
+3. **P2-T1.3**: Implement ComprehensiveEntityMigrationPipeline
+   ```csharp
+   public class ComprehensiveEntityMigrationPipeline : IComprehensiveEntityMigrationPipeline
+   {
+       public async Task<BatchProcessingResult> ProcessComprehensiveEntitiesAsync(
+           List<Dictionary<string, object>> products,
+           BatchProcessingRequest request,
+           CancellationToken cancellationToken)
+       {
+           // Initialize Pipeline Progress Aggregator (Tier 1)
+           using var pipelineAggregator = new PipelineProgressAggregator(
+               request.MigrationId, channelConfigs, _signalREventFactory, 
+               _universalAggregator, _logger);
+           
+           foreach (var product in products)
+           {
+               // Create main product
+               await CreateMainProductAsync(product, request, cancellationToken);
+               
+               // Parallel sub-entity processing
+               var tasks = new List<Task>
+               {
+                   ProcessOptionsWithProgressAsync(product, request, pipelineAggregator, cancellationToken),
+                   ProcessModifiersWithProgressAsync(product, request, pipelineAggregator, cancellationToken),
+                   ProcessImagesWithProgressAsync(product, request, pipelineAggregator, cancellationToken),
+                   ProcessReviewsWithProgressAsync(product, request, pipelineAggregator, cancellationToken)
+               };
+               
+               await Task.WhenAll(tasks);
+           }
+       }
+   }
+   ```
+
+4. **P2-T1.4**: Enhance ProcessEntityChunkActivity Integration
+   ```csharp
+   public class ProcessEntityChunkActivity  // EXISTING CLASS
+   {
+       private readonly IComprehensiveEntityMigrationPipeline _comprehensivePipeline;
+       private readonly IUniversalMigrationProgressAggregator _universalAggregator;
+       
+       public async Task<BatchProcessingResult> ProcessEntityChunkAsync([ActivityTrigger] ProcessEntityChunkRequest request)
+       {
+           // Existing validation and setup...
+           
+           if (request.EntityType == "enhanced-products")
+           {
+               // Use comprehensive pipeline for parallel sub-entity processing
+               var result = await _comprehensivePipeline.ProcessComprehensiveEntitiesAsync(
+                   fetchedEntities, batchRequest, cancellationToken);
+               
+               // Update Universal Aggregator (Tier 2)
+               await _universalAggregator.UpdatePrimaryEntityProgressAsync(
+                   request.MigrationId, "enhanced-products", 
+                   new PrimaryEntityProgress { /* result data */ });
+                   
+               return result;
+           }
+           else
+           {
+               // Standard processing for brands, products
+               return await ProcessStandardEntitiesAsync(fetchedEntities, batchRequest, cancellationToken);
+           }
+       }
+   }
+   ```
+
+5. **P2-T1.5**: Implement Dual-Tier Progress Aggregation
    
-   // Parallel batch processing (Azure Function timeout-safe)
-   await _parallelBatchPipeline.ProcessBatchesAsync(batchRequests, cancellationToken);
+   **🏗️ Tier 1: Pipeline Progress Aggregator (Within Chunks)**
+   - ✅ **Real-time channel updates**: Options, Modifiers, Images, Reviews progress
+   - ✅ **Timer-based broadcasting**: 250ms intervals for optimal UX
+   - ✅ **Bridge to Universal Aggregator**: Automatic integration with Tier 2
+   
+   **🏗️ Tier 2: Universal Migration Progress Aggregator (Ecosystem-wide)**
+   - ✅ **Primary entity tracking**: brands, products, enhanced-products
+   - ✅ **Comprehensive entity tracking**: options, modifiers, images, reviews
+   - ✅ **Unified dashboard events**: Complete migration visibility
+   
+   **📊 Dashboard Integration:**
+   ```typescript
+   // Dashboard receives both event types:
+   
+   // Tier 1: Individual comprehensive entity progress
+   interface ComprehensiveEntityProgressEvent {
+     migrationId: string;
+     parentEntityType: "products";
+     entityType: "options" | "modifiers" | "images" | "reviews";
+     processedCount: number;
+     throughputPerSecond: number;
+   }
+   
+   // Tier 2: Universal migration progress
+   interface UniversalMigrationProgressEvent {
+     migrationId: string;
+     primaryEntityProgress: { brands: Progress; products: Progress; "enhanced-products": Progress; };
+     comprehensiveEntityProgress: { products: { options: Progress; modifiers: Progress; } };
+   }
    ```
    
-   **📊 Multi-Entity Progress Tracking:**
-   - Individual tracking: "Options: 150/200, Modifiers: 45/50, Images: 300/320"
-   - EntityProgressEntry per entity type (options, modifiers, images, reviews)
-   - Real-time SignalR updates for each entity type
-   
-   **🔄 Efficient Entity Creation Flow (Timeout Optimized):**
-   - Batch size: 10 products max (respects Function App 5-minute timeout)
+   **🔄 Integration Benefits:**
+   - ✅ **Zero orchestrator changes**: Uses existing EntityMigrationOrchestrator flow
+   - ✅ **Configuration-driven**: Simply add enhanced-products config
+   - ✅ **Timeout safety**: Leverages existing ProcessEntityChunkActivity (10 products max)
+   - ✅ **Real-time updates**: Dual-tier progress for granular + overview visibility
    - Parallel entity creation within each batch
    - Progress persistence after each batch completion
    - Resumable from last completed batch on timeout/failure
@@ -316,7 +408,7 @@ mapping   mapping            ON-THE-FLY CREATION        mapping    update     up
            
            // Parallel execution with timeout resilience
            var results = await context.CallSubOrchestratorAsync<List<BatchResult>>(
-               nameof(ParallelBatchProcessingPipeline), 
+               nameof(ProcessEntityChunkActivity), 
                new ParallelBatchRequest(batchRequests));
                
            return AggregateResults(results);
@@ -942,25 +1034,29 @@ mapping   mapping            ON-THE-FLY CREATION        mapping    update     up
 
 ## 🔄 **DEPENDENCY ORDER UPDATE**
 
-### **D-T1: Update Migration Orchestrator** ⭐
-**Priority**: Critical | **Effort**: 2 hours | **Dependencies**: All Phases
+### **D-T1: Configuration-Driven Entity Order** ⭐
+**Priority**: Low | **Effort**: 1 hour | **Dependencies**: P2 Complete
+
+**Approach**: Use configuration to control entity dependency order. Start with baseline implementation (brands + products), then add enhanced-products when ready.
 
 **Sub-tasks:**
-1. **D-T1.1**: Update `MigrationDurableOrchestrator.cs`
+1. **D-T1.1**: Update `MigrationDurableOrchestrator.cs` (if needed)
    ```csharp
+   // CURRENT BASELINE (Working)
    var fullDependencyOrder = new[]
-{
-    "brands",              // Must be before products
-    "products",            // ✅ Enhanced with comprehensive includes
-    "options",             // 🆕 Depends on products (10/page API limit)
-    "modifiers",           // 🆕 Depends on products (no storage needed - no dependents) 
-    "variants",            // 🆕 Depends on options (needs option mappings)
-    "images",              // 🆕 Depends on products (individual fetching)
-    "reviews",             // 🆕 Depends on products (blob storage + individual API)
-    "channel_assignments", // 🆕 Depends on products (uses ChannelsData)
-    "related_products",    // 🆕 Depends on products (uses RelatedProductsData)
-    "metafields"           // 🆕 Depends on products (batch processing)
-};
+   {
+       "brands",              // ✅ Current working implementation
+       "products"             // ✅ Current working implementation
+   };
+   
+   // ENHANCED (Future Phase)
+   var enhancedDependencyOrder = new[]
+   {
+       "brands",              // Must be before products
+       "products",            // Standard products (250/page)
+       "enhanced-products"    // ✅ NEW: Comprehensive with sub-entities (10/page)
+       // Sub-entities (options, modifiers, images, reviews) processed WITHIN enhanced-products
+   };
    ```
 
 **Files to Modify:**

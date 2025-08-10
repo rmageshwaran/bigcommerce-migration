@@ -3,33 +3,40 @@
 ## 🚀 **CURRENT STATUS**
 
 **Current System**: ✅ Basic Products migration working (100% success rate)  
-**Enhancement Status**: 🔴 **READY TO START** - 7-phase comprehensive migration needed  
-**Performance Goal**: Maintain 250 products/page throughput + add complete entity coverage  
-**Architecture**: ✅ Enhanced strategy finalized for optimal API usage
+**Enhancement Status**: 🔴 **READY TO START** - Seamless integration strategy finalized  
+**Performance Goal**: Dual-tier progress aggregation + parallel sub-entity processing  
+**Architecture**: ✅ Configuration-driven integration with existing infrastructure
 
 ---
 
-## 🎯 **7-PHASE MIGRATION STRATEGY OVERVIEW**
+## 🎯 **ENHANCED MIGRATION STRATEGY OVERVIEW**
 
 ### **Phase 1: Enhanced Products Migration** 🔄
 - **Goal**: Enhance existing product migration with comprehensive includes
 - **API Call**: `/catalog/products?include=bulk_pricing_rules,custom_fields,channels,videos`
 - **Throughput**: ✅ 250 products/page (maintained)
 - **Integration**: Include `bulk_pricing_rules`, `custom_fields`, `videos` in create payload
-- **Note**: Reviews NOT included in Phase 1 (processed in Phase 2 instead)
+- **Architecture**: Uses existing ProductFetchStrategy + ProductTransformStrategy
 
-### **Phase 2: Comprehensive Entity Migration** 🆕  
-- **Goal**: Complete ALL entity processing in single phase (on-the-fly)
+### **Phase 2: Configuration-Driven Enhanced Products** 🆕  
+- **Goal**: Seamless integration of comprehensive entity processing
 - **API Call**: `/catalog/products?include=options,modifiers,images,reviews` (10/page limit)
-- **Strategy**: Enhanced separate activity with timeout-safe architecture
-- **Count Source**: EntityProgressEntry table (from Phase 1), NOT direct API count
-- **Architecture**: ComprehensiveEntityMigrationOrchestrator → ParallelBatchProcessing
+- **Strategy**: Configuration-driven detection with dual-tier progress aggregation
+- **Integration**: EntityMigrationOrchestrator → ProcessEntityChunkActivity → ComprehensiveEntityMigrationPipeline
+- **Architecture**: Zero orchestrator changes, existing infrastructure reuse
 
-**🏗️ Enhanced Infrastructure Reuse:**
-- ✅ ParallelBatchProcessingPipeline (proven timeout safety)
-- ✅ ProgressTracker (multi-entity tracking)
-- ✅ SignalREventFactory (real-time updates)
-- ✅ EntityErrorHandlingService (resilient error handling)
+**🚀 Seamless Integration Architecture:**
+- ✅ **Configuration Detection**: ProcessEntityChunkActivity routes enhanced-products automatically
+- ✅ **Parallel Sub-Entity Processing**: Options, modifiers, images, reviews process independently
+- ✅ **Dual-Tier Progress Aggregation**: Pipeline-level + universal migration progress
+- ✅ **Timeout Safety**: Leverages existing 10-product chunk processing
+
+**🏗️ Infrastructure Integration Benefits:**
+- ✅ ProcessEntityChunkActivity (existing timeout-safe processing)
+- ✅ SignalREventFactory (existing real-time updates)
+- ✅ EntityErrorHandlingService (existing error handling)
+- ✅ UniversalMigrationProgressAggregator (new ecosystem-wide tracking)
+- 🆕 ComprehensiveEntityMigrationPipeline (new parallel processing)
 
 **⏱️ Function App Timeout Safety:**
 - **Batch Size**: 10 products max (2-3 min processing time)
@@ -37,17 +44,20 @@
 - **Progress Persistence**: Each batch completion saved immediately
 - **Resumable**: Continue from last successful batch on timeout
 
-**📊 Multi-Entity Progress Tracking:**
-- Individual counts: "Options: 150/200, Modifiers: 45/50"
-- Real-time SignalR updates per entity type
-- EntityProgressEntry tracking for options, modifiers, images, reviews
+**📊 Pipeline Progress Aggregation:**
+- **Individual Entity Tracking**: "Options: 150/200 (75%), Modifiers: 45/50 (90%)"
+- **Real-time Throughput**: "Options: 15.2/sec, Images: 12.1/sec"
+- **Combined Progress**: "Overall: 856/1,200 entities (71.3%)"
+- **Thread-Safe Aggregation**: Concurrent updates from all processing channels
+- **Rate-Limited SignalR**: 4 updates/second to prevent UI flooding
+- **Multi-Channel Coordination**: `PipelineProgressAggregator` manages all entity types
 
-**🔄 Efficient Creation Flow:**
-- **Options**: Create + store ID mappings in EntityMapping JSON (nested structure)
-- **Modifiers**: Create immediately (no dependencies)
-- **Images**: Create immediately (parallel processing)
-- **Reviews**: Create immediately (parallel processing)
-- **No blob storage** - everything processed on-the-fly
+**🔄 Pipeline Parallel Creation Flow:**
+- **Parallel Channels**: Options, Modifiers, Images, Reviews processed simultaneously
+- **Independent Workers**: Each entity type has dedicated processing workers
+- **Concurrent API Calls**: Multiple entity creation calls in flight simultaneously
+- **Option Mappings**: Stored in EntityMapping JSON for Phase 3 variant creation
+- **No blob storage** - everything processed on-the-fly with pipeline parallelism
 
 ### **Phase 3: Variants Migration** 🆕
 - **Goal**: Batch variants migration with option mappings
@@ -189,7 +199,7 @@ Target:  brands → products → comprehensive_entities → variants → channel
 }
 ```
 
-### **Phase 2: Comprehensive Entity Migration**
+### **Phase 2: Comprehensive Entity Migration (Pipeline Parallelism)**
 ```json
 {
   "comprehensive_entities": {
@@ -197,12 +207,17 @@ Target:  brands → products → comprehensive_entities → variants → channel
     "fetchBatchSize": 10,
     "pageSize": 10,
     "include": "options,modifiers,images,reviews",
-    "onTheFlyCreation": true,
+    "pipelineParallelism": true,
     "processing": {
-      "options": { "createImmediately": true, "storeMapping": true, "maxConcurrency": 20 },
-      "modifiers": { "createImmediately": true, "maxConcurrency": 20 },
-      "images": { "createImmediately": true, "maxConcurrency": 20 },
-      "reviews": { "createImmediately": true, "maxConcurrency": 20 }
+      "pipelineChannels": {
+        "options": { "maxConcurrency": 5, "storeMapping": true, "channelCapacity": 50 },
+        "modifiers": { "maxConcurrency": 5, "channelCapacity": 50 },
+        "images": { "maxConcurrency": 8, "channelCapacity": 100 },
+        "reviews": { "maxConcurrency": 5, "channelCapacity": 50 }
+      },
+      "parallelismMode": "pipeline",
+      "totalMaxConcurrency": 23,
+      "enableChannelBackpressure": true
     }
   }
 }
@@ -288,21 +303,29 @@ src/BigCommerce.Migration.Core/Models/
 └── StorageModels.cs                 // 🔄 ADD new EntityMapping fields
 ```
 
-### **Phase 2-7: New Files to Create**
+### **Phase 2-7: New Files to Create (with Pipeline Parallelism)**
 ```
+src/BigCommerce.Migration.Orchestration/Services/
+├── PipelineParallelProcessor.cs     // 🆕 Core pipeline parallelism implementation
+├── EntityChannelManager.cs         // 🆕 Channel-based entity processing
+└── ComprehensiveEntityProcessor.cs  // 🆕 Coordinated entity processing
+
 src/BigCommerce.Migration.Orchestration/Strategies/
 ├── OptionsFetchStrategy.cs          // 🆕 Fetch products with options (10/page)
 ├── OptionsTransformStrategy.cs      // 🆕 Extract options from metadata  
-├── OptionsCreationStrategy.cs       // 🆕 Create individual options
+├── OptionsCreationStrategy.cs       // 🆕 Create individual options (channel-based)
 ├── ModifiersFetchStrategy.cs        // 🆕 Fetch products with modifiers
 ├── ModifiersTransformStrategy.cs    // 🆕 Extract modifiers from metadata
-├── ModifiersCreationStrategy.cs     // 🆕 Create individual modifiers
+├── ModifiersCreationStrategy.cs     // 🆕 Create individual modifiers (channel-based)
 ├── VariantsFetchStrategy.cs         // 🔄 ENHANCE existing stub
 ├── VariantsTransformStrategy.cs     // 🔄 ENHANCE with option mappings
 ├── VariantsCreationStrategy.cs      // 🔄 ENHANCE with batch creation
 ├── ImagesFetchStrategy.cs           // 🆕 Individual product image fetching
 ├── ImagesTransformStrategy.cs       // 🆕 Image transformation
-├── ImagesCreationStrategy.cs        // 🆕 Individual image creation
+├── ImagesCreationStrategy.cs        // 🆕 Individual image creation (channel-based)
+├── ReviewsFetchStrategy.cs          // 🆕 Extract reviews from metadata
+├── ReviewsTransformStrategy.cs      // 🆕 Review transformation  
+├── ReviewsCreationStrategy.cs       // 🆕 Individual review creation (channel-based)
 ├── ChannelAssignmentStrategy.cs     // 🆕 Process channel assignments
 ├── RelatedProductsUpdateStrategy.cs // 🆕 Bulk product updates
 ├── MetafieldsFetchStrategy.cs       // 🆕 Bulk metafields fetch

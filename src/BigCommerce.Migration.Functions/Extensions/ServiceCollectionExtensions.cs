@@ -516,7 +516,7 @@ public static class ServiceCollectionExtensions
         // ✅ **P2.5: Phase 2 Enhanced Parallel Processing Pipeline** (Required for 17.0x throughput)
         // These services were moved from Orchestration project to ensure proper DI resolution
         services.AddSingleton<IEnhancedParallelProcessor, EnhancedParallelProcessor>();
-        services.AddSingleton<IParallelBatchProcessingPipeline, ParallelBatchProcessingPipeline>();
+        
 
         return services;
     }

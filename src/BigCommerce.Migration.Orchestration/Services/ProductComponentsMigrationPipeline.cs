@@ -345,22 +345,62 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
             var optionValueMappings = new List<object>();
             
             // Extract option values if they exist in the created option
-            if (createdOption.TryGetValue("option_values", out var optionValuesObj) && 
-                optionValuesObj is List<object> optionValuesList)
+            // ✅ FIXED: Handle both JsonElement arrays and List<object> for BigCommerce API responses
+            if (createdOption.TryGetValue("option_values", out var optionValuesObj))
             {
-                foreach (var optionValue in optionValuesList.Cast<Dictionary<string, object>>())
+                List<Dictionary<string, object>>? optionValuesList = null;
+                
+                // Handle JsonElement array (from API response deserialization)
+                if (optionValuesObj is JsonElement ovElement && ovElement.ValueKind == JsonValueKind.Array)
                 {
-                    var sourceOptionValueId = GetSourceOptionValueId(sourceOption, optionValue);
-                    var destinationOptionValueId = optionValue.TryGetValue("id", out var ovId) ? ovId?.ToString() : null;
-
-                    if (!string.IsNullOrEmpty(sourceOptionValueId) && !string.IsNullOrEmpty(destinationOptionValueId))
+                    optionValuesList = new List<Dictionary<string, object>>();
+                    foreach (var ovJsonElement in ovElement.EnumerateArray())
                     {
-                        optionValueMappings.Add(new
-                        {
-                            sourceId = sourceOptionValueId,
-                            destinationId = destinationOptionValueId
-                        });
+                        var ovDict = JsonSerializer.Deserialize<Dictionary<string, object>>(ovJsonElement.GetRawText());
+                        if (ovDict != null) optionValuesList.Add(ovDict);
                     }
+                    _logger.LogDebug("🔍 [OPTION-MAPPING] Parsed {Count} option values from JsonElement array", optionValuesList.Count);
+                }
+                // Handle List<object> (already converted)
+                else if (optionValuesObj is List<object> objectList)
+                {
+                    optionValuesList = objectList.Cast<Dictionary<string, object>>().ToList();
+                    _logger.LogDebug("🔍 [OPTION-MAPPING] Using {Count} option values from List<object>", optionValuesList.Count);
+                }
+                else
+                {
+                    _logger.LogWarning("⚠️ [OPTION-MAPPING] Unexpected option_values type: {Type}, value: {Value}", 
+                        optionValuesObj?.GetType().Name ?? "null", JsonSerializer.Serialize(optionValuesObj));
+                }
+                
+                // Process option values if we successfully extracted them
+                if (optionValuesList != null && optionValuesList.Count > 0)
+                {
+                    foreach (var optionValue in optionValuesList)
+                    {
+                        var sourceOptionValueId = GetSourceOptionValueId(sourceOption, optionValue);
+                        var destinationOptionValueId = optionValue.TryGetValue("id", out var ovId) ? ovId?.ToString() : null;
+
+                        if (!string.IsNullOrEmpty(sourceOptionValueId) && !string.IsNullOrEmpty(destinationOptionValueId))
+                        {
+                            optionValueMappings.Add(new
+                            {
+                                sourceId = sourceOptionValueId,
+                                destinationId = destinationOptionValueId
+                            });
+                            _logger.LogDebug("✅ [OPTION-MAPPING] Mapped option value: {SourceId} → {DestinationId}", 
+                                sourceOptionValueId, destinationOptionValueId);
+                        }
+                        else
+                        {
+                            _logger.LogWarning("⚠️ [OPTION-MAPPING] Could not map option value - sourceId: {SourceId}, destinationId: {DestinationId}", 
+                                sourceOptionValueId ?? "null", destinationOptionValueId ?? "null");
+                        }
+                    }
+                }
+                else
+                {
+                    _logger.LogWarning("⚠️ [OPTION-MAPPING] No option values found to process for option {OptionId}", sourceOptionId);
                 }
             }
 
@@ -539,6 +579,16 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
                     
                     foreach (var optionDict in optionsList)
                     {
+                                            // 🔍 STAGE 2 DEBUG: Log the complete parsed option dictionary payload
+                    _logger.LogInformation("🔍 [STAGE-2-EXTRACTION] Product {ProductId} - COMPLETE OPTION PAYLOAD: {OptionPayload}", 
+                        productId, JsonSerializer.Serialize(optionDict, new JsonSerializerOptions { WriteIndented = true }));
+                    
+                    // 🔍 STAGE 2 DEBUG: Specifically check for id field
+                    var hasId = optionDict.ContainsKey("id");
+                    var idValue = optionDict.TryGetValue("id", out var optionId) ? optionId?.ToString() : "MISSING";
+                    _logger.LogInformation("🔍 [STAGE-2-EXTRACTION] Product {ProductId} - Option has 'id' field: {HasId}, value: {IdValue}", 
+                        productId, hasId, idValue);
+                        
                         allComponents["options"].Add(new ComponentWithContext
                         {
                             Component = optionDict,
@@ -876,9 +926,17 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
     }
 
     /// <summary>
-    /// Stores options mapping in EntityMapping table with hierarchical option-value relationships
-    /// ONLY called for options - modifiers, images, reviews don't need mappings (not referenced by variants)
+    /// ❌ REMOVED: This method created conflicting OptionsMappingData format that overwrote correct data
+    /// Options mapping is now handled exclusively by HierarchicalOptionMappingService to avoid conflicts
+    /// Components like modifiers, images, reviews don't need mappings (not referenced by variants)
     /// </summary>
+    /// <remarks>
+    /// Previously this method created entity mappings with wrong JSON format for options:
+    /// - Used snake_case instead of camelCase 
+    /// - Stored single option instead of options array
+    /// - Different property names than expected by VariantCreationStrategy
+    /// This caused variant migration to fail due to incompatible mapping format.
+    /// </remarks>
     private async Task StoreComponentMapping(
         ComponentWithContext componentWithContext,
         Dictionary<string, object> createdComponent,
@@ -886,76 +944,19 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
         string componentType,
         CancellationToken cancellationToken)
     {
-        try
+        // ✅ FIXED: No longer stores conflicting options mappings
+        // Options are handled exclusively by HierarchicalOptionMappingService via OptionsCreationStrategy
+        // This ensures single source of truth for OptionsMappingData
+        
+        if (componentType.ToLowerInvariant() == "options")
         {
-            var sourceId = componentWithContext.Component.TryGetValue("id", out var id) ? id?.ToString() : null;
-            var destinationId = createdComponent.TryGetValue("id", out var destId) ? destId?.ToString() : null;
-
-            if (!string.IsNullOrEmpty(sourceId) && !string.IsNullOrEmpty(destinationId))
-            {
-                var entityMapping = new EntityMapping
-                {
-                    MigrationId = migrationId,
-                    EntityType = componentType,
-                    SourceId = sourceId,
-                    DestinationId = destinationId,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
-                };
-
-                // 🔗 HIERARCHICAL OPTION MAPPING: Store option-value relationships for Phase 3
-                if (componentType == "options" && 
-                    componentWithContext.Component.TryGetValue("option_values", out var optionValues) &&
-                    createdComponent.TryGetValue("option_values", out var createdOptionValues))
-                {
-                    // Build clean option-value mappings without problematic fields
-                    var optionValueMappings = new List<object>();
-                    
-                    if (optionValues is List<object> sourceOptionValuesList && 
-                        createdOptionValues is List<object> destOptionValuesList)
-                    {
-                        for (int i = 0; i < Math.Min(sourceOptionValuesList.Count, destOptionValuesList.Count); i++)
-                        {
-                            if (sourceOptionValuesList[i] is Dictionary<string, object> sourceOV &&
-                                destOptionValuesList[i] is Dictionary<string, object> destOV)
-                            {
-                                var sourceOVId = sourceOV.TryGetValue("id", out var srcId) ? srcId?.ToString() : null;
-                                var destOVId = destOV.TryGetValue("id", out var dstId) ? dstId?.ToString() : null;
-                                var label = sourceOV.TryGetValue("label", out var lbl) ? lbl?.ToString() : null;
-                                
-                                if (!string.IsNullOrEmpty(sourceOVId) && !string.IsNullOrEmpty(destOVId))
-                                {
-                                    optionValueMappings.Add(new
-                                    {
-                                        source_option_value_id = sourceOVId,
-                                        destination_option_value_id = destOVId,
-                                        label = label
-                                    });
-                                }
-                            }
-                        }
-                    }
-                    
-                    entityMapping.OptionsMappingData = JsonSerializer.Serialize(new
-                    {
-                        source_option_id = sourceId,
-                        destination_option_id = destinationId,
-                        product_id = componentWithContext.ProductId,
-                        option_values = optionValueMappings
-                    });
-                }
-
-                await _migrationStorageService.CreateEntityMappingAsync(entityMapping);
-                
-                _logger.LogDebug("✅ [MAPPING-{ComponentType}] Stored mapping: {SourceId} → {DestinationId}",
-                    componentType.ToUpper(), sourceId, destinationId);
-            }
+            _logger.LogDebug("🔗 [MAPPING-OPTIONS] Skipping component mapping - options handled by HierarchicalOptionMappingService");
+            return; // Options mappings are handled by HierarchicalOptionMappingService only
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "❌ [MAPPING-{ComponentType}] Failed to store component mapping",
-                componentType.ToUpper());
-        }
+
+        // For non-option components (modifiers, images, reviews), we don't need mappings
+        // These are not referenced by variants, so no mapping storage is required
+        _logger.LogDebug("🔗 [MAPPING-{ComponentType}] No mapping required for component type", componentType.ToUpper());
     }
 
     /// <summary>

@@ -32,6 +32,10 @@ public class OptionsTransformStrategy : IEntityTransformStrategy
         CategoryTreeContext? categoryTreeContext = null,
         CancellationToken cancellationToken = default)
     {
+        // 🔍 STAGE 3 DEBUG: Log complete input payload to transform
+        _logger.LogInformation("🔍 [STAGE-3-TRANSFORM-INPUT] ===== COMPLETE INPUT PAYLOAD ===== {InputPayload}", 
+            JsonSerializer.Serialize(entity, new JsonSerializerOptions { WriteIndented = true }));
+            
         _logger.LogInformation("🔗 [OPTIONS-TRANSFORM] ===== TRANSFORM CALLED ===== Entity Keys: {EntityKeys}", 
             string.Join(", ", entity.Keys));
         
@@ -53,6 +57,10 @@ public class OptionsTransformStrategy : IEntityTransformStrategy
         // 🧹 CLEANUP: Remove source-specific fields and null values
         CleanupOptionData(transformed);
 
+        // 🔍 STAGE 3 DEBUG: Log complete output payload from transform
+        _logger.LogInformation("🔍 [STAGE-3-TRANSFORM-OUTPUT] ===== COMPLETE OUTPUT PAYLOAD ===== {OutputPayload}", 
+            JsonSerializer.Serialize(transformed, new JsonSerializerOptions { WriteIndented = true }));
+            
         _logger.LogDebug("✅ [OPTIONS-TRANSFORM] Transformed option entity for migration {MigrationId}: type={Type}, name={Name}", 
             migrationId, transformed.TryGetValue("type", out var type) ? type : "unknown",
             transformed.TryGetValue("name", out var optionName) ? optionName : "unknown");
@@ -75,7 +83,7 @@ public class OptionsTransformStrategy : IEntityTransformStrategy
         }
 
         var sourceProductId = productIdValue.ToString();
-        _logger.LogDebug("🔗 [OPTIONS-TRANSFORM] EnsureProductIdMappingAsync - sourceProductId: {SourceProductId}", sourceProductId);
+        _logger.LogInformation("🔗 [OPTIONS-TRANSFORM] EnsureProductIdMappingAsync - sourceProductId: {SourceProductId}", sourceProductId);
         if (string.IsNullOrEmpty(sourceProductId))
         {
             _logger.LogWarning("⚠️ [OPTIONS-TRANSFORM] Option has empty product_id for migration {MigrationId}", migrationId);
@@ -85,7 +93,9 @@ public class OptionsTransformStrategy : IEntityTransformStrategy
         try
         {
             // Get the product mapping to find destination product ID
+            _logger.LogInformation("🔍 [OPTIONS-TRANSFORM] Looking up product mapping for sourceProductId: {SourceProductId}, migrationId: {MigrationId}", sourceProductId, migrationId);
             var productMapping = await _migrationStorageService.GetEntityMappingAsync(migrationId, "products", sourceProductId);
+            
             if (productMapping?.DestinationId != null)
             {
                 // Update to destination product ID
@@ -94,21 +104,25 @@ public class OptionsTransformStrategy : IEntityTransformStrategy
                 // 🔗 HIERARCHICAL MAPPING: Store source product ID for option mapping service
                 transformed["_source_product_id"] = sourceProductId;
                 
-                _logger.LogDebug("🔗 [OPTIONS-TRANSFORM] Mapped product_id: {SourceProductId} → {DestinationProductId}", 
+                _logger.LogInformation("✅ [OPTIONS-TRANSFORM] Successfully mapped product_id: {SourceProductId} → {DestinationProductId}", 
                     sourceProductId, productMapping.DestinationId);
-                _logger.LogDebug("🔗 [OPTIONS-TRANSFORM] Added _source_product_id to transformed data: {SourceProductId}", sourceProductId);
+                _logger.LogInformation("✅ [OPTIONS-TRANSFORM] Added _source_product_id to transformed data: {SourceProductId}", sourceProductId);
             }
             else
             {
-                _logger.LogWarning("⚠️ [OPTIONS-TRANSFORM] No product mapping found for product {SourceProductId} in migration {MigrationId}", 
-                    sourceProductId, migrationId);
-                // Keep source product ID as fallback
+                _logger.LogError("❌ [OPTIONS-TRANSFORM] CRITICAL ERROR: No product mapping found for product {SourceProductId} in migration {MigrationId} - productMapping is {ProductMapping}. This should NOT happen if product migration completed successfully!", 
+                    sourceProductId, migrationId, productMapping == null ? "null" : "not null but DestinationId is null");
+                
+                // DO NOT add _source_product_id - this will cause the hierarchical mapping to fail as expected
+                // This forces the issue to be visible and fixed rather than silently continuing
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ [OPTIONS-TRANSFORM] Failed to map product_id for option in migration {MigrationId}", migrationId);
-            // Keep source product ID as fallback
+            _logger.LogError(ex, "❌ [OPTIONS-TRANSFORM] CRITICAL ERROR: Exception occurred while mapping product_id for option in migration {MigrationId} with sourceProductId {SourceProductId}. This should NOT happen!", migrationId, sourceProductId);
+            
+            // DO NOT add _source_product_id - let the hierarchical mapping fail to surface the issue
+            // This ensures the problem is visible and gets fixed rather than silently continuing
         }
     }
 
@@ -154,12 +168,9 @@ public class OptionsTransformStrategy : IEntityTransformStrategy
             transformed.Remove(key);
         }
 
-        // Remove source-specific fields that don't belong in destination (except product_id which we mapped)
-        var sourceOnlyFields = new[] { "id" };
-        foreach (var field in sourceOnlyFields)
-        {
-            transformed.Remove(field);
-        }
+        // ✅ ID PRESERVATION: Now handled by EntityTransformService before reaching this strategy
+        // The EntityTransformService preserves the source option ID as '_source_option_id' before removing 'id'
+        _logger.LogDebug("🔗 [OPTIONS-TRANSFORM] Source option ID preservation handled by EntityTransformService");
 
         // ✅ CRITICAL FIX: Remove 'id' fields from option_values array to prevent BigCommerce API rejection
         if (transformed.TryGetValue("option_values", out var optionValuesObj))
@@ -170,12 +181,21 @@ public class OptionsTransformStrategy : IEntityTransformStrategy
                 var optionValuesList = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(jsonElement.GetRawText());
                 if (optionValuesList != null)
                 {
+                    var preservedCount = 0;
                     foreach (var optionValueData in optionValuesList)
                     {
+                        // 🔗 PRESERVE option value ID before removal for hierarchical mapping
+                        if (optionValueData.TryGetValue("id", out var optionValueId))
+                        {
+                            optionValueData["_source_option_value_id"] = optionValueId;
+                            preservedCount++;
+                        }
+                        
                         // Remove id fields that cause "cannot have an id when creating an option" errors
                         optionValueData.Remove("id");
                         optionValueData.Remove("option_id");
                     }
+                    _logger.LogInformation("🔗 [OPTIONS-TRANSFORM] Preserved {PreservedCount} option value IDs as '_source_option_value_id'", preservedCount);
                     
                     // Replace the JsonElement with the cleaned List
                     transformed["option_values"] = optionValuesList;
@@ -184,12 +204,21 @@ public class OptionsTransformStrategy : IEntityTransformStrategy
             }
             else if (optionValuesObj is List<object> optionValuesList)
             {
+                var preservedCount = 0;
                 foreach (var optionValueData in optionValuesList.OfType<Dictionary<string, object>>())
                 {
+                    // 🔗 PRESERVE option value ID before removal for hierarchical mapping
+                    if (optionValueData.TryGetValue("id", out var optionValueId))
+                    {
+                        optionValueData["_source_option_value_id"] = optionValueId;
+                        preservedCount++;
+                    }
+                    
                     // Remove id fields that cause "cannot have an id when creating an option" errors
                     optionValueData.Remove("id");
                     optionValueData.Remove("option_id");
                 }
+                _logger.LogInformation("🔗 [OPTIONS-TRANSFORM] Preserved {PreservedCount} option value IDs as '_source_option_value_id'", preservedCount);
                 _logger.LogDebug("✅ [OPTIONS-TRANSFORM] Removed ID fields from {Count} option values (List<object> type)", optionValuesList.Count);
             }
         }

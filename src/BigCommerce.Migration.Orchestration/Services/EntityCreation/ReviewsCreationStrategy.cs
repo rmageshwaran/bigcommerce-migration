@@ -282,7 +282,7 @@ public class ReviewsCreationStrategy : IEntityCreationStrategy
         foreach (var kvp in sourceReview)
         {
             // Skip system fields that shouldn't be migrated
-            if (kvp.Key == "id" || kvp.Key == "product_id") continue;
+            if (kvp.Key == "id" || kvp.Key == "product_id" || kvp.Key == "_source_product_id") continue;
             
             // Copy all other fields exactly as they are in source
             payload[kvp.Key] = kvp.Value;

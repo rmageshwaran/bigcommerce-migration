@@ -43,6 +43,13 @@ public class EntityTransformService : IEntityTransformService
             // Create a copy to avoid modifying the original entity
             var transformedEntity = new Dictionary<string, object>(sourceEntity);
 
+            // 🔗 HIERARCHICAL MAPPING: Preserve source entity ID for options before removal
+            if (request.EntityType == "options" && transformedEntity.TryGetValue("id", out var sourceId))
+            {
+                transformedEntity["_source_option_id"] = sourceId;
+                _logger.LogInformation("🔗 [ENTITY-TRANSFORM] Preserved source option ID for hierarchical mapping: {SourceOptionId}", sourceId);
+            }
+
             // Common cleanup - remove BigCommerce system fields that shouldn't be migrated
             RemoveSystemFields(transformedEntity);
 
@@ -84,4 +91,6 @@ public class EntityTransformService : IEntityTransformService
         entity.Remove("_meta"); // Remove BigCommerce API metadata
         entity.Remove("_original_entity_id"); // Remove internal field used for error logging
     }
+
+
 } 

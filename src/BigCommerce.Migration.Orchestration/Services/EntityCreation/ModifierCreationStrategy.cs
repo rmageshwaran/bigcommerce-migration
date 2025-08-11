@@ -303,7 +303,7 @@ public class ModifierCreationStrategy : IEntityCreationStrategy
         foreach (var kvp in sourceModifier)
         {
             // Skip system fields that shouldn't be migrated
-            if (kvp.Key == "id" || kvp.Key == "product_id") continue;
+            if (kvp.Key == "id" || kvp.Key == "product_id" || kvp.Key == "_source_product_id") continue;
             
             // ✅ CRITICAL FIX: Skip option_values for checkbox modifiers during initial creation
             if (kvp.Key == "option_values" && excludeOptionValues)

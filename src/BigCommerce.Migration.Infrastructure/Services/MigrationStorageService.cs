@@ -281,6 +281,7 @@ public class MigrationStorageService : IMigrationStorageService
                 ["Metadata"] = mapping.Metadata,
                 ["RelatedProductsData"] = mapping.RelatedProductsData,
                 ["ChannelsData"] = mapping.ChannelsData,
+                ["OptionsMappingData"] = mapping.OptionsMappingData,  // 🔧 CRITICAL FIX: Include OptionsMappingData field
                 ["CreatedAt"] = mapping.CreatedAt,
                 ["UpdatedAt"] = mapping.UpdatedAt
             };
@@ -335,6 +336,7 @@ public class MigrationStorageService : IMigrationStorageService
                 Metadata = entity.GetString("Metadata"),
                 RelatedProductsData = entity.GetString("RelatedProductsData"),
                 ChannelsData = entity.GetString("ChannelsData"),
+                OptionsMappingData = entity.GetString("OptionsMappingData"),  // 🔧 CRITICAL FIX: Include OptionsMappingData field
                 CreatedAt = entity.GetDateTime("CreatedAt") ?? DateTime.UtcNow,
                 UpdatedAt = entity.GetDateTime("UpdatedAt") ?? DateTime.UtcNow
             };
@@ -494,6 +496,7 @@ public class MigrationStorageService : IMigrationStorageService
                 ["Metadata"] = mapping.Metadata,
                 ["RelatedProductsData"] = mapping.RelatedProductsData,
                 ["ChannelsData"] = mapping.ChannelsData,
+                ["OptionsMappingData"] = mapping.OptionsMappingData,  // 🔧 CRITICAL FIX: Include OptionsMappingData field
                 ["CreatedAt"] = mapping.CreatedAt,
                 ["UpdatedAt"] = mapping.UpdatedAt
             };

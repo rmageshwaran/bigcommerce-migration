@@ -184,9 +184,36 @@ public class BigCommerceApiClient : IBigCommerceApiClient
             var request = ApiRequest.CreateGet(url, storeConfig);
             var response = await _apiRequestHandler.ExecuteRequestAsync<Dictionary<string, object>>(request, cancellationToken);
             
+            // 🔍 STAGE 1 DEBUG: Log raw API response to trace options data
+            if (include?.Contains("options") == true)
+            {
+                _logger.LogInformation("🔍 [STAGE-1-API] Raw API Response for products with options: {RawResponse}", 
+                    JsonSerializer.Serialize(response, new JsonSerializerOptions { WriteIndented = true }));
+            }
+            
             if (response?.TryGetValue("data", out var dataValue) == true && dataValue is JsonElement dataElement)
             {
-                var products = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(dataElement.GetRawText()) ?? new List<Dictionary<string, object>>();
+                var rawDataText = dataElement.GetRawText();
+                
+                // 🔍 STAGE 1 DEBUG: Log raw data text before deserialization
+                if (include?.Contains("options") == true)
+                {
+                    _logger.LogInformation("🔍 [STAGE-1-API] Raw data text: {RawDataText}", rawDataText);
+                }
+                
+                var products = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(rawDataText) ?? new List<Dictionary<string, object>>();
+                
+                // 🔍 STAGE 1 DEBUG: Log deserialized products to see if options include IDs
+                if (include?.Contains("options") == true && products.Any())
+                {
+                    var firstProduct = products.First();
+                    if (firstProduct.TryGetValue("options", out var optionsValue))
+                    {
+                        _logger.LogInformation("🔍 [STAGE-1-API] First product options after deserialization: {OptionsData}", 
+                            JsonSerializer.Serialize(optionsValue, new JsonSerializerOptions { WriteIndented = true }));
+                    }
+                }
+                
                 return products;
             }
 

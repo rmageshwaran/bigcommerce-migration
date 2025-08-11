@@ -215,6 +215,9 @@ public class OptionsCreationStrategy : IEntityCreationStrategy
             _logger.LogInformation("🎛️ [OPT-{ExecutionId}] 🌐 API CALL: URL={Url}, ProductId={ProductId}", 
                 executionId, url, destinationProductId);
             
+            _logger.LogInformation("🔍 [OPT-{ExecutionId}] EXACT API PAYLOAD: {JsonPayload}", 
+                executionId, jsonContent);
+            
             _logger.LogDebug("🔍 [OPT-{ExecutionId}] REQUEST DETAILS: Method=POST, ContentType=application/json, PayloadSize={PayloadSize} bytes", 
                 executionId, jsonContent.Length);
 
@@ -250,13 +253,33 @@ public class OptionsCreationStrategy : IEntityCreationStrategy
                 // 🔗 HIERARCHICAL MAPPING: Store option mapping for Phase 3 variant migration
                 try
                 {
-                    var sourceOptionId = option.TryGetValue("id", out var srcId) ? srcId?.ToString() : null;
+                    // 🔍 STAGE 4 DEBUG: Log complete input payload to creation strategy
+                    _logger.LogInformation("🔍 [STAGE-4-CREATION-INPUT] [OPT-{ExecutionId}] ===== COMPLETE INPUT PAYLOAD ===== {InputPayload}", 
+                        executionId, JsonSerializer.Serialize(option, new JsonSerializerOptions { WriteIndented = true }));
+                    
+                    var sourceOptionId = option.TryGetValue("_source_option_id", out var srcId) ? srcId?.ToString() : null;
                     var sourceProductId = GetSourceProductIdFromOption(option, migrationId);
+                    
+                    // Log retrieved values
+                    _logger.LogInformation("🔍 [OPT-{ExecutionId}] Retrieved sourceOptionId: '{SourceOptionId}', sourceProductId: '{SourceProductId}'", 
+                        executionId, sourceOptionId ?? "NULL", sourceProductId ?? "NULL");
+                    
+                    // Check specific field presence
+                    _logger.LogInformation("🔍 [OPT-{ExecutionId}] Field check - _source_option_id exists: {HasSourceOptionId}, _source_product_id exists: {HasSourceProductId}", 
+                        executionId, option.ContainsKey("_source_option_id"), option.ContainsKey("_source_product_id"));
                     
                     if (!string.IsNullOrEmpty(sourceOptionId) && !string.IsNullOrEmpty(sourceProductId))
                     {
+                        _logger.LogInformation("🔗 [OPT-{ExecutionId}] DEBUG: About to call HierarchicalOptionMappingService with sourceOptionId: {SourceOptionId}, destinationOptionId: {DestinationOptionId}", 
+                            executionId, sourceOptionId, createdId);
+                        _logger.LogInformation("🔗 [OPT-{ExecutionId}] DEBUG: Service instance is null: {IsNull}", 
+                            executionId, _hierarchicalOptionMappingService == null);
+                            
                         await _hierarchicalOptionMappingService.StoreHierarchicalOptionMappingAsync(
                             option, createdOption, sourceOptionId, createdId, sourceProductId, migrationId, cancellationToken);
+                            
+                        _logger.LogInformation("✅ [OPT-{ExecutionId}] Successfully stored hierarchical option mapping for sourceOptionId: {SourceOptionId}, sourceProductId: {SourceProductId}", 
+                            executionId, sourceOptionId, sourceProductId);
                     }
                     else
                     {
@@ -382,22 +405,53 @@ public class OptionsCreationStrategy : IEntityCreationStrategy
         foreach (var kvp in sourceOption)
         {
             // Skip system fields that shouldn't be migrated
-            if (kvp.Key == "id" || kvp.Key == "product_id" || kvp.Key == "_source_product_id") continue;
+            if (kvp.Key == "id" || kvp.Key == "product_id" || kvp.Key == "_source_product_id" || kvp.Key == "_source_option_id") continue;
             
+            // Debug: Log option_values type to understand the issue
+            if (kvp.Key == "option_values")
+            {
+                _logger.LogInformation("🔍 DEBUG: option_values type is: {Type}, value: {Value}", 
+                    kvp.Value?.GetType().Name ?? "null", kvp.Value?.ToString() ?? "null");
+            }
+
             // Handle option_values specially to ensure proper structure
-            if (kvp.Key == "option_values" && kvp.Value is List<object> optionValuesList)
+            if (kvp.Key == "option_values")
             {
                 var optionValues = new List<Dictionary<string, object>>();
+                IEnumerable<Dictionary<string, object>> sourceOptionValues = null;
                 
-                foreach (var optionValueData in optionValuesList.Cast<Dictionary<string, object>>())
+                // Handle different list types
+                if (kvp.Value is List<object> objectList)
+                {
+                    sourceOptionValues = objectList.Cast<Dictionary<string, object>>();
+                }
+                else if (kvp.Value is List<Dictionary<string, object>> dictList)
+                {
+                    sourceOptionValues = dictList;
+                }
+                else
+                {
+                    _logger.LogWarning("🚨 Unknown option_values type: {Type}", kvp.Value?.GetType().Name ?? "null");
+                    payload[kvp.Key] = kvp.Value;
+                    continue;
+                }
+                
+                foreach (var optionValueData in sourceOptionValues)
                 {
                     var optionValuePayload = new Dictionary<string, object>();
                     
                     // Copy ALL option value fields except system fields that cause API errors
                     foreach (var optionValueKvp in optionValueData)
                     {
-                        // ✅ CRITICAL FIX: Exclude 'id' field - BigCommerce API rejects option_values with id during creation
-                        if (optionValueKvp.Key == "id" || optionValueKvp.Key == "option_id") continue;
+                        // ✅ CRITICAL FIX: Exclude internal fields - BigCommerce API rejects these fields during creation
+                        if (optionValueKvp.Key == "id" || optionValueKvp.Key == "option_id" || optionValueKvp.Key == "_source_option_value_id") 
+                        {
+                            _logger.LogDebug("🚫 EXCLUDED field from API payload: {FieldName}={FieldValue}", 
+                                optionValueKvp.Key, optionValueKvp.Value);
+                            continue;
+                        }
+                        _logger.LogDebug("✅ INCLUDED field in API payload: {FieldName}={FieldValue}", 
+                            optionValueKvp.Key, optionValueKvp.Value);
                         optionValuePayload[optionValueKvp.Key] = optionValueKvp.Value;
                     }
                     
@@ -443,13 +497,18 @@ public class OptionsCreationStrategy : IEntityCreationStrategy
     /// </summary>
     private string? GetSourceProductIdFromOption(Dictionary<string, object> option, string migrationId)
     {
+        _logger.LogInformation("🔍 [OPTIONS-CREATION] GetSourceProductIdFromOption called - checking for _source_product_id in option data");
+        
         // The source product ID should be added by the transform strategy for hierarchical mapping
         if (option.TryGetValue("_source_product_id", out var sourceProductIdObj))
         {
-            return sourceProductIdObj?.ToString();
+            var result = sourceProductIdObj?.ToString();
+            _logger.LogInformation("✅ [OPTIONS-CREATION] Found _source_product_id: '{SourceProductId}'", result ?? "NULL");
+            return result;
         }
 
-        _logger.LogWarning("Source product ID not found in option data for hierarchical mapping - transform strategy should add '_source_product_id'");
+        _logger.LogWarning("⚠️ [OPTIONS-CREATION] Missing _source_product_id in option data for migration {MigrationId}. Available keys: {Keys}", 
+            migrationId, string.Join(", ", option.Keys));
         return null;
     }
 }

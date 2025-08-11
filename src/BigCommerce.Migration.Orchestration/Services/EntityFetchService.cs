@@ -20,8 +20,7 @@ public class EntityFetchService : IEntityFetchService
     private readonly ISubBatchConfigurationService _configService;
     private readonly ILogger<EntityFetchService> _logger;
     
-    // Configuration for parallel processing (kept for backward compatibility)
-    private const int MaxConcurrency = 5; // Maximum concurrent API calls
+    // All configuration values are now loaded dynamically from SubBatchConfigurationService
 
     public EntityFetchService(
         IBigCommerceApiClient apiClient, 
@@ -389,6 +388,14 @@ public class EntityFetchService : IEntityFetchService
             if (request.EntityType.ToLowerInvariant() == "categories" && request.CategoryTreeContext != null)
             {
                 paginationRequest.CategoryTreeId = request.CategoryTreeContext.SourceCategoryTreeId;
+            }
+            
+            // ✅ ENHANCED PRODUCTS: Add include parameter from configuration for additional entity data
+            if (!string.IsNullOrEmpty(config.Include))
+            {
+                paginationRequest.Include = config.Include;
+                _logger.LogDebug("🔗 [ENHANCED-FETCH] Using include parameter from config for {EntityType}: {Include}", 
+                    request.EntityType, config.Include);
             }
 
             var response = await _apiClient.GetPaginatedEntitiesAsync(

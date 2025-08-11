@@ -513,6 +513,10 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ISignalREventFactory, SignalREventFactory>();
         services.AddSingleton<ISignalRMessageConverter, SignalRMessageConverter>();
 
+        // ✅ **ENTITY DEPENDENCY RESOLUTION SYSTEM** (Intelligent Phase Sequencing)
+        // Automatically resolves entity dependencies and triggers phased processing
+        services.AddSingleton<IEntityDependencyResolver, EntityDependencyResolver>();
+        
         // ✅ **P2.5: Phase 2 Enhanced Parallel Processing Pipeline** (Required for 17.0x throughput)
         // These services were moved from Orchestration project to ensure proper DI resolution
         services.AddSingleton<IEnhancedParallelProcessor, EnhancedParallelProcessor>();

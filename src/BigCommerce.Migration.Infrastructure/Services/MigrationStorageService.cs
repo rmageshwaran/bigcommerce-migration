@@ -380,6 +380,8 @@ public class MigrationStorageService : IMigrationStorageService
                     DestinationStoreId = entity.GetString("DestinationStoreId") ?? string.Empty,
                     Status = entity.GetString("Status") ?? string.Empty,
                     Metadata = entity.GetString("Metadata"),
+                    RelatedProductsData = entity.GetString("RelatedProductsData"),
+                    ChannelsData = entity.GetString("ChannelsData"),
                     CreatedAt = entity.GetDateTime("CreatedAt") ?? DateTime.UtcNow,
                     UpdatedAt = entity.GetDateTime("UpdatedAt") ?? DateTime.UtcNow
                 });

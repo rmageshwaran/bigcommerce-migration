@@ -55,6 +55,7 @@ public class EntityFetchStrategyFactory : IEntityFetchStrategyFactory
     /// <summary>
     /// Normalizes entity type to handle various input formats
     /// Supports: categories, category, Categories, CATEGORIES, etc.
+    /// Note: Products and brands use direct pagination, not fetch strategies
     /// </summary>
     private static string NormalizeEntityType(string entityType)
     {
@@ -64,11 +65,8 @@ public class EntityFetchStrategyFactory : IEntityFetchStrategyFactory
         return normalized switch
         {
             "category" => "categories",
-            "product" => "products", 
-            "brand" => "brands",
-            "variant" => "variants",
-            "image" => "images",
-            "modifier" => "modifiers",
+            // Note: "product", "brand", "variant" removed - these use direct pagination
+                    // Note: "image", "modifier", "option" removed - these are handled as sub-entities within product phases
             _ => normalized
         };
     }

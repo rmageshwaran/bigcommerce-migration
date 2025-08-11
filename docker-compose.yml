@@ -95,6 +95,45 @@ services:
       - ParallelProcessing__subBatchConfigurations__brands__subBatchDelayMs=50
       - ParallelProcessing__subBatchConfigurations__brands__processSubBatchesSequentially=false
       
+      # ✅ Enhanced Product Configuration (Phase 1) - OPTIMIZED FOR TIMEOUT SAFETY
+      - ParallelProcessing__subBatchConfigurations__products__entityType=products
+      - ParallelProcessing__subBatchConfigurations__products__pageSize=250
+      - ParallelProcessing__subBatchConfigurations__products__chunkSize=250
+      - ParallelProcessing__subBatchConfigurations__products__fetchBatchSize=250
+      - ParallelProcessing__subBatchConfigurations__products__subBatchSize=25
+      - ParallelProcessing__subBatchConfigurations__products__maxConcurrency=10
+      - ParallelProcessing__subBatchConfigurations__products__enableSubBatching=true
+      - ParallelProcessing__subBatchConfigurations__products__subBatchDelayMs=50
+      - ParallelProcessing__subBatchConfigurations__products__processSubBatchesSequentially=false
+      - ParallelProcessing__subBatchConfigurations__products__include=bulk_pricing_rules,custom_fields,channels,videos
+      
+      # ✅ Phase 2: Product Components Configuration - 10/page with includes
+      - ParallelProcessing__subBatchConfigurations__product-components__entityType=product-components
+      - ParallelProcessing__subBatchConfigurations__product-components__pageSize=10
+      - ParallelProcessing__subBatchConfigurations__product-components__chunkSize=10
+      - ParallelProcessing__subBatchConfigurations__product-components__fetchBatchSize=10
+      - ParallelProcessing__subBatchConfigurations__product-components__subBatchSize=5
+      - ParallelProcessing__subBatchConfigurations__product-components__maxConcurrency=5
+      - ParallelProcessing__subBatchConfigurations__product-components__enableSubBatching=true
+      - ParallelProcessing__subBatchConfigurations__product-components__subBatchDelayMs=100
+      - ParallelProcessing__subBatchConfigurations__product-components__processSubBatchesSequentially=false
+      - ParallelProcessing__subBatchConfigurations__product-components__include=options,modifiers,images,reviews
+      
+      # Variants Configuration - Phase 3: Batch API with 50 variants per call
+      - ParallelProcessing__subBatchConfigurations__variants__entityType=variants
+      - ParallelProcessing__subBatchConfigurations__variants__fetchBatchSize=250
+      - ParallelProcessing__subBatchConfigurations__variants__chunkSize=250
+      - ParallelProcessing__subBatchConfigurations__variants__pageSize=250
+      - ParallelProcessing__subBatchConfigurations__variants__subBatchSize=50
+      - ParallelProcessing__subBatchConfigurations__variants__maxConcurrency=5
+      - ParallelProcessing__subBatchConfigurations__variants__enableSubBatching=true
+      - ParallelProcessing__subBatchConfigurations__variants__subBatchDelayMs=100
+      - ParallelProcessing__subBatchConfigurations__variants__processSubBatchesSequentially=false
+      - ParallelProcessing__subBatchConfigurations__variants__include=
+      
+      # ✅ Enhanced Product Configuration (Phase 2 - comprehensive entity migration)
+
+      
       # Default Configuration for Other Entities
       - ParallelProcessing__defaultSubBatchConfiguration__entityType=default
       - ParallelProcessing__defaultSubBatchConfiguration__pageSize=250

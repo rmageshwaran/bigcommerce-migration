@@ -62,6 +62,12 @@ public class BigCommercePaginationRequest
     public string? CategoryTreeId { get; set; }
     
     /// <summary>
+    /// Include parameter for additional entity data (e.g., "bulk_pricing_rules,custom_fields,channels,videos")
+    /// Used primarily for products API to fetch related data
+    /// </summary>
+    public string? Include { get; set; }
+    
+    /// <summary>
     /// Additional query parameters
     /// </summary>
     public Dictionary<string, string> AdditionalParams { get; set; } = new();

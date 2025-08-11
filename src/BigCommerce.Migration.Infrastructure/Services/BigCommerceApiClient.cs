@@ -590,14 +590,28 @@ public class BigCommerceApiClient : IBigCommerceApiClient
     /// </summary>
     private string BuildEntityUrl(StoreConfiguration storeConfig, string entityType, BigCommercePaginationRequest request)
     {
+        _logger.LogInformation("🔗 [BUILD-URL-DEBUG] Building URL for EntityType='{EntityType}', Include='{Include}', Page={Page}, Limit={Limit}", 
+            entityType, request.Include, request.Page, request.Limit);
+            
         var baseUrl = storeConfig.GetApiBaseUrl();
         var endpoint = entityType.ToLowerInvariant() switch
         {
             "products" => "catalog/products",
-            "categories" => "catalog/categories",
+            "categories" => "catalog/categories", 
             "brands" => "catalog/brands",
+            "variants" => "catalog/variants",
+            
+            // 🚀 ENHANCED PRODUCT MIGRATION: Phase-specific entity type mappings
+            "product-components" => "catalog/products",    // Phase 2: Fetch products with includes
+            "product-variants" => "catalog/variants",      // Phase 3: Map to variants endpoint
+            "product-related" => "catalog/products",       // Phase 4: Fetch products for relationship updates
+            "product-metafields" => "catalog/products",    // Phase 5: Fetch products for metafield updates  
+            "product-channels" => "catalog/products",      // Phase 6: Fetch products for channel assignments
+            
             _ => throw new ArgumentException($"Unsupported entity type: {entityType}")
         };
+        
+        _logger.LogInformation("🔗 [BUILD-URL-DEBUG] EntityType '{EntityType}' mapped to endpoint '{Endpoint}'", entityType, endpoint);
         
         var queryParams = new List<string>
         {
@@ -609,10 +623,26 @@ public class BigCommerceApiClient : IBigCommerceApiClient
         switch (entityType.ToLowerInvariant())
         {
             case "products":
-                // Products API supports channel_id parameter
-                if (storeConfig.ChannelId != null)
+                // ✅ ENHANCED PRODUCTS: Add include parameter for additional product data WITHOUT channel_id filtering
+                if (!string.IsNullOrEmpty(request.Include))
                 {
-                    queryParams.Add($"channel_id={storeConfig.ChannelId}");
+                    queryParams.Add($"include={request.Include}");
+                }
+                break;
+                
+            case "product-components":    // 🔧 FIX: Phase 2 - NO channel_id to get all products
+            case "product-related":       // 🔧 FIX: Phase 4 - NO channel_id for relationship updates  
+            case "product-metafields":    // 🔧 FIX: Phase 5 - NO channel_id for metafield updates
+            case "product-channels":      // 🔧 FIX: Phase 6 - NO channel_id for channel assignment updates
+                // ✅ ENHANCED PRODUCTS: Add include parameter WITHOUT channel_id filtering
+                if (!string.IsNullOrEmpty(request.Include))
+                {
+                    queryParams.Add($"include={request.Include}");
+                    _logger.LogInformation("🔗 [BUILD-URL-DEBUG] Added include parameter for {EntityType}: include={Include}", entityType, request.Include);
+                }
+                else
+                {
+                    _logger.LogWarning("🔗 [BUILD-URL-DEBUG] ⚠️ No include parameter for {EntityType} - this may result in 0 components!", entityType);
                 }
                 break;
                 
@@ -627,6 +657,11 @@ public class BigCommerceApiClient : IBigCommerceApiClient
             case "brands":
                 // Brands API doesn't support channel_id or tree_id parameters
                 break;
+                
+            case "variants":
+            case "product-variants":      // 🔧 FIX: Phase 3 parameter handling
+                // Variants API doesn't require additional parameters
+                break;
         }
         
         // Add any additional parameters from the request
@@ -638,7 +673,11 @@ public class BigCommerceApiClient : IBigCommerceApiClient
             }
         }
         
-        return $"{baseUrl}/{endpoint}?{string.Join("&", queryParams)}";
+        var finalUrl = $"{baseUrl}/{endpoint}?{string.Join("&", queryParams)}";
+        
+        _logger.LogInformation("🔗 [BUILD-URL-DEBUG] ✅ Final URL constructed: {FinalUrl}", finalUrl);
+        
+        return finalUrl;
     }
     
     /// <summary>
@@ -650,6 +689,9 @@ public class BigCommerceApiClient : IBigCommerceApiClient
         BigCommercePaginationRequest request,
         long elapsedMilliseconds)
     {
+        _logger.LogInformation("📊 [PARSE-RESPONSE-DEBUG] Parsing API response - HasResult: {HasResult}, ApiVersion: {ApiVersion}", 
+            result != null, apiVersion);
+            
         var response = new BigCommercePaginatedResponse<Dictionary<string, object>>
         {
             ApiVersion = apiVersion,
@@ -662,6 +704,11 @@ public class BigCommerceApiClient : IBigCommerceApiClient
         if (result?.TryGetValue("data", out var dataValue) == true && dataValue is JsonElement dataElement)
         {
             response.Data = ParseDataArray(dataElement);
+            _logger.LogInformation("📊 [PARSE-RESPONSE-DEBUG] Parsed data array - Count: {DataCount}", response.Data.Count);
+        }
+        else
+        {
+            _logger.LogWarning("📊 [PARSE-RESPONSE-DEBUG] ⚠️ No 'data' field found in response or data is not JsonElement!");
         }
         
         if (result?.TryGetValue("meta", out var metaValue) == true && metaValue is JsonElement metaElement)
@@ -674,6 +721,9 @@ public class BigCommerceApiClient : IBigCommerceApiClient
             response.TotalPages = meta.Pagination.TotalPages;
             response.HasNextPage = meta.Pagination.CurrentPage < meta.Pagination.TotalPages;
             response.IsLastPage = meta.Pagination.CurrentPage >= meta.Pagination.TotalPages;
+            
+            _logger.LogInformation("📊 [PARSE-RESPONSE-DEBUG] Parsed pagination metadata - Total: {Total}, TotalPages: {TotalPages}, CurrentPage: {CurrentPage}, PerPage: {PerPage}", 
+                meta.Pagination.Total, meta.Pagination.TotalPages, meta.Pagination.CurrentPage, meta.Pagination.PerPage);
         }
         else
         {

@@ -107,6 +107,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IEntityCreationStrategy, BrandCreationStrategy>();
         services.AddScoped<IEntityCreationStrategy, VariantCreationStrategy>();
         services.AddScoped<IEntityCreationStrategy, ImageCreationStrategy>();
+        services.AddScoped<IEntityCreationStrategy, ModifierCreationStrategy>();
+        services.AddScoped<IEntityCreationStrategy, OptionsCreationStrategy>();
+        services.AddScoped<IEntityCreationStrategy, ReviewsCreationStrategy>();
         
         // 🔄 Register entity transform strategy pattern implementations (Task 3.2 - COMPLETED)
         services.AddScoped<IEntityTransformStrategyFactory, EntityTransformStrategyFactory>();
@@ -114,12 +117,29 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IEntityTransformStrategy, ProductTransformStrategy>();
         services.AddScoped<IEntityTransformStrategy, BrandTransformStrategy>();
         services.AddScoped<IEntityTransformStrategy, VariantTransformStrategy>();
+        // 🔄 Register component transform strategies for Phase 2
+        services.AddScoped<IEntityTransformStrategy, ImageTransformStrategy>();
+        services.AddScoped<IEntityTransformStrategy, ModifierTransformStrategy>();
+        services.AddScoped<IEntityTransformStrategy, OptionsTransformStrategy>();
+        services.AddScoped<IEntityTransformStrategy, ReviewsTransformStrategy>();
         
         // 🔽 Register entity fetch strategy pattern implementations (Task 3.3 - COMPLETED)
         services.AddScoped<IEntityFetchStrategyFactory, EntityFetchStrategyFactory>();
         services.AddScoped<IEntityFetchStrategy, CategoryFetchStrategy>();
-        services.AddScoped<IEntityFetchStrategy, ProductFetchStrategy>();
-        services.AddScoped<IEntityFetchStrategy, BrandFetchStrategy>();
+
+        // Note: ProductFetchStrategy and BrandFetchStrategy removed - these entities use direct pagination
+        
+        // ✅ Phase 2: Comprehensive Entity Migration Pipeline
+        services.AddScoped<IProductComponentsMigrationPipeline, ProductComponentsMigrationPipeline>();
+        
+        // ✅ Hierarchical Option Mapping Service (for Phase 3 variant migration)
+        services.AddScoped<IHierarchicalOptionMappingService, HierarchicalOptionMappingService>();
+        
+        // ✅ P2-T1.5: Dual-Tier Progress Aggregation System
+        // Tier 1: Pipeline Progress Aggregator (comprehensive entity progress within chunks)
+        services.AddTransient<PipelineProgressAggregator>(); // Transient for per-chunk instances
+        // Tier 2: Universal Migration Progress Aggregator (ecosystem-wide progress)
+        services.AddSingleton<IUniversalMigrationProgressAggregator, UniversalMigrationProgressAggregator>();
         
         // Note: EntityMigrationDurableOrchestrator is now used in Functions project - no DI registration needed here
         

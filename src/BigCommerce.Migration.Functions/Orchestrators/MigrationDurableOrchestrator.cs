@@ -152,8 +152,10 @@ public static class MigrationDurableOrchestrator
 
             try
             {
-                // Step 5: Process entities in dependency order
-            var entityOrder = GetEntityDependencyOrder(input.MigrationRequest?.Entities ?? new List<string>());
+                // Step 5: Resolve entity dependencies using EntityDependencyResolver
+            var entityOrder = await context.CallActivityAsync<List<string>>(
+                "ResolveEntityDependencies", 
+                input.MigrationRequest?.Entities ?? new List<string>());
             logger.LogInformation("Step 5: Processing {EntityCount} entity types in dependency order for MigrationId: {MigrationId}", 
                 entityOrder.Count, migrationId);
 
@@ -424,7 +426,7 @@ public static class MigrationDurableOrchestrator
                 Duration = result.Duration,
                 EntityResults = result.EntityResults,
                 Errors = errors,
-                Statistics = new MigrationStatistics
+                Statistics = new BigCommerce.Migration.Orchestration.Models.MigrationStatistics
                 {
                     TotalDuration = result.Duration,
                     TotalApiCalls = 0,
@@ -436,25 +438,6 @@ public static class MigrationDurableOrchestrator
                 }
             }
         });
-    }
-
-    private static List<string> GetEntityDependencyOrder(IEnumerable<string> requestedEntities)
-    {
-        // 🎯 FOCUSED TESTING: Only brands and products for function timeout testing
-        // Categories hardcoded in ProductTransformStrategy (ID: 14988)
-        // Other entities (variants, images, modifiers) disabled for focused testing
-        var fullDependencyOrder = new[]
-        {
-            "brands",      // Must be before products - referenced by products  
-            "products"     // Focus on product migration performance and timeout testing
-        };
-
-        // Filter to only include requested entities while maintaining order
-        var requestedSet = new HashSet<string>(requestedEntities, StringComparer.OrdinalIgnoreCase);
-        
-        return fullDependencyOrder
-            .Where(entity => requestedSet.Contains(entity))
-            .ToList();
     }
 }
 

@@ -144,7 +144,8 @@ public class HeartbeatBackgroundService : BackgroundService, IHeartbeatBackgroun
         _logger.LogTrace("Processing heartbeats for {StoreCount} active stores", storesToProcess.Count);
 
         // Process heartbeats in parallel with limited concurrency
-        var semaphore = new SemaphoreSlim(5); // Max 5 concurrent heartbeats
+        const int MaxConcurrentHeartbeats = 5; // TODO: Make configurable if needed
+        var semaphore = new SemaphoreSlim(MaxConcurrentHeartbeats);
         var heartbeatTasks = storesToProcess.Select(async storeId =>
         {
             await semaphore.WaitAsync(cancellationToken);

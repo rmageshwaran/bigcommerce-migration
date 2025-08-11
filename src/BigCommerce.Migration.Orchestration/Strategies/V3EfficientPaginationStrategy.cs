@@ -50,14 +50,18 @@ public class V3EfficientPaginationStrategy : IEntityDiscoveryStrategy
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            _logger.LogInformation("🔍 V3 Efficient Discovery: Starting metadata-only discovery for {EntityType} in migration {MigrationId}", 
+            _logger.LogInformation("🔍 [V3-EFFICIENT-DEBUG] Starting metadata-only discovery for {EntityType} in migration {MigrationId}", 
                 request.EntityType, request.MigrationId);
-
-            // 🚨 CRITICAL FIX: Use same limit as processing to ensure consistent pagination metadata
-            // Discovery must match processing chunk size to prevent pagination overlaps
-            var discoveryLimit = request.EntityType.Equals("brands", StringComparison.OrdinalIgnoreCase) ? 50 : 250;
             
-            _logger.LogInformation("🔧 [PAGINATION-FIX] Using discoveryLimit={DiscoveryLimit} for {EntityType} to match processing chunk size (brands=50, others=250)", 
+            var includeParam = request.EntityConfig?.Settings?.TryGetValue("include", out var includeValue) == true ? includeValue?.ToString() : null;
+            _logger.LogDebug("🔍 [V3-EFFICIENT-DEBUG] Request details - EntityConfig.Include: '{Include}', EntityConfig.PageSize: {PageSize}, SourceStore: {StoreId}", 
+                includeParam, request.EntityConfig?.PageSize, request.SourceStore?.StoreId);
+
+            // ✅ FIXED: Use dynamic discovery limit based on entity configuration to maximize API efficiency
+            // Discovery must match processing chunk size to prevent pagination overlaps
+            var discoveryLimit = request.EntityConfig.PageSize; // Use configured page size for optimal API utilization
+            
+            _logger.LogInformation("🚀 [PAGINATION-OPTIMIZED] Using discoveryLimit={DiscoveryLimit} for {EntityType} to match configured pageSize (optimized for API efficiency)", 
                 discoveryLimit, request.EntityType);
             
             var paginationRequest = new BigCommercePaginationRequest
@@ -67,14 +71,23 @@ public class V3EfficientPaginationStrategy : IEntityDiscoveryStrategy
                 IncludeDeleted = request.EntityConfig.IncludeDeleted,
                 IncludeDrafts = request.EntityConfig.IncludeDrafts,
                 SortBy = "id",
-                SortDirection = "asc"
+                SortDirection = "asc",
+                // ✅ ENHANCED PRODUCTS: Add include parameter for additional product data
+                // Use the include parameter from the entity configuration for product-components
+                Include = DetermineIncludeParameter(request.EntityType, includeParam)
             };
+
+            _logger.LogInformation("🔍 [V3-EFFICIENT-DEBUG] Making API call with Include='{Include}', Limit={Limit}, EntityType={EntityType}", 
+                paginationRequest.Include, paginationRequest.Limit, request.EntityType);
 
             var response = await _apiClient.GetPaginatedEntitiesAsync(
                 request.SourceStore,
                 request.EntityType,
                 paginationRequest,
                 cancellationToken);
+                
+            _logger.LogInformation("🔍 [V3-EFFICIENT-DEBUG] API response received - TotalItems: {TotalItems}, TotalPages: {TotalPages}, PerPage: {PerPage}, Data.Count: {DataCount}", 
+                response.TotalItems, response.TotalPages, response.PerPage, response.Data?.Count);
 
             // Calculate total entity count and pages based on pagination metadata
             var totalCount = response.TotalItems ?? 0;
@@ -111,8 +124,12 @@ public class V3EfficientPaginationStrategy : IEntityDiscoveryStrategy
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "🚨 V3 efficient pagination strategy failed for {EntityType} in migration {MigrationId}", 
-                request.EntityType, request.MigrationId);
+            // ✅ P0-T2: Enhanced API error logging with request/response payload logging
+            _logger.LogError(ex, "🔥 [V3-PAGINATION-API-ERROR] V3 efficient pagination strategy failed for {EntityType} in migration {MigrationId}. " +
+                            "Store: {StoreId}, PageSize: {PageSize}, " +
+                            "ErrorType: {ErrorType}, Category: Error",
+                request.EntityType, request.MigrationId, request.SourceStore.StoreId, 
+                request.EntityConfig.PageSize, ex.GetType().Name);
 
             return new EntityDiscoveryResult
             {
@@ -123,5 +140,34 @@ public class V3EfficientPaginationStrategy : IEntityDiscoveryStrategy
                 ApiVersion = BigCommerceApiVersion.V3
             };
         }
+    }
+
+    /// <summary>
+    /// Determines the appropriate include parameter based on entity type and configuration
+    /// </summary>
+    /// <param name="entityType">The entity type being discovered</param>
+    /// <param name="configuredInclude">The include parameter from entity configuration</param>
+    /// <returns>The include parameter to use for the API call</returns>
+    private string? DetermineIncludeParameter(string entityType, string? configuredInclude)
+    {
+        // Log the determination process
+        _logger.LogDebug("🔍 [V3-EFFICIENT-DEBUG] Determining include parameter for EntityType='{EntityType}', ConfiguredInclude='{ConfiguredInclude}'", 
+            entityType, configuredInclude);
+
+        var result = entityType.ToLowerInvariant() switch
+        {
+            "products" => "bulk_pricing_rules,custom_fields,channels,videos", // Default for products
+            "product-components" => configuredInclude ?? "options,modifiers,images,reviews", // Use configured or default for components
+            "product-variants" => null, // Variants don't support include parameters
+            "product-related" => configuredInclude,
+            "product-metafields" => configuredInclude,
+            "product-channels" => configuredInclude,
+            _ => configuredInclude // Use configured value for other entity types
+        };
+
+        _logger.LogInformation("🔍 [V3-EFFICIENT-DEBUG] ✅ Include parameter determined: EntityType='{EntityType}' → Include='{Include}'", 
+            entityType, result);
+
+        return result;
     }
 } 

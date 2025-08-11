@@ -2,6 +2,7 @@ using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Logging;
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
+using BigCommerce.Migration.Core.Services;
 using BigCommerce.Migration.Orchestration.Models;
 using BigCommerce.Migration.Orchestration.Services;
 
@@ -26,6 +27,10 @@ public class ProcessEntityChunkActivity
     private readonly IEntityMappingService _entityMappingService;
     private readonly IEntityErrorHandlingService _errorHandlingService;
     private readonly IProgressEventPublisher _progressEventPublisher;
+    private readonly ISignalREventFactory _signalREventFactory; // 🎯 CENTRALIZED SIGNALR: Factory for consistent event creation
+    private readonly IProductComponentsMigrationPipeline _productComponentsPipeline; // 🔗 PHASE 2: Special pipeline for product components
+
+    private readonly IUniversalMigrationProgressAggregator _universalAggregator; // ✅ P2-T1.5: Universal aggregator for Tier 2 progress
 
     public ProcessEntityChunkActivity(
         ILogger<ProcessEntityChunkActivity> logger,
@@ -34,7 +39,11 @@ public class ProcessEntityChunkActivity
         IEntityCreateService entityCreateService,
         IEntityMappingService entityMappingService,
         IEntityErrorHandlingService errorHandlingService,
-        IProgressEventPublisher progressEventPublisher)
+        IProgressEventPublisher progressEventPublisher,
+        ISignalREventFactory signalREventFactory,
+        IProductComponentsMigrationPipeline productComponentsPipeline,
+
+        IUniversalMigrationProgressAggregator universalAggregator)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _entityFetchService = entityFetchService ?? throw new ArgumentNullException(nameof(entityFetchService));
@@ -43,6 +52,10 @@ public class ProcessEntityChunkActivity
         _entityMappingService = entityMappingService ?? throw new ArgumentNullException(nameof(entityMappingService));
         _errorHandlingService = errorHandlingService ?? throw new ArgumentNullException(nameof(errorHandlingService));
         _progressEventPublisher = progressEventPublisher ?? throw new ArgumentNullException(nameof(progressEventPublisher));
+        _signalREventFactory = signalREventFactory ?? throw new ArgumentNullException(nameof(signalREventFactory)); // 🎯 CENTRALIZED SIGNALR: Factory injection
+        _productComponentsPipeline = productComponentsPipeline ?? throw new ArgumentNullException(nameof(productComponentsPipeline)); // 🔗 PHASE 2: Special pipeline injection
+
+        _universalAggregator = universalAggregator ?? throw new ArgumentNullException(nameof(universalAggregator)); // ✅ P2-T1.5: Universal aggregator injection
     }
 
     /// <summary>
@@ -119,8 +132,44 @@ public class ProcessEntityChunkActivity
                 };
             }
 
-            // Step 2: Transform and create entities
-            result = await ProcessEntitiesForChunk(entities, batchRequest, request.ChunkNumber);
+            // Step 2: Process entities using appropriate pipeline based on entity type
+            _logger.LogInformation("📋 [CHUNK-{ChunkNumber}] Processing {EntityType} entities", 
+                request.ChunkNumber, batchRequest.EntityType);
+
+            // 🔗 PHASE 2 SPECIAL ROUTING: product-components requires component extraction and parallel processing
+            if (batchRequest.EntityType.Equals("product-components", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogInformation("🔗 [CHUNK-{ChunkNumber}] Routing to ProductComponentsMigrationPipeline for product-components", 
+                    request.ChunkNumber);
+                    
+                result = await _productComponentsPipeline.ProcessProductComponentsAsync(
+                    entities,
+                    batchRequest.MigrationId,
+                    batchRequest.SourceStore,
+                    batchRequest.DestinationStore,
+                    CancellationToken.None);
+            }
+            else
+            {
+                // Standard processing for products, brands, categories, variants, etc.
+                result = await ProcessStandardEntitiesForChunk(entities, batchRequest, request.ChunkNumber);
+            }
+            
+            // ✅ Update Universal Aggregator (Tier 2) with entity progress
+            await _universalAggregator.UpdatePrimaryEntityProgressAsync(
+                batchRequest.MigrationId,
+                batchRequest.EntityType,
+                new PrimaryEntityProgress
+                {
+                    EntityType = batchRequest.EntityType,
+                    TotalCount = result.TotalProcessed, // Will be aggregated across chunks
+                    ProcessedCount = result.TotalProcessed,
+                    SuccessCount = result.SuccessfulEntities,
+                    FailureCount = result.FailedEntities,
+                    Status = result.SuccessfulEntities == result.TotalProcessed ? "completed" : "processing",
+                    ThroughputPerSecond = result.TotalProcessed / Math.Max(result.ProcessingTime.TotalSeconds, 1),
+                    ProcessingTime = result.ProcessingTime
+                });
 
             var processingTime = DateTime.UtcNow - startTime;
             result.ProcessingTime = processingTime;
@@ -181,9 +230,11 @@ public class ProcessEntityChunkActivity
     }
 
     /// <summary>
-    /// Processes entities for this chunk (transform + create + mapping)
+    /// Processes entities for this chunk using standard pipeline (transform + create + mapping)
+    /// Used for brands, products, categories, variants - entities that don't require comprehensive sub-entity processing
+    /// ✅ P2-T1.4: Renamed to distinguish from comprehensive pipeline processing
     /// </summary>
-    private async Task<BatchProcessingResult> ProcessEntitiesForChunk(
+    private async Task<BatchProcessingResult> ProcessStandardEntitiesForChunk(
         List<Dictionary<string, object>> entities,
         BatchProcessingRequest batchRequest,
         int chunkNumber)
@@ -312,28 +363,37 @@ public class ProcessEntityChunkActivity
                                 
                     if (!string.IsNullOrEmpty(sourceId) && !string.IsNullOrEmpty(destinationId))
                     {
-                        // Extract level from source entity for mapping differentiation
-                        var processingLevel = sourceEntity.TryGetValue("_processing_level", out var level) ? (int)(level ?? 0) : 0;
-                        var processingMode = sourceEntity.TryGetValue("_processing_mode", out var mode) ? mode?.ToString() : "Unknown";
-                        
-                        // Store level metadata for filtering mappings by level
-                        var metadata = System.Text.Json.JsonSerializer.Serialize(new { 
-                            Level = processingLevel,
-                            ProcessingMode = processingMode
-                        });
-
-                        var mapping = new EntityMapping
+                        // 🔗 SKIP OPTIONS: Options use hierarchical mapping via HierarchicalOptionMappingService
+                        // Only create individual EntityMapping records for non-option entities
+                        if (batchRequest.EntityType.ToLowerInvariant() != "options")
                         {
-                            MigrationId = batchRequest.MigrationId,
-                            EntityType = batchRequest.EntityType,
-                            SourceId = sourceId,
-                            DestinationId = destinationId,
-                            Metadata = metadata, // ✅ Store level info for mapping differentiation
-                            CreatedAt = DateTime.UtcNow,
-                            UpdatedAt = DateTime.UtcNow
-                        };
-                        
-                        await _entityMappingService.StoreEntityMappingAsync(mapping, CancellationToken.None);
+                            // Extract level from source entity for mapping differentiation
+                            var processingLevel = sourceEntity.TryGetValue("_processing_level", out var level) ? (int)(level ?? 0) : 0;
+                            var processingMode = sourceEntity.TryGetValue("_processing_mode", out var mode) ? mode?.ToString() : "Unknown";
+                            
+                            // Store level metadata for filtering mappings by level
+                            var metadata = System.Text.Json.JsonSerializer.Serialize(new { 
+                                Level = processingLevel,
+                                ProcessingMode = processingMode
+                            });
+
+                            var mapping = new EntityMapping
+                            {
+                                MigrationId = batchRequest.MigrationId,
+                                EntityType = batchRequest.EntityType,
+                                SourceId = sourceId,
+                                DestinationId = destinationId,
+                                Metadata = metadata, // ✅ Store level info for mapping differentiation
+                                CreatedAt = DateTime.UtcNow,
+                                UpdatedAt = DateTime.UtcNow
+                            };
+                            
+                            await _entityMappingService.StoreEntityMappingAsync(mapping, CancellationToken.None);
+                        }
+                        else
+                        {
+                            _logger.LogDebug("🔗 [MAPPING-SKIP] Skipping individual EntityMapping for options - using hierarchical mapping instead");
+                        }
                     }
                 }
                 catch (Exception ex)
@@ -353,28 +413,30 @@ public class ProcessEntityChunkActivity
     }
 
     /// <summary>
-    /// Publishes progress update for this chunk completion
+    /// Publishes progress update for this chunk completion using centralized SignalR factory
+    /// SOLID: Single Responsibility - focused on publishing chunk progress only
     /// </summary>
     private async Task PublishChunkProgress(ProcessEntityChunkRequest request, BatchProcessingResult result)
     {
         try
         {
-            var progressEvent = new EntityProgressEvent
+            // ✅ CENTRALIZED SIGNALR: Use factory for consistent event creation with auto-populated base properties
+            var progressEvent = _signalREventFactory.CreateEntityProgress(request.MigrationId, new EntityProgressOptions
             {
-                MigrationId = request.MigrationId,
                 EntityType = request.EntityType,
                 TotalCount = request.ChunkSize,
                 ProcessedCount = result.TotalProcessed,
-                SuccessCount = result.SuccessfulEntities,
-                FailureCount = result.FailedEntities,
                 Status = result.SuccessfulEntities == result.TotalProcessed ? "completed" : "processing",
-                ProcessingTime = result.ProcessingTime,
-                Timestamp = DateTime.UtcNow
-            };
+                ProcessingTime = result.ProcessingTime
+                // ✅ Base properties (Timestamp, IsCancelled, HubMethod) auto-populated by factory
+                // ✅ SuccessCount/FailureCount calculated from ProcessedCount internally by factory
+                // ✅ Validation built-in
+                // ✅ Consistent naming enforced
+            });
 
             await _progressEventPublisher.PublishEntityProgressAsync(progressEvent);
             
-            _logger.LogDebug("📊 [CHUNK-{ChunkNumber}] Published progress update: {Successful}/{Total} entities",
+            _logger.LogDebug("📊 [CHUNK-{ChunkNumber}] Published centralized SignalR progress update: {Successful}/{Total} entities",
                 request.ChunkNumber, result.SuccessfulEntities, result.TotalProcessed);
         }
         catch (Exception ex)

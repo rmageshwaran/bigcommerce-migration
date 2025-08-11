@@ -56,6 +56,12 @@ public class EntityMapping
     public string? ChannelsData { get; set; }
 
     /// <summary>
+    /// Option and option value mappings stored as JSON for variant migration
+    /// Format: { "options": [{ "sourceOptionId": "123", "destinationOptionId": "456", "optionValues": [{ "sourceId": "111", "destinationId": "222" }] }] }
+    /// </summary>
+    public string? OptionsMappingData { get; set; }
+
+    /// <summary>
     /// When the mapping was created
     /// </summary>
     public DateTime CreatedAt { get; set; }

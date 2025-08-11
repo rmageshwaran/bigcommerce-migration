@@ -37,8 +37,12 @@ public class DiscoverEntitiesActivity
         {
             cancellationToken.ThrowIfCancellationRequested();
             
-            _logger.LogInformation("Discovering entities for migration {MigrationId}, Entity Type: {EntityType}", 
+            _logger.LogInformation("🔍 [DISCOVERY-DEBUG] Starting discovery for migration {MigrationId}, Entity Type: {EntityType}", 
                 request.MigrationId, request.EntityType);
+            
+            var includeParam = request.EntityConfig?.Settings?.TryGetValue("include", out var includeValue) == true ? includeValue?.ToString() : null;
+            _logger.LogDebug("🔍 [DISCOVERY-DEBUG] Request details - SourceStore: {StoreId}, Include: {Include}, EntityConfig: {EntityConfig}", 
+                request.SourceStore?.StoreId, includeParam, request.EntityConfig != null ? $"ChunkSize:{request.EntityConfig.ChunkSize}, PageSize:{request.EntityConfig.PageSize}" : "null");
 
             // Validate request
             var validationErrors = ValidateRequest(request);
@@ -54,17 +58,20 @@ public class DiscoverEntitiesActivity
             }
 
             // STRATEGY PATTERN: Get appropriate strategy based on API version and entity type
-            _logger.LogDebug("Selecting discovery strategy for {EntityType}", request.EntityType);
+            _logger.LogInformation("🔍 [DISCOVERY-DEBUG] Selecting discovery strategy for {EntityType}", request.EntityType);
             var strategy = await _strategyFactory.GetStrategyAsync(request.SourceStore, request.EntityType, cancellationToken);
             
-            _logger.LogInformation("Using {StrategyType} for {EntityType} in migration {MigrationId}", 
+            _logger.LogInformation("🔍 [DISCOVERY-DEBUG] Using {StrategyType} for {EntityType} in migration {MigrationId}", 
                 strategy.GetType().Name, request.EntityType, request.MigrationId);
 
             // Delegate to strategy implementation
             var result = await strategy.DiscoverEntitiesAsync(request, cancellationToken);
 
-            _logger.LogInformation("Discovery completed for {EntityType}: {Count} entities found with {DataCount} entity data cached", 
+            _logger.LogInformation("🔍 [DISCOVERY-DEBUG] Discovery completed for {EntityType}: {Count} entities found with {DataCount} entity data cached", 
                 request.EntityType, result.TotalCount, result.EntityData.Count);
+            
+            _logger.LogDebug("🔍 [DISCOVERY-DEBUG] Discovery result details - IsSuccessful: {IsSuccessful}, Errors: [{Errors}], HasPaginationMetadata: {HasPaginationMetadata}", 
+                result.IsSuccessful, string.Join(", ", result.Errors), result.PaginationMetadata != null);
 
             return result;
         }

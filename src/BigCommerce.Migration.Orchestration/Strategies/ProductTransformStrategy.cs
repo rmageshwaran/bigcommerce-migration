@@ -79,12 +79,12 @@ public class ProductTransformStrategy : IEntityTransformStrategy
             transformed["description"] = description;
         }
 
-        // 🚀 HARD-CODED CATEGORY: Using fixed category ID instead of dynamic mapping
-        // This allows product migration to work without category migration dependency
-        TransformCategoryMappingHardCoded(entity, transformed, migrationId);
+        // 🚀 TEMPORARILY COMMENTED: Category and brand mapping to avoid missing ID errors
+        // TODO: Uncomment after categories and brands are migrated first
+        // TransformCategoryMappingHardCoded(entity, transformed, migrationId);
 
-        // Handle brand mapping
-        await TransformBrandMappingAsync(entity, transformed, migrationId, cancellationToken);
+        // Handle brand mapping - TEMPORARILY COMMENTED
+        // await TransformBrandMappingAsync(entity, transformed, migrationId, cancellationToken);
 
         // Handle inventory and stock tracking
         TransformInventoryFields(entity, transformed);

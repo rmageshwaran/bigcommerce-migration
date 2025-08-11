@@ -57,8 +57,11 @@ public class EntityDiscoveryStrategyFactory : IEntityDiscoveryStrategyFactory
             // Detect API version for the store
             var apiVersion = await _apiClient.DetectApiVersionAsync(storeConfig, cancellationToken);
             
-            _logger.LogInformation("Detected API version {ApiVersion} for {EntityType} discovery", 
+            _logger.LogInformation("🏭 [STRATEGY-FACTORY-DEBUG] Detected API version {ApiVersion} for {EntityType} discovery", 
                 apiVersion, entityType);
+            
+            _logger.LogDebug("🏭 [STRATEGY-FACTORY-DEBUG] Store details - StoreId: {StoreId}, EntityType: {EntityType}", 
+                storeConfig?.StoreId, entityType);
 
             return apiVersion switch
             {
@@ -91,15 +94,17 @@ public class EntityDiscoveryStrategyFactory : IEntityDiscoveryStrategyFactory
     /// <returns>V3 strategy instance</returns>
     private IEntityDiscoveryStrategy CreateV3Strategy(string entityType)
     {
+        _logger.LogInformation("🏭 [STRATEGY-FACTORY-DEBUG] Selecting V3 strategy for EntityType: {EntityType}", entityType);
+        
         // 🎯 EXPLICIT STRATEGY SELECTION: Ensure correct processing approach
         if (IsHierarchicalEntity(entityType))
         {
-            _logger.LogInformation("📋 Creating V3 hierarchical strategy for {EntityType} - will use ID-based batching with full data caching", entityType);
+            _logger.LogInformation("🏭 [STRATEGY-FACTORY-DEBUG] ✅ Creating V3 hierarchical strategy for {EntityType} - will use ID-based batching with full data caching", entityType);
             return new V3HierarchicalStrategy(_apiClient, _v3HierarchicalLogger);
         }
         else
         {
-            _logger.LogInformation("📄 Creating V3 efficient pagination strategy for {EntityType} - will use page-by-page processing", entityType);
+            _logger.LogInformation("🏭 [STRATEGY-FACTORY-DEBUG] ✅ Creating V3 efficient pagination strategy for {EntityType} - will use page-by-page processing", entityType);
             return new V3EfficientPaginationStrategy(_apiClient, _v3EfficientLogger);
         }
     }
@@ -117,4 +122,6 @@ public class EntityDiscoveryStrategyFactory : IEntityDiscoveryStrategyFactory
         
         return isHierarchical;
     }
+
+
 } 

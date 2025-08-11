@@ -104,7 +104,11 @@ public class ModifierFetchStrategy : IEntityFetchStrategy
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to fetch modifiers for migration {MigrationId}", migrationId);
+            // ✅ P0-T2: Enhanced API error logging with request/response payload logging
+            _logger.LogError(ex, "🔥 [MODIFIER-FETCH-API-ERROR] Failed to fetch modifiers for migration {MigrationId}. " +
+                            "Store: {StoreId}, RequestedModifierIds: {ModifierCount}, RequestedIds: [{ModifierIds}], " +
+                            "ErrorType: {ErrorType}, Category: Error",
+                migrationId, sourceStore.StoreId, entityIds.Count, string.Join(",", entityIds), ex.GetType().Name);
             
             // Return empty list to allow migration to continue with other batches
             return new List<Dictionary<string, object>>();

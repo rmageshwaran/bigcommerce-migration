@@ -334,6 +334,20 @@ public class SubBatchConfiguration
     public bool ProcessSubBatchesSequentially { get; set; } = true;
 
     /// <summary>
+    /// Include parameter for BigCommerce API calls (e.g., "bulk_pricing_rules,custom_fields,channels,videos")
+    /// Used for enhanced product migration to fetch additional entity data
+    /// </summary>
+    [JsonPropertyName("include")]
+    public string? Include { get; set; }
+
+    /// <summary>
+    /// Whether to enable parallel processing of sub-entities (options, modifiers, images, reviews)
+    /// Used for Enhanced Product Migration Phase 2 comprehensive entity processing
+    /// </summary>
+    [JsonPropertyName("enableParallelSubEntities")]
+    public bool EnableParallelSubEntities { get; set; } = false;
+
+    /// <summary>
     /// Custom settings specific to this entity type
     /// </summary>
     [JsonPropertyName("customSettings")]
@@ -368,7 +382,8 @@ public class SubBatchConfiguration
                 MaxConcurrency = 3,
                 EnableSubBatching = true,
                 SubBatchDelayMs = 100, // Small delay for complex entities
-                ProcessSubBatchesSequentially = true
+                ProcessSubBatchesSequentially = true,
+                Include = "bulk_pricing_rules,custom_fields,channels,videos" // ✅ Enhanced Product Migration Phase 1
             },
             ["variants"] = new SubBatchConfiguration
             {

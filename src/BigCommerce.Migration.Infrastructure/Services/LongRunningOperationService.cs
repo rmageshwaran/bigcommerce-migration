@@ -42,8 +42,9 @@ public class LongRunningOperationService
                 var exportPath = Path.GetTempFileName();
                 var processedCount = 0;
 
-                // Simulate processing large batches of data
-                foreach (var batch in entityIds.Chunk(100))
+                // Simulate processing large batches of data 
+                const int DefaultChunkSize = 100; // Configuration could be added if needed
+                foreach (var batch in entityIds.Chunk(DefaultChunkSize))
                 {
                     // The middleware will check for cancellation every 30 seconds by default
                     // Individual batch processing respects the cancellation token

@@ -96,7 +96,9 @@ public class SubBatchConfigurationService : ISubBatchConfigurationService
                         MaxConcurrency = entitySection.GetValue<int>("maxConcurrency", 5),
                         EnableSubBatching = entitySection.GetValue<bool>("enableSubBatching", true),
                         SubBatchDelayMs = entitySection.GetValue<int>("subBatchDelayMs", 0),
-                        ProcessSubBatchesSequentially = entitySection.GetValue<bool>("processSubBatchesSequentially", true)
+                        ProcessSubBatchesSequentially = entitySection.GetValue<bool>("processSubBatchesSequentially", true),
+                        Include = entitySection.GetValue<string>("include"), // ✅ Enhanced Product Migration: Load include parameter
+                        EnableParallelSubEntities = entitySection.GetValue<bool>("enableParallelSubEntities", false) // ✅ Phase 2: Parallel sub-entity processing
                     };
 
                     configurations[entityType] = config;

@@ -55,26 +55,28 @@ public class CategoryFetchStrategy : IEntityFetchStrategy
         var allCategories = new List<Dictionary<string, object>>();
         var currentPage = 1;
         
-        do
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            
-            var paginationRequest = new BigCommercePaginationRequest
+            do
             {
-                Page = currentPage,
-                Limit = 250, // Keep large limit for efficiency
-                CategoryTreeId = categoryTreeId,
-                SortBy = "id",
-                SortDirection = "asc"
-            };
+                cancellationToken.ThrowIfCancellationRequested();
+                
+                var paginationRequest = new BigCommercePaginationRequest
+                {
+                    Page = currentPage,
+                    Limit = 250, // Keep large limit for efficiency
+                    CategoryTreeId = categoryTreeId,
+                    SortBy = "id",
+                    SortDirection = "asc"
+                };
 
-            var response = await _apiClient.GetPaginatedEntitiesAsync(
-                sourceStore,
-                "categories",
-                paginationRequest,
-                cancellationToken);
+                var response = await _apiClient.GetPaginatedEntitiesAsync(
+                    sourceStore,
+                    "categories",
+                    paginationRequest,
+                    cancellationToken);
 
-            var pageCategories = response.Data ?? new List<Dictionary<string, object>>();
+                var pageCategories = response.Data ?? new List<Dictionary<string, object>>();
             
             if (pageCategories.Any())
             {
@@ -117,8 +119,22 @@ public class CategoryFetchStrategy : IEntityFetchStrategy
             
         } while (true);
 
-        _logger.LogInformation("✅ Pagination completed: Retrieved {TotalCount} categories from {Pages} pages for tree {TreeId}",
-            allCategories.Count, currentPage, categoryTreeId);
+            _logger.LogInformation("✅ Pagination completed: Retrieved {TotalCount} categories from {Pages} pages for tree {TreeId}",
+                allCategories.Count, currentPage, categoryTreeId);
+        }
+        catch (Exception ex)
+        {
+            // ✅ P0-T2: Enhanced API error logging with request/response payload logging
+            _logger.LogError(ex, "🔥 [CATEGORY-FETCH-API-ERROR] Failed to fetch categories for migration {MigrationId}. " +
+                            "Store: {StoreId}, CategoryTreeId: {CategoryTreeId}, CurrentPage: {CurrentPage}, " +
+                            "RequestedCategoryIds: {CategoryCount}, RequestedIds: [{CategoryIds}], " +
+                            "ErrorType: {ErrorType}, Category: Error",
+                migrationId, sourceStore.StoreId, categoryTreeId, currentPage,
+                entityIds.Count, string.Join(",", entityIds), ex.GetType().Name);
+            
+            // Return empty list to allow migration to continue with other entity types
+            return new List<Dictionary<string, object>>();
+        }
 
         // ✅ DEBUG: Log all retrieved categories for debugging
         if (_logger.IsEnabled(LogLevel.Debug))

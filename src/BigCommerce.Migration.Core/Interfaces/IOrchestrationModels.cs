@@ -63,8 +63,35 @@ public class EntityDiscoveryResult
     
     /// <summary>
     /// Indicates if this is a successful discovery with data
+    /// Enhanced to support memory-efficient V3 pagination strategies
     /// </summary>
-    public bool IsSuccessful => Errors.Count == 0 && (HasEntityData || SkipDiscovery);
+    public bool IsSuccessful => Errors.Count == 0 && (HasEntityData || SkipDiscovery || (TotalCount > 0 && !HasEntityData && ApiVersion == BigCommerceApiVersion.V3));
+}
+
+/// <summary>
+/// Result model for entity creation operations
+/// </summary>
+public class EntityCreationResult
+{
+    /// <summary>
+    /// Whether the entity creation was successful
+    /// </summary>
+    public bool Success { get; set; }
+    
+    /// <summary>
+    /// The ID of the created entity (if successful)
+    /// </summary>
+    public string? CreatedEntityId { get; set; }
+    
+    /// <summary>
+    /// Error message if creation failed
+    /// </summary>
+    public string? ErrorMessage { get; set; }
+    
+    /// <summary>
+    /// Additional metadata about the creation process
+    /// </summary>
+    public Dictionary<string, object> Metadata { get; set; } = new();
 }
 
 /// <summary>

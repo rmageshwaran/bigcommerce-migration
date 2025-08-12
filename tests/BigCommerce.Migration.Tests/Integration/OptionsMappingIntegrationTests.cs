@@ -321,36 +321,34 @@ public class OptionsMappingIntegrationTests
 
     private async Task SimulateVariantCreationLookup(EntityMapping productMapping, string migrationId)
     {
-        // Simulate the exact lookup logic from VariantCreationStrategy.cs
-        var productMappings = new List<EntityMapping> { productMapping };
-        _mockStorageService.Setup(x => x.GetEntityMappingsAsync(migrationId, "products"))
-            .ReturnsAsync(productMappings);
+        // Simulate the optimized lookup logic from VariantCreationStrategy.GetProductMappingDataAsync
+        // Uses single GetEntityMappingAsync call instead of GetEntityMappingsAsync for better performance
+        _mockStorageService.Setup(x => x.GetEntityMappingAsync(migrationId, "products", productMapping.SourceId))
+            .ReturnsAsync(productMapping);
 
-        // Test lookup of destination option ID (from VariantCreationStrategy.LookupDestinationOptionIdAsync)
+        // Test lookup of destination option ID (compatible with optimized VariantCreationStrategy)
         var sourceOptionId = "source_opt_123";
         string? foundDestinationOptionId = null;
 
-        foreach (var mapping in productMappings)
+        // Simulate the JSON parsing logic used in GetProductMappingDataAsync
+        if (!string.IsNullOrEmpty(productMapping.OptionsMappingData))
         {
-            if (!string.IsNullOrEmpty(mapping.OptionsMappingData))
+            var optionsData = JsonSerializer.Deserialize<Dictionary<string, object>>(productMapping.OptionsMappingData);
+            
+            if (optionsData != null && optionsData.TryGetValue("options", out var optionsArray) && 
+                optionsArray is JsonElement optionsElement && optionsElement.ValueKind == JsonValueKind.Array)
             {
-                var optionsData = JsonSerializer.Deserialize<Dictionary<string, object>>(mapping.OptionsMappingData);
-                
-                if (optionsData != null && optionsData.TryGetValue("options", out var optionsArray) && 
-                    optionsArray is JsonElement optionsElement && optionsElement.ValueKind == JsonValueKind.Array)
+                foreach (var optionElement in optionsElement.EnumerateArray())
                 {
-                    foreach (var optionElement in optionsElement.EnumerateArray())
+                    var optionDict = JsonSerializer.Deserialize<Dictionary<string, object>>(optionElement.GetRawText());
+                    
+                    if (optionDict != null && 
+                        optionDict.TryGetValue("sourceOptionId", out var sourceIdObj) && 
+                        sourceIdObj?.ToString() == sourceOptionId &&
+                        optionDict.TryGetValue("destinationOptionId", out var destIdObj))
                     {
-                        var optionDict = JsonSerializer.Deserialize<Dictionary<string, object>>(optionElement.GetRawText());
-                        
-                        if (optionDict != null && 
-                            optionDict.TryGetValue("sourceOptionId", out var sourceIdObj) && 
-                            sourceIdObj?.ToString() == sourceOptionId &&
-                            optionDict.TryGetValue("destinationOptionId", out var destIdObj))
-                        {
-                            foundDestinationOptionId = destIdObj?.ToString();
-                            break;
-                        }
+                        foundDestinationOptionId = destIdObj?.ToString();
+                        break;
                     }
                 }
             }
@@ -364,37 +362,35 @@ public class OptionsMappingIntegrationTests
         var sourceOptionValueId = "source_174";
         string? foundDestinationOptionValueId = null;
 
-        foreach (var mapping in productMappings)
+        // Continue using the same productMapping for option value lookup
+        if (!string.IsNullOrEmpty(productMapping.OptionsMappingData))
         {
-            if (!string.IsNullOrEmpty(mapping.OptionsMappingData))
+            var optionsData = JsonSerializer.Deserialize<Dictionary<string, object>>(productMapping.OptionsMappingData);
+            
+            if (optionsData != null && optionsData.TryGetValue("options", out var optionsArray) && 
+                optionsArray is JsonElement optionsElement && optionsElement.ValueKind == JsonValueKind.Array)
             {
-                var optionsData = JsonSerializer.Deserialize<Dictionary<string, object>>(mapping.OptionsMappingData);
-                
-                if (optionsData != null && optionsData.TryGetValue("options", out var optionsArray) && 
-                    optionsArray is JsonElement optionsElement && optionsElement.ValueKind == JsonValueKind.Array)
+                foreach (var optionElement in optionsElement.EnumerateArray())
                 {
-                    foreach (var optionElement in optionsElement.EnumerateArray())
+                    var optionDict = JsonSerializer.Deserialize<Dictionary<string, object>>(optionElement.GetRawText());
+                    
+                    if (optionDict != null && 
+                        optionDict.TryGetValue("sourceOptionId", out var sourceIdObj) && 
+                        sourceIdObj?.ToString() == sourceOptionId &&
+                        optionDict.TryGetValue("optionValues", out var optionValuesObj) &&
+                        optionValuesObj is JsonElement optionValuesElement && optionValuesElement.ValueKind == JsonValueKind.Array)
                     {
-                        var optionDict = JsonSerializer.Deserialize<Dictionary<string, object>>(optionElement.GetRawText());
-                        
-                        if (optionDict != null && 
-                            optionDict.TryGetValue("sourceOptionId", out var sourceIdObj) && 
-                            sourceIdObj?.ToString() == sourceOptionId &&
-                            optionDict.TryGetValue("optionValues", out var optionValuesObj) &&
-                            optionValuesObj is JsonElement optionValuesElement && optionValuesElement.ValueKind == JsonValueKind.Array)
+                        foreach (var valueElement in optionValuesElement.EnumerateArray())
                         {
-                            foreach (var valueElement in optionValuesElement.EnumerateArray())
+                            var valueDict = JsonSerializer.Deserialize<Dictionary<string, object>>(valueElement.GetRawText());
+                            
+                            if (valueDict != null &&
+                                valueDict.TryGetValue("sourceId", out var sourceValueIdObj) && 
+                                sourceValueIdObj?.ToString() == sourceOptionValueId &&
+                                valueDict.TryGetValue("destinationId", out var destValueIdObj))
                             {
-                                var valueDict = JsonSerializer.Deserialize<Dictionary<string, object>>(valueElement.GetRawText());
-                                
-                                if (valueDict != null &&
-                                    valueDict.TryGetValue("sourceId", out var sourceValueIdObj) && 
-                                    sourceValueIdObj?.ToString() == sourceOptionValueId &&
-                                    valueDict.TryGetValue("destinationId", out var destValueIdObj))
-                                {
-                                    foundDestinationOptionValueId = destValueIdObj?.ToString();
-                                    break;
-                                }
+                                foundDestinationOptionValueId = destValueIdObj?.ToString();
+                                break;
                             }
                         }
                     }

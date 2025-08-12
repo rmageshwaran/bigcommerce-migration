@@ -88,7 +88,7 @@ public class Phase3VariantsMigrationIntegrationTests
             x => x.Log(
                 LogLevel.Information,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Creating 250 variants using batch API")),
+                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Creating 250 variants using optimized cached lookups")),
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);

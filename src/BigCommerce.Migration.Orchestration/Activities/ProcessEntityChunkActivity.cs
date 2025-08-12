@@ -363,9 +363,12 @@ public class ProcessEntityChunkActivity
                                 
                     if (!string.IsNullOrEmpty(sourceId) && !string.IsNullOrEmpty(destinationId))
                     {
-                        // 🔗 SKIP OPTIONS: Options use hierarchical mapping via HierarchicalOptionMappingService
-                        // Only create individual EntityMapping records for non-option entities
-                        if (batchRequest.EntityType.ToLowerInvariant() != "options")
+                        // 🔗 SKIP OPTIONS & VARIANTS: 
+                        // - Options use hierarchical mapping via HierarchicalOptionMappingService
+                        // - Variants are leaf entities with no dependents - no mapping storage needed
+                        // Only create individual EntityMapping records for entities that have dependents
+                        if (batchRequest.EntityType.ToLowerInvariant() != "options" && 
+                            batchRequest.EntityType.ToLowerInvariant() != "product-variants")
                         {
                             // Extract level from source entity for mapping differentiation
                             var processingLevel = sourceEntity.TryGetValue("_processing_level", out var level) ? (int)(level ?? 0) : 0;
@@ -438,7 +441,15 @@ public class ProcessEntityChunkActivity
                         }
                         else
                         {
-                            _logger.LogDebug("🔗 [MAPPING-SKIP] Skipping individual EntityMapping for options - using hierarchical mapping instead");
+                            var entityType = batchRequest.EntityType.ToLowerInvariant();
+                            if (entityType == "options")
+                            {
+                                _logger.LogDebug("🔗 [MAPPING-SKIP] Skipping individual EntityMapping for options - using hierarchical mapping instead");
+                            }
+                            else if (entityType == "product-variants")
+                            {
+                                _logger.LogDebug("🔗 [MAPPING-SKIP] Skipping individual EntityMapping for variants - leaf entities with no dependents");
+                            }
                         }
                     }
                 }

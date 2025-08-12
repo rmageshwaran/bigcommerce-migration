@@ -99,9 +99,8 @@ public class EntityDependencyResolver : IEntityDependencyResolver
             return new List<string>
             {
                 "products",              // Phase 1: Core products (250/page)
-                "product-components"     // Phase 2: Options, modifiers, images, reviews (10/page)
-                // ❌ TEMPORARILY DISABLED: Phase 3 - debugging Phase 2 first
-                // "product-variants"       // Phase 3: Product variants
+                "product-components",    // Phase 2: Options, modifiers, images, reviews (10/page)
+                "product-variants"       // Phase 3: Product variants ✅ ENABLED with SKU duplicate prevention
                 // ❌ TEMPORARILY DISABLED: Phases 4-6 need transform strategies implementation
                 // "product-related",       // Phase 4: Related products updates
                 // "product-metafields",    // Phase 5: Product meta fields

@@ -65,7 +65,12 @@ public class VariantCreationStrategy : IEntityCreationStrategy
             return new List<Dictionary<string, object>>();
         }
 
-        _logger.LogInformation("🚀 Creating {Count} variants using batch API for migration {MigrationId}", 
+        // 🚀 PERFORMANCE: Clear single-item cache at the start of each batch
+        _cachedProductId = null;
+        _cachedProductMapping = null;
+        //_logger.LogDebug("🗑️ [CACHE-CLEAR] Cleared single-item product mapping cache for new batch");
+
+        _logger.LogInformation("🚀 Creating {Count} variants using optimized cached lookups for migration {MigrationId}", 
             entities.Count, migrationId);
 
         try
@@ -92,16 +97,19 @@ public class VariantCreationStrategy : IEntityCreationStrategy
                     var url = $"{destinationStore.GetApiBaseUrl()}/catalog/variants";
                     requestPayload = JsonSerializer.Serialize(transformedVariants);
                     
-                    _logger.LogDebug("🚀 Batch API Call: PUT {Url} with {Count} variants", url, transformedVariants.Count);
+                    //_logger.LogDebug("🚀 Batch API Call: PUT {Url} with {Count} variants", url, transformedVariants.Count);
                     
-                    var response = await _apiRequestHandler.ExecuteRequestAsync<List<Dictionary<string, object>>>(
+                    var response = await _apiRequestHandler.ExecuteRequestAsync<Dictionary<string, object>>(
                         ApiRequest.CreatePut(url, requestPayload, destinationStore), 
                         ct);
                     
-                    _logger.LogInformation("✅ Successfully created {Count} variants via batch API", batch50Variants.Count);
+                    // 🔧 FIX: Extract variants from BigCommerce API response wrapper
+                    var createdVariants = ExtractVariantsFromResponse(response);
+                    
+                    _logger.LogInformation("✅ Successfully created {Count} variants via batch API", createdVariants.Count);
                     
                     // 3. ❌ NO MAPPING STORAGE - Variants are leaf entities with no dependents
-                    return response ?? new List<Dictionary<string, object>>();
+                    return createdVariants;
                 }
                 catch (Exception ex)
                 {
@@ -171,7 +179,21 @@ public class VariantCreationStrategy : IEntityCreationStrategy
                 {
                     var destinationProductId = await GetDestinationProductIdAsync(sourceProductId.ToString()!, migrationId);
                     transformedVariant["product_id"] = int.Parse(destinationProductId);
-                    _logger.LogDebug("🔗 Mapped product_id: {SourceId} → {DestinationId}", sourceProductId, destinationProductId);
+                    //_logger.LogDebug("🔗 Mapped product_id: {SourceId} → {DestinationId}", sourceProductId, destinationProductId);
+                    
+                    // 🚫 DUPLICATE PREVENTION: Skip variant if it matches the product's default SKU
+                    // When a product is created in Phase 1, BigCommerce automatically creates a default variant with the product's SKU
+                    if (variant.TryGetValue("sku", out var variantSku) && variantSku != null)
+                    {
+                        var mappingData = await GetProductMappingDataAsync(sourceProductId.ToString()!, migrationId);
+                        if (!string.IsNullOrEmpty(mappingData.ProductSku) && 
+                            string.Equals(variantSku.ToString(), mappingData.ProductSku, StringComparison.OrdinalIgnoreCase))
+                        {
+                            _logger.LogInformation("🚫 [DUPLICATE-SKIP] Skipping variant with SKU '{VariantSku}' - matches product default SKU (already created in Phase 1)", 
+                                variantSku);
+                            continue; // Skip this variant - it's already created as the default variant
+                        }
+                    }
                 }
                 else
                 {
@@ -196,8 +218,8 @@ public class VariantCreationStrategy : IEntityCreationStrategy
                 
                 if (variant.TryGetValue("option_values", out var optionValues))
                 {
-                    _logger.LogDebug("🔍 [VARIANT-TRANSFORM] Processing option_values for variant with product_id {ProductId}: {OptionValuesType}", 
-                        sourceProductId, optionValues?.GetType().Name ?? "null");
+                    //_logger.LogDebug("🔍 [VARIANT-TRANSFORM] Processing option_values for variant with product_id {ProductId}: {OptionValuesType}", 
+                    //    sourceProductId, optionValues?.GetType().Name ?? "null");
                     
                     // Handle different data types for option_values
                     List<Dictionary<string, object>>? optionValuesList = null;
@@ -210,12 +232,43 @@ public class VariantCreationStrategy : IEntityCreationStrategy
                             var ovDict = JsonSerializer.Deserialize<Dictionary<string, object>>(ovJsonElement.GetRawText());
                             if (ovDict != null) optionValuesList.Add(ovDict);
                         }
-                        _logger.LogDebug("🔍 [VARIANT-TRANSFORM] Parsed {Count} option values from JsonElement", optionValuesList.Count);
+                        //_logger.LogDebug("🔍 [VARIANT-TRANSFORM] Parsed {Count} option values from JsonElement", optionValuesList.Count);
                     }
                     else if (optionValues is List<object> objectList)
                     {
                         optionValuesList = objectList.Cast<Dictionary<string, object>>().ToList();
-                        _logger.LogDebug("🔍 [VARIANT-TRANSFORM] Using {Count} option values from List<object>", optionValuesList.Count);
+                        //_logger.LogDebug("🔍 [VARIANT-TRANSFORM] Using {Count} option values from List<object>", optionValuesList.Count);
+                    }
+                    else if (optionValues is string jsonString && !string.IsNullOrEmpty(jsonString))
+                    {
+                        // 🔧 FIX: Handle JSON string format (common case from BigCommerce API)
+                        try
+                        {
+                            // 🔍 LOG: Raw variant option_values JSON string before parsing
+                            //_logger.LogDebug("🎯 [VARIANT-RAW] Raw option_values JSON string for product {ProductId}: {RawOptionValues}", 
+                            //    sourceProductId, jsonString);
+                            
+                            var parsedArray = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(jsonString);
+                            if (parsedArray != null)
+                            {
+                                optionValuesList = parsedArray;
+                                //_logger.LogDebug("🔍 [VARIANT-TRANSFORM] Parsed {Count} option values from JSON string", optionValuesList.Count);
+                                
+                                // 🔍 LOG: Each parsed option value for comparison with mapping data
+                                foreach (var ovDict in parsedArray)
+                                {
+                                    if (ovDict.TryGetValue("option_id", out var optId) && ovDict.TryGetValue("id", out var valueId))
+                                    {
+                                        //_logger.LogDebug("🎯 [VARIANT-OPTION] Source variant option_value: option_id={OptionId}, id={ValueId}", 
+                                        //    optId, valueId);
+                                    }
+                                }
+                            }
+                        }
+                        catch (JsonException ex)
+                        {
+                            _logger.LogError(ex, "❌ [VARIANT-TRANSFORM] Failed to parse option_values JSON string: {JsonString}", jsonString);
+                        }
                     }
                     else
                     {
@@ -226,15 +279,15 @@ public class VariantCreationStrategy : IEntityCreationStrategy
                     // Transform each option value
                     if (optionValuesList != null && optionValuesList.Count > 0)
                     {
-                        _logger.LogDebug("🔄 [VARIANT-TRANSFORM] Transforming {Count} option values", optionValuesList.Count);
+                        //_logger.LogDebug("🔄 [VARIANT-TRANSFORM] Transforming {Count} option values", optionValuesList.Count);
                         
                         foreach (var ovDict in optionValuesList)
                         {
-                            _logger.LogDebug("🔍 [VARIANT-TRANSFORM] Source option_value: {OptionValue}", JsonSerializer.Serialize(ovDict));
+                            //_logger.LogDebug("🔍 [VARIANT-TRANSFORM] Source option_value: {OptionValue}", JsonSerializer.Serialize(ovDict));
                             
                             try
                             {
-                                var transformedOV = await TransformOptionValueAsync(ovDict, migrationId);
+                                var transformedOV = await TransformOptionValueAsync(ovDict, sourceProductId.ToString()!, migrationId);
                                 
                                 // Ensure we have the required fields after transformation
                                 if (transformedOV.ContainsKey("id") && transformedOV.ContainsKey("option_id"))
@@ -245,7 +298,7 @@ public class VariantCreationStrategy : IEntityCreationStrategy
                                         ["option_id"] = transformedOV["option_id"]  // option ID (integer)
                                     };
                                     transformedOptionValues.Add(cleanOV);
-                                    _logger.LogDebug("✅ [VARIANT-TRANSFORM] Transformed option_value: {TransformedOptionValue}", JsonSerializer.Serialize(cleanOV));
+                                    //_logger.LogDebug("✅ [VARIANT-TRANSFORM] Transformed option_value: {TransformedOptionValue}", JsonSerializer.Serialize(cleanOV));
                                 }
                                 else
                                 {
@@ -279,10 +332,10 @@ public class VariantCreationStrategy : IEntityCreationStrategy
                 }
                 else
                 {
-                    _logger.LogDebug("📦 [VARIANT-TRANSFORM] Creating variant with {OptionValuesCount} option_values for product_id {ProductId}", transformedOptionValues.Count, sourceProductId);
+                    //_logger.LogDebug("📦 [VARIANT-TRANSFORM] Creating variant with {OptionValuesCount} option_values for product_id {ProductId}", transformedOptionValues.Count, sourceProductId);
                 }
                 
-                _logger.LogDebug("🎯 [VARIANT-TRANSFORM] Final variant payload: {VariantPayload}", JsonSerializer.Serialize(transformedVariant));
+                //_logger.LogDebug("🎯 [VARIANT-TRANSFORM] Final variant payload: {VariantPayload}", JsonSerializer.Serialize(transformedVariant));
                 
                 // 4. OPTIONAL: Copy over standard variant fields if present
                 var optionalFields = new[] { 
@@ -313,39 +366,245 @@ public class VariantCreationStrategy : IEntityCreationStrategy
             }
         }
 
-        _logger.LogDebug("✅ Successfully transformed {TransformedCount}/{TotalCount} variants", 
-            transformedVariants.Count, variants.Count);
+        //_logger.LogDebug("✅ Successfully transformed {TransformedCount}/{TotalCount} variants", 
+        //    transformedVariants.Count, variants.Count);
 
         return transformedVariants;
     }
 
     /// <summary>
-    /// Gets destination product ID from Phase 1 entity mappings
+    /// Single-item cache for current product mapping to avoid repeated database calls for variants of the same product
+    /// Only holds one product's mapping data at a time to minimize memory usage
     /// </summary>
-    /// <param name="sourceProductId">Source product ID</param>
-    /// <param name="migrationId">Migration identifier</param>
-    /// <returns>Destination product ID</returns>
-    private async Task<string> GetDestinationProductIdAsync(string sourceProductId, string migrationId)
+    private string? _cachedProductId = null;
+    private ProductMappingData? _cachedProductMapping = null;
+
+    /// <summary>
+    /// Extracts variant data from BigCommerce API response wrapper
+    /// BigCommerce bulk APIs return data wrapped in a "data" field
+    /// </summary>
+    /// <param name="response">API response from BigCommerce</param>
+    /// <returns>List of created variants</returns>
+    private List<Dictionary<string, object>> ExtractVariantsFromResponse(Dictionary<string, object>? response)
     {
-        var mapping = await _migrationStorageService.GetEntityMappingAsync(
-            migrationId, "products", sourceProductId);
-        
-        return mapping?.DestinationId ?? 
-               throw new InvalidOperationException($"Product mapping not found for source ID: {sourceProductId}. Ensure Phase 1 (Products) completed successfully.");
+        if (response?.TryGetValue("data", out var dataValue) == true)
+        {
+            List<Dictionary<string, object>>? variants = null;
+
+            // Handle JsonElement (typical API response)
+            if (dataValue is JsonElement dataElement && dataElement.ValueKind == JsonValueKind.Array)
+            {
+                try
+                {
+                    variants = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(dataElement.GetRawText());
+                    //_logger.LogDebug("✅ [RESPONSE-PARSE] Extracted {Count} variants from JsonElement data wrapper", variants?.Count ?? 0);
+                }
+                catch (JsonException ex)
+                {
+                    _logger.LogError(ex, "❌ [RESPONSE-PARSE] Failed to deserialize variants from JsonElement");
+                }
+            }
+            // Handle direct List<Dictionary> (test scenarios)
+            else if (dataValue is List<Dictionary<string, object>> directList)
+            {
+                variants = directList;
+                //_logger.LogDebug("✅ [RESPONSE-PARSE] Extracted {Count} variants from direct list", variants.Count);
+            }
+            // Handle IEnumerable<object> (alternative format)
+            else if (dataValue is IEnumerable<object> enumerable)
+            {
+                try
+                {
+                    variants = enumerable.Cast<Dictionary<string, object>>().ToList();
+                    // _logger.LogDebug("✅ [RESPONSE-PARSE] Extracted {Count} variants from enumerable", variants.Count);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "❌ [RESPONSE-PARSE] Failed to cast enumerable to variant list");
+                }
+            }
+            else
+            {
+                _logger.LogWarning("⚠️ [RESPONSE-PARSE] Unexpected data format in response: {DataType}", dataValue?.GetType().Name ?? "null");
+            }
+
+            return variants ?? new List<Dictionary<string, object>>();
+        }
+
+        _logger.LogWarning("⚠️ [RESPONSE-PARSE] No 'data' field found in BigCommerce API response");
+        return new List<Dictionary<string, object>>();
     }
 
     /// <summary>
-    /// Transforms option values by mapping option_id and id from Phase 2 option mappings
-    /// Uses hierarchical JSON format stored in EntityMapping.OptionsMappingData
+    /// Data structure to hold all mapping information for a product in one consolidated object
+    /// Eliminates need for 3 separate database calls per variant
+    /// </summary>
+    private class ProductMappingData
+    {
+        public string DestinationProductId { get; set; } = string.Empty;
+        public Dictionary<string, string> OptionIdMappings { get; set; } = new();
+        public Dictionary<string, Dictionary<string, string>> OptionValueMappings { get; set; } = new();
+        public string? ProductSku { get; set; } = null; // SKU from metadata to identify default variant
+    }
+
+    /// <summary>
+    /// 🚀 PERFORMANCE OPTIMIZED: Gets all required mapping data for a product in a single database call
+    /// Uses single-item cache to hold only current product's data (not all products)
+    /// Uses specific rowkey (products_{sourceProductId}) instead of loading all products
+    /// </summary>
+    private async Task<ProductMappingData> GetProductMappingDataAsync(string sourceProductId, string migrationId)
+    {
+        // Check single-item cache first - avoid repeated database calls for same product
+        if (_cachedProductId == sourceProductId && _cachedProductMapping != null)
+        {
+            //_logger.LogDebug("📋 [CACHE-HIT] Using cached mapping data for product {ProductId}", sourceProductId);
+            return _cachedProductMapping;
+        }
+
+        //_logger.LogDebug("🔍 [CACHE-MISS] Fetching mapping data for product {ProductId} with specific rowkey", sourceProductId);
+
+        // 🎯 PERFORMANCE FIX: Use GetEntityMappingAsync with specific rowkey instead of GetEntityMappingsAsync
+        // This targets exactly one row (products_{sourceProductId}) instead of loading all products
+        var mapping = await _migrationStorageService.GetEntityMappingAsync(
+            migrationId, "products", sourceProductId);
+        
+        if (mapping == null)
+        {
+            throw new InvalidOperationException($"Product mapping not found for source ID: {sourceProductId}. Ensure Phase 1 (Products) completed successfully.");
+        }
+
+                    var productData = new ProductMappingData
+            {
+                DestinationProductId = mapping.DestinationId ?? throw new InvalidOperationException($"DestinationId is null for product {sourceProductId}")
+            };
+
+            // Extract product SKU from metadata to identify default variant that should be skipped
+            if (!string.IsNullOrEmpty(mapping.Metadata))
+            {
+                try
+                {
+                    var metadataDict = JsonSerializer.Deserialize<Dictionary<string, object>>(mapping.Metadata);
+                    if (metadataDict != null && metadataDict.TryGetValue("Sku", out var skuObj))
+                    {
+                        productData.ProductSku = skuObj?.ToString();
+                        //_logger.LogDebug("🔍 [SKU-EXTRACT] Found product SKU in metadata: {ProductSku} for product {ProductId}", 
+                        //    productData.ProductSku, sourceProductId);
+                    }
+                }
+                catch (JsonException ex)
+                {
+                    _logger.LogWarning(ex, "⚠️ Failed to parse metadata JSON for product {ProductId}", sourceProductId);
+                }
+            }
+
+        // Parse and cache option mappings if available
+        if (!string.IsNullOrEmpty(mapping.OptionsMappingData))
+        {
+            try
+            {
+                // 🔍 LOG: Raw OptionsMappingData from database before deserialization
+                //_logger.LogDebug("🗃️ [MAPPING-RAW] Raw OptionsMappingData from database for product {ProductId}: {RawMappingData}", 
+                //    sourceProductId, mapping.OptionsMappingData);
+                
+                var optionsData = JsonSerializer.Deserialize<Dictionary<string, object>>(mapping.OptionsMappingData);
+                
+                if (optionsData != null && optionsData.TryGetValue("options", out var optionsArray) && 
+                    optionsArray is JsonElement optionsElement && optionsElement.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var optionElement in optionsElement.EnumerateArray())
+                    {
+                        var optionDict = JsonSerializer.Deserialize<Dictionary<string, object>>(optionElement.GetRawText());
+                        
+                        if (optionDict != null && 
+                            optionDict.TryGetValue("sourceOptionId", out var sourceIdObj) && 
+                            optionDict.TryGetValue("destinationOptionId", out var destIdObj))
+                        {
+                            var sourceOptionIdStr = sourceIdObj?.ToString();
+                            var destOptionIdStr = destIdObj?.ToString();
+                            
+                            if (!string.IsNullOrEmpty(sourceOptionIdStr) && !string.IsNullOrEmpty(destOptionIdStr))
+                            {
+                                // Cache option ID mapping
+                                productData.OptionIdMappings[sourceOptionIdStr] = destOptionIdStr;
+                                //_logger.LogDebug("🗺️ [MAPPING-CACHE] Cached option ID mapping: {SourceOptionId} → {DestOptionId}", 
+                                //    sourceOptionIdStr, destOptionIdStr);
+
+                                // Cache option value mappings for this option
+                                if (optionDict.TryGetValue("optionValues", out var optionValuesObj) &&
+                                    optionValuesObj is JsonElement optionValuesElement && optionValuesElement.ValueKind == JsonValueKind.Array)
+                                {
+                                    var valueIdMappings = new Dictionary<string, string>();
+                                    
+                                    foreach (var valueElement in optionValuesElement.EnumerateArray())
+                                    {
+                                        var valueDict = JsonSerializer.Deserialize<Dictionary<string, object>>(valueElement.GetRawText());
+                                        
+                                        if (valueDict != null &&
+                                            valueDict.TryGetValue("sourceId", out var sourceValueIdObj) && 
+                                            valueDict.TryGetValue("destinationId", out var destValueIdObj))
+                                        {
+                                            var sourceValueIdStr = sourceValueIdObj?.ToString();
+                                            var destValueIdStr = destValueIdObj?.ToString();
+                                            
+                                            if (!string.IsNullOrEmpty(sourceValueIdStr) && !string.IsNullOrEmpty(destValueIdStr))
+                                            {
+                                                valueIdMappings[sourceValueIdStr] = destValueIdStr;
+                                                //_logger.LogDebug("🗺️ [MAPPING-CACHE] Cached option value mapping: option{OptionId}.value{SourceValueId} → {DestValueId}", 
+                                                //    sourceOptionIdStr, sourceValueIdStr, destValueIdStr);
+                                            }
+                                        }
+                                    }
+                                    
+                                    productData.OptionValueMappings[sourceOptionIdStr] = valueIdMappings;
+                                    //_logger.LogDebug("🗺️ [MAPPING-COMPLETE] Cached {ValueCount} option value mappings for option {OptionId}", 
+                                    //    valueIdMappings.Count, sourceOptionIdStr);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogWarning(ex, "⚠️ Failed to parse option mappings JSON for product {ProductId}", sourceProductId);
+            }
+        }
+
+        // Cache the result in single-item cache for subsequent variants of the same product
+        _cachedProductId = sourceProductId;
+        _cachedProductMapping = productData;
+        
+        //_logger.LogDebug("✅ [CACHE-STORE] Cached mapping data for product {ProductId}: destinationId={DestId}, sku={ProductSku}, optionMappings={OptionCount}, optionValueMappings={ValueCount}", 
+        //    sourceProductId, productData.DestinationProductId, productData.ProductSku,
+        //    productData.OptionIdMappings.Count, 
+        //    productData.OptionValueMappings.Count);
+
+        return productData;
+    }
+
+    /// <summary>
+    /// Gets destination product ID from consolidated mapping data
+    /// </summary>
+    private async Task<string> GetDestinationProductIdAsync(string sourceProductId, string migrationId)
+    {
+        var mappingData = await GetProductMappingDataAsync(sourceProductId, migrationId);
+        return mappingData.DestinationProductId;
+    }
+
+    /// <summary>
+    /// 🚀 PERFORMANCE OPTIMIZED: Transforms option values using consolidated mapping data
+    /// Uses cached product mapping data instead of separate database calls
     /// </summary>
     /// <param name="sourceOptionValue">Source option value to transform</param>
+    /// <param name="sourceProductId">Source product ID for mapping lookup</param>
     /// <param name="migrationId">Migration identifier</param>
     /// <returns>Transformed option value with destination IDs</returns>
         private async Task<Dictionary<string, object>> TransformOptionValueAsync(
         Dictionary<string, object> sourceOptionValue, 
+        string sourceProductId,
         string migrationId)
     {
-        _logger.LogDebug("🔍 [OPTION-TRANSFORM] Input source option_value: {SourceOptionValue}", JsonSerializer.Serialize(sourceOptionValue));
+        //_logger.LogDebug("🔍 [OPTION-TRANSFORM] Input source option_value: {SourceOptionValue}", JsonSerializer.Serialize(sourceOptionValue));
         
         var transformedOV = new Dictionary<string, object>();
         
@@ -353,24 +612,27 @@ public class VariantCreationStrategy : IEntityCreationStrategy
             sourceOptionValue.TryGetValue("id", out var sourceOptionValueId) &&
             sourceOptionId != null && sourceOptionValueId != null)
         {
-            _logger.LogDebug("🔍 [OPTION-TRANSFORM] Looking up mappings for source option_id={SourceOptionId}, source option_value_id={SourceValueId}", 
-                sourceOptionId, sourceOptionValueId);
+            //_logger.LogDebug("🔍 [OPTION-TRANSFORM] Looking up mappings for source option_id={SourceOptionId}, source option_value_id={SourceValueId}", 
+            //    sourceOptionId, sourceOptionValueId);
             
             try
             {
-                var destinationOptionId = await LookupDestinationOptionIdAsync(sourceOptionId.ToString()!, migrationId);
-                var destinationOptionValueId = await LookupDestinationOptionValueIdAsync(
-                    sourceOptionId.ToString()!, sourceOptionValueId.ToString()!, migrationId);
+                // 🚀 PERFORMANCE OPTIMIZED: Use consolidated mapping lookup instead of 2 separate database calls
+                var mappingData = await GetProductMappingDataAsync(sourceProductId, migrationId);
                 
-                _logger.LogDebug("🔍 [OPTION-TRANSFORM] Lookup results: option_id {SourceOptionId}→{DestOptionId}, option_value_id {SourceValueId}→{DestValueId}", 
-                    sourceOptionId, destinationOptionId, sourceOptionValueId, destinationOptionValueId);
+                var destinationOptionId = LookupDestinationOptionIdFromCache(sourceOptionId.ToString()!, mappingData);
+                var destinationOptionValueId = LookupDestinationOptionValueIdFromCache(
+                    sourceOptionId.ToString()!, sourceOptionValueId.ToString()!, mappingData);
+                
+                //_logger.LogDebug("🔍 [OPTION-TRANSFORM] Lookup results: option_id {SourceOptionId}→{DestOptionId}, option_value_id {SourceValueId}→{DestValueId}", 
+                //    sourceOptionId, destinationOptionId, sourceOptionValueId, destinationOptionValueId);
                 
                 // 🔧 FIX: Convert to integers as required by BigCommerce API
                 transformedOV["option_id"] = int.Parse(destinationOptionId);
                 transformedOV["id"] = int.Parse(destinationOptionValueId);
                 
-                _logger.LogDebug("✅ [OPTION-TRANSFORM] Successfully mapped option_value: option_id {SourceOptionId}→{DestOptionId}, id {SourceValueId}→{DestValueId}", 
-                    sourceOptionId, destinationOptionId, sourceOptionValueId, destinationOptionValueId);
+                //_logger.LogDebug("✅ [OPTION-TRANSFORM] Successfully mapped option_value: option_id {SourceOptionId}→{DestOptionId}, id {SourceValueId}→{DestValueId}", 
+                //    sourceOptionId, destinationOptionId, sourceOptionValueId, destinationOptionValueId);
             }
             catch (Exception ex)
             {
@@ -392,138 +654,43 @@ public class VariantCreationStrategy : IEntityCreationStrategy
             if (sourceOptionValue.ContainsKey("id")) transformedOV["id"] = sourceOptionValue["id"];
         }
         
-        _logger.LogDebug("🎯 [OPTION-TRANSFORM] Final transformed option_value: {TransformedOptionValue}", JsonSerializer.Serialize(transformedOV));
+        //_logger.LogDebug("🎯 [OPTION-TRANSFORM] Final transformed option_value: {TransformedOptionValue}", JsonSerializer.Serialize(transformedOV));
         return transformedOV;
     }
 
     /// <summary>
-    /// Looks up destination option ID from Phase 2 option mappings stored in EntityMapping.OptionsMappingData
-    /// Searches through all product entity mappings to find the one containing the requested option
+    /// 🚀 PERFORMANCE OPTIMIZED: Looks up destination option ID from cached mapping data
+    /// Eliminates database calls by using pre-loaded mapping data
     /// </summary>
-    private async Task<string> LookupDestinationOptionIdAsync(string sourceOptionId, string migrationId)
+    private string LookupDestinationOptionIdFromCache(string sourceOptionId, ProductMappingData mappingData)
     {
-        try
+        if (mappingData.OptionIdMappings.TryGetValue(sourceOptionId, out var destinationOptionId))
         {
-            // Strategy: Search through all product entity mappings to find option mappings
-            // This is a brute-force approach but ensures we find the mapping regardless of which product it belongs to
-            var productMappings = await _migrationStorageService.GetEntityMappingsAsync(migrationId, "products");
-            
-            foreach (var productMapping in productMappings)
-            {
-                if (!string.IsNullOrEmpty(productMapping.OptionsMappingData))
-                {
-                    try
-                    {
-                        var optionsData = JsonSerializer.Deserialize<Dictionary<string, object>>(productMapping.OptionsMappingData);
-                        
-                        if (optionsData != null && optionsData.TryGetValue("options", out var optionsArray) && 
-                            optionsArray is JsonElement optionsElement && optionsElement.ValueKind == JsonValueKind.Array)
-                        {
-                            foreach (var optionElement in optionsElement.EnumerateArray())
-                            {
-                                var optionDict = JsonSerializer.Deserialize<Dictionary<string, object>>(optionElement.GetRawText());
-                                
-                                if (optionDict != null && 
-                                    optionDict.TryGetValue("sourceOptionId", out var sourceIdObj) && 
-                                    sourceIdObj?.ToString() == sourceOptionId &&
-                                    optionDict.TryGetValue("destinationOptionId", out var destIdObj))
-                                {
-                                    var destinationId = destIdObj?.ToString() ?? sourceOptionId;
-                                    _logger.LogDebug("✅ Found option ID mapping: {SourceId} → {DestinationId}", sourceOptionId, destinationId);
-                                    return destinationId;
-                                }
-                            }
-                        }
-                    }
-                    catch (JsonException ex)
-                    {
-                        _logger.LogWarning(ex, "⚠️ Failed to parse option mappings JSON for product {ProductId}", productMapping.SourceId);
-                        continue;
-                    }
-                }
-            }
-            
-            // Fallback: Option mapping not found, throw exception to indicate mapping failure
-            _logger.LogWarning("⚠️ Option ID mapping not found for {SourceOptionId}", sourceOptionId);
-            throw new InvalidOperationException($"Option mapping not found for source option ID: {sourceOptionId}");
+            //_logger.LogDebug("✅ [CACHE-LOOKUP] Found option ID mapping: {SourceId} → {DestinationId}", sourceOptionId, destinationOptionId);
+            return destinationOptionId;
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "❌ Failed to lookup option ID mapping for {SourceOptionId}", sourceOptionId);
-            return sourceOptionId; // Fallback to source ID
-        }
+
+        _logger.LogWarning("⚠️ [CACHE-LOOKUP] Option ID mapping not found for {SourceOptionId}", sourceOptionId);
+        throw new InvalidOperationException($"Option mapping not found for source option ID: {sourceOptionId}");
     }
 
     /// <summary>
-    /// Looks up destination option value ID from Phase 2 option mappings stored in EntityMapping.OptionsMappingData
-    /// Searches for the specific option and then the specific option value within that option
+    /// 🚀 PERFORMANCE OPTIMIZED: Looks up destination option value ID from cached mapping data
+    /// Eliminates database calls by using pre-loaded mapping data
     /// </summary>
-    private async Task<string> LookupDestinationOptionValueIdAsync(string sourceOptionId, string sourceOptionValueId, string migrationId)
+    private string LookupDestinationOptionValueIdFromCache(string sourceOptionId, string sourceOptionValueId, ProductMappingData mappingData)
     {
-        try
+        if (mappingData.OptionValueMappings.TryGetValue(sourceOptionId, out var optionValueMappings) &&
+            optionValueMappings.TryGetValue(sourceOptionValueId, out var destinationOptionValueId))
         {
-            // Strategy: Search through all product entity mappings to find option value mappings
-            var productMappings = await _migrationStorageService.GetEntityMappingsAsync(migrationId, "products");
-            
-            foreach (var productMapping in productMappings)
-            {
-                if (!string.IsNullOrEmpty(productMapping.OptionsMappingData))
-                {
-                    try
-                    {
-                        var optionsData = JsonSerializer.Deserialize<Dictionary<string, object>>(productMapping.OptionsMappingData);
-                        
-                        if (optionsData != null && optionsData.TryGetValue("options", out var optionsArray) && 
-                            optionsArray is JsonElement optionsElement && optionsElement.ValueKind == JsonValueKind.Array)
-                        {
-                            foreach (var optionElement in optionsElement.EnumerateArray())
-                            {
-                                var optionDict = JsonSerializer.Deserialize<Dictionary<string, object>>(optionElement.GetRawText());
-                                
-                                if (optionDict != null && 
-                                    optionDict.TryGetValue("sourceOptionId", out var sourceIdObj) && 
-                                    sourceIdObj?.ToString() == sourceOptionId &&
-                                    optionDict.TryGetValue("optionValues", out var optionValuesObj) &&
-                                    optionValuesObj is JsonElement optionValuesElement && optionValuesElement.ValueKind == JsonValueKind.Array)
-                                {
-                                    foreach (var valueElement in optionValuesElement.EnumerateArray())
-                                    {
-                                        var valueDict = JsonSerializer.Deserialize<Dictionary<string, object>>(valueElement.GetRawText());
-                                        
-                                        if (valueDict != null &&
-                                            valueDict.TryGetValue("sourceId", out var sourceValueIdObj) && 
-                                            sourceValueIdObj?.ToString() == sourceOptionValueId &&
-                                            valueDict.TryGetValue("destinationId", out var destValueIdObj))
-                                        {
-                                            var destinationId = destValueIdObj?.ToString() ?? sourceOptionValueId;
-                                            _logger.LogDebug("✅ Found option value ID mapping: {SourceOptionId}.{SourceValueId} → {DestinationValueId}", 
-                                                sourceOptionId, sourceOptionValueId, destinationId);
-                                            return destinationId;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    catch (JsonException ex)
-                    {
-                        _logger.LogWarning(ex, "⚠️ Failed to parse option mappings JSON for product {ProductId}", productMapping.SourceId);
-                        continue;
-                    }
-                }
-            }
-            
-            // Fallback: Option value mapping not found, throw exception to indicate mapping failure
-            _logger.LogWarning("⚠️ Option value ID mapping not found for {SourceOptionId}.{SourceValueId}", 
-                sourceOptionId, sourceOptionValueId);
-            throw new InvalidOperationException($"Option value mapping not found for source option ID: {sourceOptionId}, option value ID: {sourceOptionValueId}");
+            // _logger.LogDebug("✅ [CACHE-LOOKUP] Found option value ID mapping: {SourceOptionId}.{SourceValueId} → {DestinationValueId}", 
+            //    sourceOptionId, sourceOptionValueId, destinationOptionValueId);
+            return destinationOptionValueId;
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "❌ Failed to lookup option value ID mapping for {SourceOptionId}.{SourceValueId}", 
-                sourceOptionId, sourceOptionValueId);
-            return sourceOptionValueId; // Fallback to source ID
-        }
+
+        _logger.LogWarning("⚠️ [CACHE-LOOKUP] Option value ID mapping not found for {SourceOptionId}.{SourceValueId}", 
+            sourceOptionId, sourceOptionValueId);
+        throw new InvalidOperationException($"Option value mapping not found for source option ID: {sourceOptionId}, option value ID: {sourceOptionValueId}");
     }
 
     /// <summary>
@@ -571,8 +738,8 @@ public class VariantCreationStrategy : IEntityCreationStrategy
                 await _errorHandlingService.LogEntityErrorAsync(
                     exception, variant, batchRequest, variantId, responsePayload, simpleErrorMessage, cancellationToken);
                 
-                _logger.LogDebug("🔗 [VARIANT-ERROR] Logged variant '{VariantSku}' (ID: {VariantId}) batch error to OpenSearch", 
-                    variantSku, variantId);
+                // _logger.LogDebug("🔗 [VARIANT-ERROR] Logged variant '{VariantSku}' (ID: {VariantId}) batch error to OpenSearch", 
+                //    variantSku, variantId);
             }
 
             _logger.LogInformation("✅ Successfully logged batch error for {VariantCount} variants to OpenSearch", batchVariants.Count);

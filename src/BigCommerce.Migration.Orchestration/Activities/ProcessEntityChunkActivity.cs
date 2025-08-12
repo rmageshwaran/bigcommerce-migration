@@ -382,11 +382,16 @@ public class ProcessEntityChunkActivity
                             string? relatedProductsData = null;
                             if (batchRequest.EntityType.ToLowerInvariant() == "products")
                             {
+                                string sku = createdEntity.GetValueOrDefault("sku")?.ToString();
+                                
+                                metadata = System.Text.Json.JsonSerializer.Serialize(new { 
+                                   Sku = sku
+                                });
                                 // Extract channels data directly from source entity
                                 if (sourceEntity.TryGetValue("channels", out var channelsValue))
                                 {
                                     var serializedChannels = System.Text.Json.JsonSerializer.Serialize(channelsValue);
-                                    if (serializedChannels != "\"[]\"" && serializedChannels != "null" && serializedChannels != "\"[-1]\"")
+                                    if (serializedChannels != "\"[]\"" && serializedChannels != "null")
                                     {
                                         channelsData = serializedChannels;
                                         _logger.LogInformation("✅ [ENTITY-MAPPING] Extracted channels data for product {ProductId}: {ChannelsData}", sourceId, channelsData);
@@ -402,7 +407,7 @@ public class ProcessEntityChunkActivity
                                 {
                                     var serializedRelatedProducts = System.Text.Json.JsonSerializer.Serialize(relatedProductsValue);
 
-                                    if (serializedRelatedProducts != "\"[]\"" && serializedRelatedProducts != "null" && serializedRelatedProducts != "\"[-1]\"")
+                                    if (serializedRelatedProducts != "\"[]\"" && serializedRelatedProducts != "null")
                                     {
                                         relatedProductsData = serializedRelatedProducts;
                                         _logger.LogInformation("✅ [ENTITY-MAPPING] Extracted related_products data for product {ProductId}: {RelatedProductsData}", sourceId, relatedProductsData);

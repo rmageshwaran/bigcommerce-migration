@@ -377,17 +377,58 @@ public class ProcessEntityChunkActivity
                                 ProcessingMode = processingMode
                             });
 
+                            // 🔗 PRODUCT METADATA: Extract channels and related_products data from source entity
+                            string? channelsData = null;
+                            string? relatedProductsData = null;
+                            if (batchRequest.EntityType.ToLowerInvariant() == "products")
+                            {
+                                // Extract channels data directly from source entity
+                                if (sourceEntity.TryGetValue("channels", out var channelsValue))
+                                {
+                                    var serializedChannels = System.Text.Json.JsonSerializer.Serialize(channelsValue);
+                                    if (serializedChannels != "\"[]\"" && serializedChannels != "null" && serializedChannels != "\"[-1]\"")
+                                    {
+                                        channelsData = serializedChannels;
+                                        _logger.LogInformation("✅ [ENTITY-MAPPING] Extracted channels data for product {ProductId}: {ChannelsData}", sourceId, channelsData);
+                                    }
+                                    else
+                                    {
+                                        _logger.LogInformation("ℹ️ [ENTITY-MAPPING] Skipped empty/null channels array for product {ProductId} (value: {SerializedChannels})", sourceId, serializedChannels);
+                                    }
+                                }
+
+                                // Extract related_products data directly from source entity
+                                if (sourceEntity.TryGetValue("related_products", out var relatedProductsValue))
+                                {
+                                    var serializedRelatedProducts = System.Text.Json.JsonSerializer.Serialize(relatedProductsValue);
+
+                                    if (serializedRelatedProducts != "\"[]\"" && serializedRelatedProducts != "null" && serializedRelatedProducts != "\"[-1]\"")
+                                    {
+                                        relatedProductsData = serializedRelatedProducts;
+                                        _logger.LogInformation("✅ [ENTITY-MAPPING] Extracted related_products data for product {ProductId}: {RelatedProductsData}", sourceId, relatedProductsData);
+                                    }
+                                    else
+                                    {
+                                        _logger.LogInformation("ℹ️ [ENTITY-MAPPING] Skipped empty/null related_products array for product {ProductId} (value: {SerializedRelatedProducts})", sourceId, serializedRelatedProducts);
+                                    }
+                                }
+                            }
+
                             var mapping = new EntityMapping
                             {
                                 MigrationId = batchRequest.MigrationId,
                                 EntityType = batchRequest.EntityType,
+                                SourceStoreId = batchRequest.SourceStore.StoreId!,
+                                DestinationStoreId = batchRequest.DestinationStore.StoreId!,
                                 SourceId = sourceId,
                                 DestinationId = destinationId,
                                 Metadata = metadata, // ✅ Store level info for mapping differentiation
+                                ChannelsData = channelsData, // 🔗 PHASE 4: Store channels data for product-channel assignment
+                                RelatedProductsData = relatedProductsData, // 🔗 PHASE 6: Store related products data for related product updates
                                 CreatedAt = DateTime.UtcNow,
                                 UpdatedAt = DateTime.UtcNow
                             };
-                            
+
                             await _entityMappingService.StoreEntityMappingAsync(mapping, CancellationToken.None);
                         }
                         else

@@ -120,9 +120,11 @@ public class ProductTransformStrategy : IEntityTransformStrategy
         // Remove system fields that shouldn't be migrated
         RemoveSystemFields(transformed);
 
-        // Extract and store metadata for EntityMapping (channels, related_products)
-        await ExtractAndStoreMetadataAsync(entity, migrationId, cancellationToken);
-
+        // 🧹 FINAL CLEANUP: Remove system fields that shouldn't be in the final product payload
+        // NOTE: Keep "id" field for EntityMapping creation - ProductCreationStrategy will remove it before API call
+        transformed.Remove("related_products"); // Remove from transformed output (metadata extracted in ProcessEntityChunkActivity)
+        transformed.Remove("channels"); // Remove from transformed output (metadata extracted in ProcessEntityChunkActivity)
+        
         // Final validation and cleanup
         ValidateRequiredFields(transformed, migrationId);
 
@@ -564,7 +566,8 @@ public class ProductTransformStrategy : IEntityTransformStrategy
             "storefronts", // Store-specific field managed by BigCommerce
             
             // Dependent entities handled separately after product creation
-            "images", "variants", "related_products"
+            "images", "variants"
+            // NOTE: "related_products" is preserved for metadata extraction and removed later
         };
 
         foreach (var field in systemFields)
@@ -856,79 +859,25 @@ public class ProductTransformStrategy : IEntityTransformStrategy
         return null;
     }
 
+
+
     /// <summary>
-    /// Extracts channels and related_products data from the source entity and stores them in EntityMapping
-    /// This metadata will be used later during options and variants migration
+    /// Checks if the given value is an empty array
     /// </summary>
-    private async Task ExtractAndStoreMetadataAsync(Dictionary<string, object> entity, string migrationId, CancellationToken cancellationToken)
+    /// <param name="value">Value to check</param>
+    /// <returns>True if the value is an empty array, false otherwise</returns>
+    private static bool IsEmptyArray(object value)
     {
-        try
+        if (value is System.Text.Json.JsonElement jsonElement && jsonElement.ValueKind == System.Text.Json.JsonValueKind.Array)
         {
-            var sourceId = GetStringValue(entity, "id");
-            if (string.IsNullOrEmpty(sourceId))
-            {
-                _logger.LogWarning("Product missing ID field, cannot store metadata for migration {MigrationId}", migrationId);
-                return;
-            }
-
-            // Extract channels data (from API include=channels)
-            string? channelsData = null;
-            if (entity.TryGetValue("channels", out var channelsValue))
-            {
-                channelsData = System.Text.Json.JsonSerializer.Serialize(channelsValue);
-                _logger.LogDebug("Extracted channels data for product {ProductId} in migration {MigrationId}", sourceId, migrationId);
-            }
-
-            // Extract related_products data (from base product JSON)
-            string? relatedProductsData = null;
-            if (entity.TryGetValue("related_products", out var relatedProductsValue))
-            {
-                relatedProductsData = System.Text.Json.JsonSerializer.Serialize(relatedProductsValue);
-                _logger.LogDebug("Extracted related_products data for product {ProductId} in migration {MigrationId}", sourceId, migrationId);
-            }
-
-            // Only update if we have metadata to store
-            if (!string.IsNullOrEmpty(channelsData) || !string.IsNullOrEmpty(relatedProductsData))
-            {
-                // Get existing mapping to update it
-                var existingMappings = await _entityMappingService.GetEntityMappingsAsync(migrationId, "products", cancellationToken);
-                var existingMapping = existingMappings.FirstOrDefault(m => m.SourceId == sourceId);
-                
-                if (existingMapping != null)
-                {
-                    // Update existing mapping with metadata
-                    existingMapping.ChannelsData = channelsData;
-                    existingMapping.RelatedProductsData = relatedProductsData;
-                    existingMapping.UpdatedAt = DateTime.UtcNow;
-                    
-                    await _entityMappingService.StoreEntityMappingAsync(existingMapping, cancellationToken);
-                    _logger.LogDebug("Updated EntityMapping with metadata for product {ProductId} in migration {MigrationId}", sourceId, migrationId);
-                }
-                else
-                {
-                    // Create new mapping with metadata (this might happen if the mapping doesn't exist yet)
-                    var newMapping = new EntityMapping
-                    {
-                        MigrationId = migrationId,
-                        EntityType = "products", 
-                        SourceId = sourceId,
-                        DestinationId = "", // Will be set later when product is created
-                        Status = "pending",
-                        ChannelsData = channelsData,
-                        RelatedProductsData = relatedProductsData,
-                        CreatedAt = DateTime.UtcNow,
-                        UpdatedAt = DateTime.UtcNow
-                    };
-                    
-                    await _entityMappingService.StoreEntityMappingAsync(newMapping, cancellationToken);
-                    _logger.LogDebug("Created EntityMapping with metadata for product {ProductId} in migration {MigrationId}", sourceId, migrationId);
-                }
-            }
+            return jsonElement.GetArrayLength() == 0;
         }
-        catch (Exception ex)
+        
+        if (value is System.Collections.ICollection collection)
         {
-            _logger.LogError(ex, "Failed to extract and store metadata for migration {MigrationId}: {ErrorMessage}", migrationId, ex.Message);
-            // Don't throw - metadata storage failure shouldn't stop the product transformation
+            return collection.Count == 0;
         }
+        
+        return false;
     }
 } 

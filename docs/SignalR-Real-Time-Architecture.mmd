@@ -1,0 +1,80 @@
+graph TD
+    subgraph "Backend Event Sources"
+        ORG[Migration Orchestrators] --> SRF[SignalREventFactory]
+        ACT[Migration Activities] --> SRF
+        AGG[Progress Aggregators] --> SRF
+        PT[Progress Tracker] --> SRF
+        EPA[Enhanced Parallel Activities] --> SRF
+    end
+
+    subgraph "Centralized Event Factory"
+        SRF --> MP[Migration Progress Events]
+        SRF --> EP[Entity Progress Events]
+        SRF --> BP[Batch Progress Events]
+        SRF --> ERR[Error Events]
+        SRF --> ST[Status Change Events]
+        SRF --> AUTO[Auto-populated Base Properties]
+    end
+
+    subgraph "Event Publishing Pipeline"
+        MP --> PEP[ProgressEventPublisher]
+        EP --> PEP
+        BP --> PEP
+        ERR --> PEP
+        ST --> PEP
+        PEP --> JSON[JSON Serialization camelCase]
+        JSON --> ASQ[Azure Storage Queue signalr-progress-events]
+    end
+
+    subgraph "Azure Functions Processing"
+        ASQ --> QT[Queue Trigger ProcessProgressEvents]
+        QT --> FILTER[Soft Cancellation Filter]
+        FILTER --> SMC[SignalRMessageConverter]
+        SMC --> CASE[PascalCase → camelCase]
+        CASE --> SRA[SignalR Message Action]
+    end
+
+    subgraph "Azure SignalR Service"
+        SRA --> HUB[Migration Hub migrationhub]
+        HUB --> NEGO[Negotiate Endpoint /api/SignalRNegotiation]
+        HUB --> BROAD[Broadcast to Connected Clients]
+        NEGO --> CONN[Client Connection Info]
+    end
+
+    subgraph "Frontend Real-Time Integration"
+        CONN --> SRS[SignalRService TypeScript]
+        BROAD --> SRS
+        SRS --> AUTORC[Auto-Reconnection 5 attempts]
+        SRS --> GROUPS[Migration Group Management]
+        GROUPS --> EVENTS[Event Handlers]
+    end
+
+    subgraph "React Dashboard Integration"
+        EVENTS --> HOOK[useRealTimeMigrationProgress]
+        HOOK --> STATE[Real-Time State Management]
+        STATE --> CTX[DashboardContext]
+        CTX --> NORM[Status Normalization]
+        NORM --> UI[Dashboard UI Components]
+    end
+
+    subgraph "Event Types Flow"
+        BROAD --> MPA[MigrationProgressUpdated]
+        BROAD --> EPA_OUT[EntityProgressUpdated]
+        BROAD --> BPA[BatchProgressUpdated]
+        BROAD --> EO[ErrorOccurred]
+        BROAD --> MSC[MigrationStatusChanged]
+    end
+
+    subgraph "Live Features"
+        LC[Live Cancellation] --> FILTER
+        RL[Rate Limiting 1sec] --> PEP
+        CB[Circuit Breaker] --> SRS
+        RETRY[Exponential Backoff] --> SRS
+    end
+
+    style SRF fill:#e8f5e8
+    style PEP fill:#fff3e0
+    style ASQ fill:#e3f2fd
+    style HUB fill:#fce4ec
+    style SRS fill:#f3e5f5
+    style UI fill:#e0f7fa

@@ -1,8 +1,8 @@
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
 using BigCommerce.Migration.Infrastructure.Services;
-using BigCommerce.Migration.Orchestration.Services;
-using BigCommerce.Migration.Orchestration.Services.EntityCreation;
+using BigCommerce.Migration.Activities.Services;
+using BigCommerce.Migration.Activities.Services.EntityCreation;
 using Microsoft.Extensions.Logging;
 using Moq;
 using System.Text.Json;

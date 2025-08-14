@@ -32,7 +32,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "cicd", "cicd", "{E7D6C4B3-2
 		docker-compose.yml = docker-compose.yml
 	EndProjectSection
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BigCommerce.Migration.Orchestration", "src\BigCommerce.Migration.Orchestration\BigCommerce.Migration.Orchestration.csproj", "{A4DD5E25-92A5-473E-BFD2-4530B7E5A8F8}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BigCommerce.Migration.Activities", "src\BigCommerce.Migration.Activities\BigCommerce.Migration.Activities.csproj", "{A4DD5E25-92A5-473E-BFD2-4530B7E5A8F8}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "BigCommerce.Migration.CodeAnalysis", "src\BigCommerce.Migration.CodeAnalysis\BigCommerce.Migration.CodeAnalysis.csproj", "{8C5E7B2A-3F1E-4D2B-9A8F-7E6D5C4B3A9E}"
 EndProject

@@ -8,7 +8,6 @@ using BigCommerce.Migration.Infrastructure.Services;
 using BigCommerce.Migration.Orchestration.Services;
 using BigCommerce.Migration.Orchestration.Strategies;
 using BigCommerce.Migration.Orchestration.Services.EntityCreation;
-using BigCommerce.Migration.Orchestration.Orchestrators;
 using BigCommerce.Migration.Orchestration.Activities;
 using System.Net.Http;
 
@@ -92,6 +91,11 @@ public static class ServiceCollectionExtensions
         
         // 🎯 Register configuration activity for orchestrator use
         services.AddScoped<GetEntityConfigurationActivity>();
+        
+        // 🚫 Register native cancellation activities for Phase 1 & 2.3.2
+        services.AddScoped<SetCancellationFlagActivity>();
+        services.AddScoped<CheckCancellationFlagActivity>();
+        services.AddScoped<PublishCollisionCancellationActivity>(); // Phase 2.3.2: Collision integration
         
         // Register entity discovery strategy pattern implementations (Task 2.3.3 - COMPLETED)
         services.AddSingleton<IEntityDiscoveryStrategyFactory, EntityDiscoveryStrategyFactory>();

@@ -4,8 +4,8 @@ using System.Text.Json;
 using Xunit;
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
-using BigCommerce.Migration.Orchestration.Services.EntityCreation;
-using BigCommerce.Migration.Orchestration.Services;
+using BigCommerce.Migration.Activities.Services.EntityCreation;
+using BigCommerce.Migration.Activities.Services;
 
 namespace BigCommerce.Migration.Tests.Services;
 

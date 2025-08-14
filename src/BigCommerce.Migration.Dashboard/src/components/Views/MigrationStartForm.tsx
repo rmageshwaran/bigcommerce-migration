@@ -51,8 +51,8 @@ interface MigrationFormData {
 // Hardcoded store configurations for development
 const storeConfigurations = {
   production: {
-    storeId: "v6q95r5n91",
-    accessToken: "2jxzl0n457l7dbz9jgeo8tzbj6xw6ba",
+    storeId: "j0itxkyhku",
+    accessToken: "15db0coi6b5mobshq4z66ytc001gk6y",
     channelId: "1"
   },
   /*production: {
@@ -61,8 +61,8 @@ const storeConfigurations = {
     channelId: "1"
   },*/
   staging: {
-    storeId: "in2msaitrc", 
-    accessToken: "bntqbbjvnnap8agkdbo5bekqehb473z",
+    storeId: "v6q95r5n91", 
+    accessToken: "2jxzl0n457l7dbz9jgeo8tzbj6xw6ba",
     channelId: "1"
   }
   /*development: {

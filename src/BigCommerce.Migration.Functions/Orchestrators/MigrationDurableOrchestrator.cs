@@ -3,10 +3,10 @@ using Microsoft.DurableTask;
 using Microsoft.Extensions.Logging;
 using BigCommerce.Migration.Core.Models;
 using BigCommerce.Migration.Core.Interfaces;
-using BigCommerce.Migration.Orchestration.Models;
-using BigCommerce.Migration.Orchestration.Activities;
-using BigCommerce.Migration.Orchestration.Extensions;
-using BigCommerce.Migration.Orchestration.Services;
+using BigCommerce.Migration.Activities.Models;
+using BigCommerce.Migration.Activities.Activities;
+using BigCommerce.Migration.Activities.Extensions;
+using BigCommerce.Migration.Activities.Services;
 using System.Linq;
 
 namespace BigCommerce.Migration.Functions.Orchestrators;
@@ -127,18 +127,33 @@ public static class MigrationDurableOrchestrator
                 logger.LogWarning("Orchestrator collision detected for migration: {MigrationId}. Another instance is already running: {CurrentHolder}", 
                     migrationId, collisionResult.CurrentLockHolder?.InstanceId);
                 
-                // Return deterministic cancellation result for collision
-                var collisionCancellationResult = await context.CallActivityAsync<object>(
-                    "CreateCollisionCancellationResultActivity",
-                    new CollisionCancellationRequest
+                // Phase 4.1: Enhanced collision cancellation with native cancellation integration
+                logger.LogInformation("Publishing enhanced collision cancellation via native cancellation system for migration: {MigrationId}", migrationId);
+                await context.CallActivityAsync(
+                    "PublishCollisionCancellation",
+                    new CollisionCancellationNotificationRequest
                     {
                         MigrationId = migrationId,
                         InstanceId = instanceId,
-                        CancellationReason = collisionResult.Message,
-                        CurrentUtcDateTime = context.CurrentUtcDateTime
+                        Reason = collisionResult.Message ?? "Another orchestrator instance is already running",
+                        CancelledAt = context.CurrentUtcDateTime
                     });
                 
-                return (MigrationOrchestrationResult)collisionCancellationResult;
+                // Phase 4.1: Return standardized result (consistent with enhanced cancellation)
+                logger.LogInformation("Creating collision cancellation result for migration: {MigrationId}", migrationId);
+                return new MigrationOrchestrationResult
+                {
+                    MigrationId = migrationId,
+                    Status = "Cancelled",
+                    ErrorMessage = $"Orchestrator collision detected: {collisionResult.Message}",
+                    StartTime = context.CurrentUtcDateTime,
+                    EndTime = context.CurrentUtcDateTime,
+                    Duration = TimeSpan.Zero,
+                    TotalEntitiesProcessed = 0,
+                    TotalEntitiesSuccessful = 0,
+                    TotalEntitiesFailed = 0,
+                    EntityResults = new Dictionary<string, EntityMigrationResult>()
+                };
             }
 
             logger.LogInformation("Successfully acquired orchestrator lock for migration: {MigrationId}, instance: {InstanceId}", 
@@ -155,24 +170,55 @@ public static class MigrationDurableOrchestrator
             logger.LogInformation("Step 5: Processing {EntityCount} entity types in dependency order for MigrationId: {MigrationId}", 
                 entityOrder.Count, migrationId);
 
+            // Step 5.1: Setup external event listening for cancellation
+            var cancellationEvent = context.WaitForExternalEvent<string>("CancellationRequested");
+            logger.LogInformation("Step 5.1: External cancellation event listener activated for MigrationId: {MigrationId}", migrationId);
+
+            // Step 5.2: Initialize deterministic cancellation state
+            var cancellationState = new { 
+                IsCancelled = false, 
+                CancellationReason = string.Empty, 
+                CancellationSource = string.Empty,
+                CancelledAt = (DateTime?)null 
+            };
+            logger.LogInformation("Step 5.2: Deterministic cancellation state initialized for MigrationId: {MigrationId}", migrationId);
+
             foreach (var entityType in entityOrder)
             {
                 logger.LogInformation("Processing entity type: {EntityType} for MigrationId: {MigrationId}", 
                     entityType, migrationId);
 
-                // Check for cancellation before processing each entity
-                var isEntityCancelled = await context.CallActivityAsync<bool>("CheckMigrationCancellation", migrationId);
-                if (isEntityCancelled)
+                // Check for cancellation before processing each entity (flag + external event)
+                if (!cancellationState.IsCancelled)
                 {
-                    logger.LogInformation("Migration {MigrationId} was cancelled during {EntityType} processing", 
-                        migrationId, entityType);
+                    var entityCancellationResult = await context.CallActivityAsync<(bool IsCancelled, string? Reason)>("CheckCancellationFlag", migrationId);
+                    bool externalCancellationReceived = cancellationEvent.IsCompleted && cancellationEvent.IsCompletedSuccessfully;
+                    
+                    if (entityCancellationResult.IsCancelled || externalCancellationReceived)
+                    {
+                        // Update deterministic cancellation state
+                        cancellationState = new {
+                            IsCancelled = true,
+                            CancellationReason = externalCancellationReceived ? 
+                                (cancellationEvent.Result ?? "External cancellation requested") : 
+                                (entityCancellationResult.Reason ?? "No reason provided"),
+                            CancellationSource = externalCancellationReceived ? "ExternalEvent" : "CancellationFlag",
+                            CancelledAt = (DateTime?)context.CurrentUtcDateTime
+                        };
+                    }
+                }
+
+                if (cancellationState.IsCancelled)
+                {
+                    logger.LogInformation("Migration {MigrationId} was cancelled during {EntityType} processing. Source: {Source}, Reason: {Reason}", 
+                        migrationId, entityType, cancellationState.CancellationSource, cancellationState.CancellationReason);
                     
                     return new MigrationOrchestrationResult
                     {
                         MigrationId = migrationId,
                         Status = "Cancelled",
-                        EndTime = context.CurrentUtcDateTime,
-                        ErrorMessage = $"Migration cancelled during {entityType} processing"
+                        EndTime = cancellationState.CancelledAt ?? context.CurrentUtcDateTime,
+                        ErrorMessage = $"Migration cancelled during {entityType} processing ({cancellationState.CancellationSource}): {cancellationState.CancellationReason}"
                     };
                 }
 
@@ -231,7 +277,7 @@ public static class MigrationDurableOrchestrator
                 }
             }
 
-            // Step 6: Calculate final results
+            // Step 6: Calculate final results with enhanced cancellation detection
             var totalProcessed = result.EntityResults.Values.Sum(r => r.ProcessedEntities);
             var totalSuccessful = result.EntityResults.Values.Sum(r => r.SuccessfulEntities);
             var totalFailed = result.EntityResults.Values.Sum(r => r.FailedEntities);
@@ -242,21 +288,36 @@ public static class MigrationDurableOrchestrator
             result.EndTime = context.CurrentUtcDateTime;
             result.Duration = result.EndTime.Value - result.StartTime;
 
-            // ✅ CANCELLATION DETECTION: Check if any entity migration was cancelled
+            // ✅ ENHANCED CANCELLATION DETECTION: Check both state and entity results
+            bool wasCancelledByState = cancellationState.IsCancelled;
             var cancelledEntities = result.EntityResults.Values
                 .Where(r => !r.IsSuccess && (r.ErrorMessage?.Contains("cancelled", StringComparison.OrdinalIgnoreCase) == true ||
                                            r.Errors.Any(e => e.Contains("cancelled", StringComparison.OrdinalIgnoreCase))))
                 .ToList();
 
-            if (cancelledEntities.Any())
+            if (wasCancelledByState || cancelledEntities.Any())
             {
                 result.Status = "Cancelled";
-                var cancelledEntityTypes = string.Join(", ", cancelledEntities.Select(r => r.EntityType));
-                result.ErrorMessage = $"Migration was cancelled. Cancelled entities: {cancelledEntityTypes}";
                 
-                logger.LogWarning("Migration was cancelled for MigrationId: {MigrationId}. " +
-                                "Cancelled entities: {CancelledEntities}, Processed: {ProcessedCount}, Successful: {SuccessfulCount}", 
-                    migrationId, cancelledEntityTypes, totalProcessed, totalSuccessful);
+                // Prioritize deterministic state information if available
+                if (wasCancelledByState)
+                {
+                    result.ErrorMessage = $"Migration was cancelled ({cancellationState.CancellationSource}): {cancellationState.CancellationReason}";
+                    result.EndTime = cancellationState.CancelledAt ?? result.EndTime;
+                    
+                    logger.LogWarning("Migration was cancelled for MigrationId: {MigrationId} via {Source}. " +
+                                    "Reason: {Reason}, Processed: {ProcessedCount}, Successful: {SuccessfulCount}", 
+                        migrationId, cancellationState.CancellationSource, cancellationState.CancellationReason, totalProcessed, totalSuccessful);
+                }
+                else
+                {
+                    var cancelledEntityTypes = string.Join(", ", cancelledEntities.Select(r => r.EntityType));
+                    result.ErrorMessage = $"Migration was cancelled. Cancelled entities: {cancelledEntityTypes}";
+                    
+                    logger.LogWarning("Migration was cancelled for MigrationId: {MigrationId}. " +
+                                    "Cancelled entities: {CancelledEntities}, Processed: {ProcessedCount}, Successful: {SuccessfulCount}", 
+                        migrationId, cancelledEntityTypes, totalProcessed, totalSuccessful);
+                }
                 
                 // Complete migration as cancelled - update storage service for HTTP API
                 await CompleteMigrationAsync(context, migrationId, result, MigrationStatus.Cancelled, result.ErrorMessage);
@@ -407,7 +468,7 @@ public static class MigrationDurableOrchestrator
                 Duration = result.Duration,
                 EntityResults = result.EntityResults,
                 Errors = errors,
-                Statistics = new BigCommerce.Migration.Orchestration.Models.MigrationStatistics
+                Statistics = new BigCommerce.Migration.Activities.Models.MigrationStatistics
                 {
                     TotalDuration = result.Duration,
                     TotalApiCalls = 0,

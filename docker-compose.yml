@@ -63,6 +63,69 @@ services:
       - BigCommerce__MaxRetries=3
       - BigCommerce__EnableDebugLogging=true
       
+      # ✅ PREDICTIVE RATE LIMITING CONFIGURATION (Phase 4.1 - Docker Integration)
+      # Feature Flags - Enable Predictive Distribution
+      - DynamicRateLimiting__Features__EnableDynamicRateLimiting=true
+      - DynamicRateLimiting__Features__EnableApiHealthMonitoring=true
+      - DynamicRateLimiting__Features__EnableRealTimeEvents=true
+      - DynamicRateLimiting__Features__EnableAdvancedRateCalculation=true
+      - DynamicRateLimiting__Features__EnableBigCommerceRateLimitIntegration=true
+      - DynamicRateLimiting__Features__EnableDetailedLogging=true
+      - DynamicRateLimiting__Features__EnablePredictiveDistribution=true
+      - DynamicRateLimiting__Features__EnableInstanceCoordination=true
+      - DynamicRateLimiting__Features__EnableQuotaTracking=true
+      
+      # Rate Calculation Settings - Conservative for Docker
+      - DynamicRateLimiting__RateCalculation__MinimumRate=5.0
+      - DynamicRateLimiting__RateCalculation__MaximumRate=50.0
+      - DynamicRateLimiting__RateCalculation__DefaultRate=12.0
+      - DynamicRateLimiting__RateCalculation__ResponseTimeWeight=0.2
+      - DynamicRateLimiting__RateCalculation__ErrorRateWeight=0.12
+      - DynamicRateLimiting__RateCalculation__BigCommerceRateLimitWeight=0.12
+      - DynamicRateLimiting__RateCalculation__HealthFactorWeight=0.56
+      - DynamicRateLimiting__RateCalculation__CriticalHealthThreshold=25.0
+      - DynamicRateLimiting__RateCalculation__ExcellentHealthThreshold=85.0
+      - DynamicRateLimiting__RateCalculation__ExcellentHealthBoostMultiplier=1.3
+      
+      # Health Monitoring Settings
+      - DynamicRateLimiting__HealthMonitoring__MonitoringWindowMinutes=5
+      - DynamicRateLimiting__HealthMonitoring__MaxCallHistorySize=1000
+      - DynamicRateLimiting__HealthMonitoring__SlowResponseThresholdMs=1000.0
+      - DynamicRateLimiting__HealthMonitoring__CriticalResponseThresholdMs=3000.0
+      - DynamicRateLimiting__HealthMonitoring__ErrorRateThreshold=0.05
+      - DynamicRateLimiting__HealthMonitoring__CleanupIntervalSeconds=300
+      - DynamicRateLimiting__HealthMonitoring__EnableAutomaticCleanup=true
+      
+      # Event Settings
+      - DynamicRateLimiting__Events__SignificantRateChangeThreshold=0.2
+      - DynamicRateLimiting__Events__SignificantHealthChangeThreshold=15.0
+      - DynamicRateLimiting__Events__EventThrottleIntervalSeconds=30
+      - DynamicRateLimiting__Events__EnableEventBatching=false
+      - DynamicRateLimiting__Events__IncludeDetailedHealthInEvents=true
+      
+      # Safety Settings
+      - DynamicRateLimiting__Safety__FallbackRateRequestsPerSecond=8.0
+      - DynamicRateLimiting__Safety__MaxConsecutiveFailures=3
+      - DynamicRateLimiting__Safety__FallbackRetryDelayMinutes=10
+      - DynamicRateLimiting__Safety__EnableAutomaticRecovery=true
+      - DynamicRateLimiting__Safety__EnableCircuitBreaker=true
+      - DynamicRateLimiting__Safety__HealthMonitoringTimeoutMs=1000
+      - DynamicRateLimiting__Safety__EnableGracefulDegradation=true
+      
+      # ✅ PREDICTIVE SETTINGS - OPTIMIZED FOR DOCKER DEPLOYMENT
+      - DynamicRateLimiting__Predictive__SafetyBufferPercentage=0.25
+      - DynamicRateLimiting__Predictive__HealthyQuotaThreshold=0.3
+      - DynamicRateLimiting__Predictive__CriticalQuotaThreshold=0.1
+      - DynamicRateLimiting__Predictive__TokenExpirySeconds=20
+      - DynamicRateLimiting__Predictive__InstanceTimeoutSeconds=90
+      - DynamicRateLimiting__Predictive__HeartbeatIntervalSeconds=45
+      - DynamicRateLimiting__Predictive__MaxETagRetries=5
+      - DynamicRateLimiting__Predictive__CoordinationHealthCheckSeconds=20
+      - DynamicRateLimiting__Predictive__TableStorage__QuotaTableName=RateLimitQuotas
+      - DynamicRateLimiting__Predictive__TableStorage__InstanceTableName=RateLimitInstances
+      - DynamicRateLimiting__Predictive__TableStorage__TokenTableName=RateLimitTokens
+      - DynamicRateLimiting__Predictive__TableStorage__AutoCreateTables=true
+      
       # OpenSearch Configuration (External AWS)
       - OpenSearch__Endpoint=https://search-bigcommerceinsights-co3k7jb4ukk565b4c3bskzucpm.us-east-1.es.amazonaws.com
       - OpenSearch__Username=admin

@@ -40,7 +40,7 @@
   <ItemGroup>
     <ProjectReference Include="..\BigCommerce.Migration.Core\BigCommerce.Migration.Core.csproj" />
     <ProjectReference Include="..\BigCommerce.Migration.Infrastructure\BigCommerce.Migration.Infrastructure.csproj" />
-    <ProjectReference Include="..\BigCommerce.Migration.Orchestration\BigCommerce.Migration.Orchestration.csproj" />
+    <ProjectReference Include="..\BigCommerce.Migration.Activities\BigCommerce.Migration.Activities.csproj" />
   </ItemGroup>
 
   <ItemGroup>

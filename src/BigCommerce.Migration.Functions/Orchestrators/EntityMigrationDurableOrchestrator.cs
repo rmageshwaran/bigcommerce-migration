@@ -4,9 +4,9 @@ using Microsoft.DurableTask;
 using Microsoft.Extensions.Logging;
 using BigCommerce.Migration.Core.Models;
 using BigCommerce.Migration.Core.Interfaces;
-using BigCommerce.Migration.Orchestration.Models;
-using BigCommerce.Migration.Orchestration.Activities;
-using BigCommerce.Migration.Orchestration.Extensions;
+using BigCommerce.Migration.Activities.Models;
+using BigCommerce.Migration.Activities.Activities;
+using BigCommerce.Migration.Activities.Extensions;
 using System.Linq;
 
 namespace BigCommerce.Migration.Functions.Orchestrators;
@@ -50,17 +50,31 @@ public static class EntityMigrationDurableOrchestrator
             logger.LogInformation("🚀 THROUGHPUT OPTIMIZED: Starting {EntityType} migration with 17.0x parallel processing for MigrationId: {MigrationId}", 
                 entityType, migrationId);
 
-            // Step 1: Fast cancellation check using passed state (no external storage call needed)
-            if (input.IsCancelled)
+            // Step 0.5: Setup external event listening for cancellation
+            var cancellationEvent = context.WaitForExternalEvent<string>("CancellationRequested");
+            logger.LogInformation("Step 0.5: External cancellation event listener activated for {EntityType} migration {MigrationId}", entityType, migrationId);
+
+            // Step 0.6: Initialize deterministic cancellation state
+            var cancellationState = new { 
+                IsCancelled = input.IsCancelled, 
+                CancellationReason = input.CancellationReason ?? string.Empty, 
+                CancellationSource = input.IsCancelled ? "Inherited" : string.Empty,
+                CancelledAt = input.CancelledAt 
+            };
+            logger.LogInformation("Step 0.6: Deterministic cancellation state initialized for {EntityType} migration {MigrationId}. Inherited: {Inherited}", 
+                entityType, migrationId, input.IsCancelled);
+
+            // Step 1: Enhanced cancellation check using deterministic state
+            if (cancellationState.IsCancelled)
             {
-                logger.LogInformation("Migration {MigrationId} was cancelled before {EntityType} processing began. Reason: {Reason}", 
-                    migrationId, entityType, input.CancellationReason);
+                logger.LogInformation("Migration {MigrationId} was cancelled before {EntityType} processing began. Source: {Source}, Reason: {Reason}", 
+                    migrationId, entityType, cancellationState.CancellationSource, cancellationState.CancellationReason);
                 
                 result.IsSuccess = false;
-                result.ErrorMessage = $"{entityType} migration was cancelled: {input.CancellationReason}";
-                result.EndTime = context.CurrentUtcDateTime;
+                result.ErrorMessage = $"{entityType} migration was cancelled ({cancellationState.CancellationSource}): {cancellationState.CancellationReason}";
+                result.EndTime = cancellationState.CancelledAt ?? context.CurrentUtcDateTime;
                 result.Duration = result.EndTime.Value - result.StartTime;
-                result.Errors.Add($"{entityType} migration was cancelled: {input.CancellationReason}");
+                result.Errors.Add($"{entityType} migration was cancelled ({cancellationState.CancellationSource}): {cancellationState.CancellationReason}");
                 
                 return result;
             }
@@ -143,9 +157,9 @@ public static class EntityMigrationDurableOrchestrator
                     EntityType = entityType,
                     TotalCount = discoverResult.TotalCount,
                     Timestamp = context.CurrentUtcDateTime,
-                    IsCancelled = input.IsCancelled,
-                    CancellationReason = input.CancellationReason,
-                    CancelledAt = input.CancelledAt
+                    IsCancelled = cancellationState.IsCancelled,
+                    CancellationReason = cancellationState.CancellationReason,
+                    CancelledAt = cancellationState.CancelledAt
                 });
 
             // Step 6: Update initial progress
@@ -161,9 +175,9 @@ public static class EntityMigrationDurableOrchestrator
                     SuccessfulEntities = 0,
                     FailedEntities = 0,
                     Timestamp = context.CurrentUtcDateTime,
-                    IsCancelled = input.IsCancelled,
-                    CancellationReason = input.CancellationReason,
-                    CancelledAt = input.CancelledAt
+                    IsCancelled = cancellationState.IsCancelled,
+                    CancellationReason = cancellationState.CancellationReason,
+                    CancelledAt = cancellationState.CancelledAt
                 });
 
             // 🚀 **STEP 7: SMART PROCESSING** - Hybrid approach for optimal performance
@@ -205,6 +219,40 @@ public static class EntityMigrationDurableOrchestrator
                     entityType, migrationId);
             }
             
+            // Step 7.1: Check for cancellation before starting batch processing
+            if (!cancellationState.IsCancelled)
+            {
+                var preBatchCancellationResult = await context.CallActivityAsync<(bool IsCancelled, string Reason)>("CheckCancellationFlag", migrationId);
+                bool preBatchExternalCancellation = cancellationEvent.IsCompleted && cancellationEvent.IsCompletedSuccessfully;
+                
+                if (preBatchCancellationResult.IsCancelled || preBatchExternalCancellation)
+                {
+                    // Update deterministic cancellation state
+                    cancellationState = new {
+                        IsCancelled = true,
+                        CancellationReason = preBatchExternalCancellation ? 
+                            (cancellationEvent.Result ?? "External cancellation requested") : 
+                            (preBatchCancellationResult.Reason ?? "No reason provided"),
+                        CancellationSource = preBatchExternalCancellation ? "ExternalEvent" : "CancellationFlag",
+                        CancelledAt = (DateTime?)context.CurrentUtcDateTime
+                    };
+                }
+            }
+
+            if (cancellationState.IsCancelled)
+            {
+                logger.LogInformation("Migration {MigrationId} was cancelled before {EntityType} batch processing. Source: {Source}, Reason: {Reason}", 
+                    migrationId, entityType, cancellationState.CancellationSource, cancellationState.CancellationReason);
+                
+                result.IsSuccess = false;
+                result.ErrorMessage = $"{entityType} migration was cancelled before batch processing ({cancellationState.CancellationSource}): {cancellationState.CancellationReason}";
+                result.EndTime = cancellationState.CancelledAt ?? context.CurrentUtcDateTime;
+                result.Duration = result.EndTime.Value - result.StartTime;
+                result.Errors.Add($"{entityType} migration was cancelled before batch processing ({cancellationState.CancellationSource}): {cancellationState.CancellationReason}");
+                
+                return result;
+            }
+
             if (shouldUseChunking)
             {
                 // 🚀 LARGE DATASET: Use chunked orchestration for timeout prevention
@@ -274,9 +322,9 @@ public static class EntityMigrationDurableOrchestrator
                     CategoryTreeContext = input.CategoryTreeContext ?? new CategoryTreeContext(),
                     UseDirectPagination = useDirectPagination,
                     PaginationMetadata = useDirectPagination ? chunkPaginationMetadata : discoverResult?.PaginationMetadata,
-                    IsCancelled = input.IsCancelled,
-                    CancellationReason = input.CancellationReason ?? string.Empty,
-                    CancelledAt = input.CancelledAt
+                    IsCancelled = cancellationState.IsCancelled,
+                    CancellationReason = cancellationState.CancellationReason,
+                    CancelledAt = cancellationState.CancelledAt
                 };
                 
                 logger.LogError("🚀 [ORCHESTRATOR-CHUNK-DEBUG] FINAL chunkRequest for chunk {ChunkNumber}: " +
@@ -350,9 +398,9 @@ public static class EntityMigrationDurableOrchestrator
                     CategoryTreeContext = input.CategoryTreeContext ?? new CategoryTreeContext(),
                     UseDirectPagination = useDirectPagination,
                     PaginationMetadata = discoverResult?.PaginationMetadata,
-                    IsCancelled = input.IsCancelled,
-                    CancellationReason = input.CancellationReason ?? string.Empty,
-                    CancelledAt = input.CancelledAt
+                    IsCancelled = cancellationState.IsCancelled,
+                    CancellationReason = cancellationState.CancellationReason,
+                    CancelledAt = cancellationState.CancelledAt
                 };
 
                 // Call the fast parallel processing activity directly (like the original approach)
@@ -393,14 +441,37 @@ public static class EntityMigrationDurableOrchestrator
                     CurrentBatch = totalBatches,
                     TotalBatches = totalBatches,
                     Timestamp = context.CurrentUtcDateTime,
-                    IsCancelled = input.IsCancelled,
-                    CancellationReason = input.CancellationReason,
-                    CancelledAt = input.CancelledAt
+                    IsCancelled = cancellationState.IsCancelled,
+                    CancellationReason = cancellationState.CancellationReason,
+                    CancelledAt = cancellationState.CancelledAt
                 });
 
-            // Step 7: Determine final result
-            result.EndTime = context.CurrentUtcDateTime;
+            // Step 7: Enhanced final result determination with cancellation detection
+            result.EndTime = cancellationState.CancelledAt ?? context.CurrentUtcDateTime;
             result.Duration = result.EndTime.Value - result.StartTime;
+
+            // Check for cancellation first
+            bool wasCancelledByState = cancellationState.IsCancelled;
+            bool wasCancelledByResult = (parallelResult?.Errors?.Any(e => e.Contains("cancelled", StringComparison.OrdinalIgnoreCase)) == true);
+
+            if (wasCancelledByState || wasCancelledByResult)
+            {
+                result.IsSuccess = false;
+                if (wasCancelledByState)
+                {
+                    result.ErrorMessage = $"{entityType} migration was cancelled ({cancellationState.CancellationSource}): {cancellationState.CancellationReason}";
+                    logger.LogInformation("{EntityType} migration was cancelled for MigrationId: {MigrationId} via {Source}. Reason: {Reason}", 
+                        entityType, migrationId, cancellationState.CancellationSource, cancellationState.CancellationReason);
+                }
+                else
+                {
+                    result.ErrorMessage = $"{entityType} migration was cancelled during processing";
+                    logger.LogInformation("{EntityType} migration was cancelled during processing for MigrationId: {MigrationId}", 
+                        entityType, migrationId);
+                }
+                
+                return result;
+            }
 
             if (result.ProcessedEntities == 0)
             {

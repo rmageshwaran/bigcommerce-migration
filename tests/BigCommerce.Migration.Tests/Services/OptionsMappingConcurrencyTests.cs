@@ -1,6 +1,6 @@
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
-using BigCommerce.Migration.Orchestration.Services;
+using BigCommerce.Migration.Activities.Services;
 using Microsoft.Extensions.Logging;
 using Moq;
 using System.Collections.Concurrent;

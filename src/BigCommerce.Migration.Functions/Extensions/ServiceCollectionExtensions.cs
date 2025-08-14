@@ -2,11 +2,12 @@ using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
 using BigCommerce.Migration.Core.Services;
 using BigCommerce.Migration.Infrastructure.Services;
+using BigCommerce.Migration.Infrastructure.Extensions;
 using BigCommerce.Migration.Functions.Services;
 using BigCommerce.Migration.Functions.Middleware;
 
-using BigCommerce.Migration.Orchestration.Services;
-using BigCommerce.Migration.Orchestration.Extensions;
+using BigCommerce.Migration.Activities.Services;
+using BigCommerce.Migration.Activities.Extensions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -435,6 +436,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IBlobService, BlobService>();
         services.AddSingleton<IQueueService, QueueService>();
         services.AddScoped<IMigrationStorageService, MigrationStorageService>();
+        services.AddSingleton<ICancellationStore, CancellationStore>();
 
         // Register API request handler for HTTP concerns (delegation pattern)
                     services.AddSingleton<IApiRequestHandler>(serviceProvider =>
@@ -455,6 +457,13 @@ public static class ServiceCollectionExtensions
         services.Configure<DynamicRateLimitingConfiguration>(
             configuration.GetSection("DynamicRateLimiting"));
         
+        // Register IOptions<DynamicRateLimitingConfiguration> as singleton
+        services.AddSingleton<IOptions<DynamicRateLimitingConfiguration>>(serviceProvider =>
+            serviceProvider.GetRequiredService<IOptionsSnapshot<DynamicRateLimitingConfiguration>>());
+        
+        // Register predictive rate limiting services (Phase 1 - Predictive Rate Limiting)
+        services.AddPredictiveRateLimiting();
+        
         // Register dynamic rate limiting services (Phase 1 - Dynamic Rate Limiting)
         services.AddSingleton<IDateTimeProvider, DateTimeProvider>();
         services.AddSingleton<IApiHealthMonitor, ApiHealthMonitor>();
@@ -465,16 +474,37 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IRateLimitService>(serviceProvider => 
             serviceProvider.GetRequiredService<RateLimitService>());
         
-        // Register dynamic rate limiting service using decorator pattern
-        services.AddSingleton<IDynamicRateLimiter>(serviceProvider =>
+        // Register consolidated dynamic rate limiting service with optional enhanced capabilities
+        services.AddSingleton<DynamicRateLimitService>(serviceProvider =>
         {
             var logger = serviceProvider.GetRequiredService<ILogger<DynamicRateLimitService>>();
-            var baseRateLimitService = serviceProvider.GetRequiredService<RateLimitService>();
+            var rateLimitService = serviceProvider.GetRequiredService<RateLimitService>();
             var healthMonitor = serviceProvider.GetRequiredService<IApiHealthMonitor>();
             var rateCalculator = serviceProvider.GetRequiredService<IRateCalculator>();
             
-            return new DynamicRateLimitService(logger, baseRateLimitService, healthMonitor, rateCalculator);
+            // Optional enhanced services (will be null if predictive is disabled)
+            var predictiveService = serviceProvider.GetService<IPredictiveRateLimitingService>();
+            var coordinationHealthMonitor = serviceProvider.GetService<ICoordinationHealthMonitor>();
+            var quotaTrackingService = serviceProvider.GetService<IQuotaTrackingService>();
+            var configuration = serviceProvider.GetService<IOptions<DynamicRateLimitingConfiguration>>();
+            
+            return new DynamicRateLimitService(
+                logger,
+                rateLimitService,
+                healthMonitor,
+                rateCalculator,
+                predictiveService,
+                coordinationHealthMonitor,
+                quotaTrackingService,
+                configuration);
         });
+
+        // Register interfaces for the consolidated service
+        services.AddSingleton<IEnhancedDynamicRateLimiter>(serviceProvider =>
+            serviceProvider.GetRequiredService<DynamicRateLimitService>());
+        
+        services.AddSingleton<IDynamicRateLimiter>(serviceProvider =>
+            serviceProvider.GetRequiredService<DynamicRateLimitService>());
         
         // 🚨 FIX: Don't override IRateLimitService - let both coexist
         // The ApiRequestHandler will use IDynamicRateLimiter when available

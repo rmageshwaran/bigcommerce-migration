@@ -60,7 +60,7 @@ public static class PredictiveRateLimitingServiceCollectionExtensions
         // Decorate the existing IDynamicRateLimiter with enhanced capabilities
         // Enhanced integration - temporarily disabled for initial build
         // TODO: Add Scrutor package for Decorate pattern or use manual decoration
-        // services.Decorate<IDynamicRateLimiter, EnhancedDynamicRateLimitService>();
+        // Enhanced functionality is now built into DynamicRateLimitService directly
 
         return services;
     }

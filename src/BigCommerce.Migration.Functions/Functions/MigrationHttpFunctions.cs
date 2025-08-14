@@ -5,8 +5,11 @@ using System.Net;
 using System.Text.Json;
 using BigCommerce.Migration.Core.Models;
 using BigCommerce.Migration.Core.Interfaces;
+using BigCommerce.Migration.Core.Services;
 using Microsoft.Azure.WebJobs.Extensions.OpenApi.Core.Attributes;
 using Microsoft.OpenApi.Models;
+using Microsoft.DurableTask.Client;
+using Microsoft.DurableTask;
 
 namespace BigCommerce.Migration.Functions.Functions;
 
@@ -24,6 +27,9 @@ public class MigrationHttpFunctions
     private readonly IQueueService _queueService;
     private readonly IBlobService _blobService;
     private readonly IProgressTracker _progressTracker;
+    private readonly ICancellationStore _cancellationStore;
+    private readonly ISignalREventFactory _signalREventFactory;
+    private readonly IProgressEventPublisher _progressEventPublisher;
 
     /// <summary>
     /// Initializes a new instance of the MigrationHttpFunctions class
@@ -35,6 +41,10 @@ public class MigrationHttpFunctions
     /// <param name="migrationStorageService">Migration storage service</param>
     /// <param name="queueService">Queue service</param>
     /// <param name="blobService">Blob service</param>
+    /// <param name="progressTracker">Progress tracker service</param>
+    /// <param name="cancellationStore">Cancellation store for native cancellation flags</param>
+    /// <param name="signalREventFactory">SignalR event factory for notifications</param>
+    /// <param name="progressEventPublisher">Progress event publisher for SignalR broadcasting</param>
     public MigrationHttpFunctions(
         ILogger<MigrationHttpFunctions> logger,
         IBigCommerceApiClient bigCommerceApiClient,
@@ -43,7 +53,10 @@ public class MigrationHttpFunctions
         IMigrationStorageService migrationStorageService,
         IQueueService queueService,
         IBlobService blobService,
-        IProgressTracker progressTracker)
+        IProgressTracker progressTracker,
+        ICancellationStore cancellationStore,
+        ISignalREventFactory signalREventFactory,
+        IProgressEventPublisher progressEventPublisher)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _bigCommerceApiClient = bigCommerceApiClient ?? throw new ArgumentNullException(nameof(bigCommerceApiClient));
@@ -53,6 +66,9 @@ public class MigrationHttpFunctions
         _queueService = queueService ?? throw new ArgumentNullException(nameof(queueService));
         _blobService = blobService ?? throw new ArgumentNullException(nameof(blobService));
         _progressTracker = progressTracker ?? throw new ArgumentNullException(nameof(progressTracker));
+        _cancellationStore = cancellationStore ?? throw new ArgumentNullException(nameof(cancellationStore));
+        _signalREventFactory = signalREventFactory ?? throw new ArgumentNullException(nameof(signalREventFactory));
+        _progressEventPublisher = progressEventPublisher ?? throw new ArgumentNullException(nameof(progressEventPublisher));
     }
 
     /// <summary>
@@ -459,21 +475,23 @@ public class MigrationHttpFunctions
     }
 
     /// <summary>
-    /// Cancels a migration operation
+    /// Cancels a migration operation using native Durable Functions approach
     /// </summary>
     /// <param name="req">HTTP request</param>
     /// <param name="migrationId">Migration ID</param>
+    /// <param name="durableTaskClient">Durable task client for orchestrator termination</param>
     /// <param name="context">Function execution context</param>
     /// <returns>HTTP response with cancellation status</returns>
     [Function("CancelMigration")]
     public async Task<HttpResponseData> CancelMigration(
         [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "migrations/{migrationId}/cancel")] HttpRequestData req,
         string migrationId,
+        [DurableClient] DurableTaskClient durableTaskClient,
         FunctionContext context)
     {
         try
         {
-            _logger.LogInformation("Cancelling migration. MigrationId: {MigrationId}", migrationId);
+            _logger.LogInformation("🚫 [NATIVE-CANCEL] Starting migration cancellation. MigrationId: {MigrationId}", migrationId);
 
             // Validate migration ID
             if (string.IsNullOrWhiteSpace(migrationId))
@@ -504,13 +522,61 @@ public class MigrationHttpFunctions
                 return await CreateErrorResponse(req, HttpStatusCode.BadRequest, "Migration already cancelled", migrationId);
             }
 
-            // Update migration status to cancelled
+            var cancellationReason = "User requested cancellation";
+            
+            // PHASE 1: Native Durable Functions Cancellation Implementation
+            // Step 1: Set cancellation flag in blob storage (cooperative cancellation)
+            await _cancellationStore.SetCancellationFlagAsync(migrationId, cancellationReason);
+            _logger.LogInformation("🚫 [NATIVE-CANCEL] Cancellation flag set. MigrationId: {MigrationId}", migrationId);
+
+            // Step 2: Update migration status to cancelled in storage
             migrationEntry.Status = Core.Models.MigrationStatus.Cancelled;
             migrationEntry.UpdatedAt = DateTime.UtcNow;
             await _migrationStorageService.UpdateMigrationAsync(migrationEntry);
+            _logger.LogInformation("🚫 [NATIVE-CANCEL] Migration status updated. MigrationId: {MigrationId}", migrationId);
 
-            // TODO: Implement native Durable Functions cancellation in Phase 1
-            _logger.LogInformation("Migration status updated to cancelled. MigrationId: {MigrationId}", migrationId);
+            // Step 3: Send external event to main orchestrator (if running)
+            try
+            {
+                await durableTaskClient.RaiseEventAsync(migrationId, "CancellationRequested", cancellationReason);
+                _logger.LogInformation("🚫 [NATIVE-CANCEL] External event sent to orchestrator. MigrationId: {MigrationId}", migrationId);
+            }
+            catch (Exception eventEx)
+            {
+                // Log but don't fail - orchestrator might already be completed or not exist
+                _logger.LogWarning(eventEx, "🚫 [NATIVE-CANCEL] Could not send external event (orchestrator may not exist). MigrationId: {MigrationId}", migrationId);
+            }
+
+            // Step 4: Terminate main orchestrator (if running)
+            try
+            {
+                await durableTaskClient.TerminateInstanceAsync(migrationId, cancellationReason);
+                _logger.LogInformation("🚫 [NATIVE-CANCEL] Orchestrator termination requested. MigrationId: {MigrationId}", migrationId);
+            }
+            catch (Exception terminateEx)
+            {
+                // Log but don't fail - orchestrator might already be completed or not exist
+                _logger.LogWarning(terminateEx, "🚫 [NATIVE-CANCEL] Could not terminate orchestrator (may not exist). MigrationId: {MigrationId}", migrationId);
+            }
+
+            // Step 5: Send SignalR notification about cancellation
+            var statusEvent = _signalREventFactory.CreateStatusProgress(migrationId, new StatusProgressOptions
+            {
+                Status = "Cancelled",
+                Message = "Migration cancelled by user request",
+                IsCancelled = true,
+                CancellationReason = cancellationReason,
+                CancelledAt = DateTime.UtcNow,
+                Data = new Dictionary<string, object>
+                {
+                    ["reason"] = cancellationReason,
+                    ["cancelledAt"] = DateTime.UtcNow.ToString("O"),
+                    ["approach"] = "native-durable-functions"
+                }
+            });
+
+            await _progressEventPublisher.PublishStatusAsync(statusEvent);
+            _logger.LogInformation("🚫 [NATIVE-CANCEL] SignalR cancellation notification sent. MigrationId: {MigrationId}", migrationId);
             
             var response = req.CreateResponse(HttpStatusCode.OK);
             response.Headers.Add("Content-Type", "application/json; charset=utf-8");
@@ -519,8 +585,17 @@ public class MigrationHttpFunctions
             {
                 migrationId = migrationId,
                 status = "cancelled",
-                message = "Migration cancelled successfully",
-                cancelledAt = DateTime.UtcNow
+                message = "Migration cancelled successfully using native Durable Functions approach",
+                cancelledAt = DateTime.UtcNow,
+                approach = "native-durable-functions",
+                actions = new[]
+                {
+                    "cancellation-flag-set",
+                    "migration-status-updated", 
+                    "external-event-sent",
+                    "orchestrator-termination-requested",
+                    "signalr-notification-sent"
+                }
             };
 
             await response.WriteStringAsync(JsonSerializer.Serialize(responseData, new JsonSerializerOptions

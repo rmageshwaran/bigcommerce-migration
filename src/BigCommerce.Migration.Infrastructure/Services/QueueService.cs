@@ -132,49 +132,7 @@ public class QueueService : IQueueService
         }
     }
 
-    /// <summary>
-    /// Creates a migration cancellation message for queue output binding
-    /// </summary>
-    /// <param name="migrationId">Migration ID to cancel</param>
-    /// <param name="reason">Cancellation reason</param>
-    /// <returns>Queue message ready for output binding</returns>
-    public Core.Models.QueueMessage CreateCancellationMessage(string migrationId, string reason)
-    {
-        try
-        {
-            _logger.LogInformation("Creating cancellation message: {MigrationId}, Reason: {Reason}", migrationId, reason);
-
-            var messageContent = new
-            {
-                MessageType = "MigrationCancellation",
-                MigrationId = migrationId,
-                Reason = reason,
-                RequestedBy = "System", // Could be enhanced to track actual user
-                CreatedAt = DateTime.UtcNow,
-                Version = "1.0"
-            };
-
-            var queueMessage = new Core.Models.QueueMessage
-            {
-                MessageId = Guid.NewGuid().ToString(),
-                Content = JsonSerializer.Serialize(messageContent, new JsonSerializerOptions
-                {
-                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-                }),
-                MessageType = "MigrationCancellation",
-                InsertionTime = DateTime.UtcNow,
-                ExpirationTime = DateTime.UtcNow.AddDays(1) // Cancellations expire quickly
-            };
-
-            _logger.LogInformation("Successfully created cancellation message: {MessageId}", queueMessage.MessageId);
-            return queueMessage;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error creating cancellation message: {MigrationId}", migrationId);
-            throw;
-        }
-    }
+    // REMOVED: CreateCancellationMessage - Use native Durable Functions cancellation with ICancellationStore instead
 
     /// <summary>
     /// Creates multiple entity batch messages for parallel processing
@@ -379,56 +337,7 @@ public class QueueService : IQueueService
         }
     }
 
-    /// <summary>
-    /// Processes a cancellation message received from queue trigger
-    /// </summary>
-    /// <param name="queueMessage">Queue message from trigger</param>
-    /// <returns>Processed message result</returns>
-    public async Task<MessageProcessingResult> ProcessCancellationMessageAsync(Core.Models.QueueMessage queueMessage)
-    {
-        try
-        {
-            _logger.LogInformation("Processing cancellation message: {MessageId}", queueMessage.MessageId);
-
-            // Validate and parse message
-            var validationResult = await ValidateQueueMessageAsync(queueMessage);
-            if (!validationResult.IsValid)
-            {
-                return new MessageProcessingResult
-                {
-                    IsSuccess = false,
-                    ErrorDetails = validationResult.ValidationError,
-                    ShouldRetry = false,
-                    ProcessedAt = DateTime.UtcNow
-                };
-            }
-
-            // TODO: Implement actual cancellation processing logic
-            await Task.Delay(500);
-
-            _logger.LogInformation("Successfully processed cancellation message: {MessageId}", queueMessage.MessageId);
-            
-            return new MessageProcessingResult
-            {
-                IsSuccess = true,
-                Message = "Cancellation processed successfully",
-                ProcessedAt = DateTime.UtcNow,
-                ProcessingDuration = TimeSpan.FromMilliseconds(500)
-            };
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error processing cancellation message: {MessageId}", queueMessage.MessageId);
-            
-            return new MessageProcessingResult
-            {
-                IsSuccess = false,
-                ErrorDetails = ex.Message,
-                ShouldRetry = true,
-                ProcessedAt = DateTime.UtcNow
-            };
-        }
-    }
+    // REMOVED: ProcessCancellationMessageAsync - Use native Durable Functions cancellation with ICancellationStore instead
 
     /// <summary>
     /// Processes a batch completion message received from queue trigger
@@ -574,7 +483,7 @@ public class QueueService : IQueueService
             }
 
             // Message type validation
-            var validMessageTypes = new[] { "MigrationStart", "EntityBatch", "BatchCompletion", "MigrationCancellation" };
+            var validMessageTypes = new[] { "MigrationStart", "EntityBatch", "BatchCompletion" };
             if (!string.IsNullOrWhiteSpace(queueMessage.MessageType) && 
                 !validMessageTypes.Contains(queueMessage.MessageType))
             {

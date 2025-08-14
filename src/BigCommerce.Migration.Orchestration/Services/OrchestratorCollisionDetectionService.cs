@@ -341,25 +341,28 @@ namespace BigCommerce.Migration.Orchestration.Services
         }
 
         /// <summary>
-        /// Creates a collision result with deterministic cancellation information
-        /// This integrates with our existing deterministic cancellation pattern
+        /// Creates a simple collision result for cancelled migrations
         /// </summary>
         /// <param name="migrationId">Migration identifier</param>
         /// <param name="instanceId">Instance identifier</param>
         /// <param name="cancellationReason">Reason for the collision/cancellation</param>
         /// <param name="currentUtcDateTime">Current UTC time (from orchestrator context)</param>
-        /// <returns>Cancellation result for deterministic orchestrator behavior</returns>
+        /// <returns>Simple cancellation result object</returns>
         public object CreateCollisionCancellationResult(
             string migrationId, 
             string instanceId, 
             string cancellationReason, 
             DateTime currentUtcDateTime)
         {
-            // Use our existing CancelledResultFactory to ensure deterministic behavior
-            var cancellationState = DeterministicCancellationState.Create(migrationId);
-            cancellationState.MarkAsCancelled($"Orchestrator collision detected: {cancellationReason}", currentUtcDateTime);
-            
-            return CancelledResultFactory.CreateCancelledMigrationResult(cancellationState, currentUtcDateTime);
+            // Return a simple result object for collision detection
+            return new 
+            {
+                Status = "Cancelled",
+                Reason = $"Orchestrator collision detected: {cancellationReason}",
+                MigrationId = migrationId,
+                InstanceId = instanceId,
+                CancelledAt = currentUtcDateTime
+            };
         }
     }
 

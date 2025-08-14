@@ -97,17 +97,19 @@ public static class MigrationDurableOrchestrator
             // Update the input context with resolved tree IDs
             input.CategoryTreeContext = resolvedCategoryTreeContext;
 
-            // Step 4: Check for cancellation before starting entity processing using deterministic pattern
-            var cancellationState = context.GetOrInitializeCancellationState(migrationId);
-            cancellationState = await context.CheckExternalCancellationOnceAsync(cancellationState);
-
-            if (cancellationState.IsCancelled)
+            // Step 4: Check for cancellation before starting entity processing
+            var isCancelled = await context.CallActivityAsync<bool>("CheckMigrationCancellation", migrationId);
+            if (isCancelled)
             {
-                logger.LogInformation("Migration {MigrationId} was cancelled before entity processing began. Reason: {Reason}", 
-                    migrationId, cancellationState.CancellationReason);
+                logger.LogInformation("Migration {MigrationId} was cancelled before entity processing began", migrationId);
                 
-                return (MigrationOrchestrationResult)CancelledResultFactory.CreateCancelledMigrationResult(
-                    cancellationState, context.CurrentUtcDateTime);
+                return new MigrationOrchestrationResult
+                {
+                    MigrationId = migrationId,
+                    Status = "Cancelled",
+                    EndTime = context.CurrentUtcDateTime,
+                    ErrorMessage = "Migration cancelled before entity processing began"
+                };
             }
 
             // Step 4.5: Phase 3.1 - Orchestrator collision detection
@@ -142,13 +144,7 @@ public static class MigrationDurableOrchestrator
             logger.LogInformation("Successfully acquired orchestrator lock for migration: {MigrationId}, instance: {InstanceId}", 
                 migrationId, instanceId);
 
-            // Create cancellation token source for this execution based on external cancellation state
-            // This allows activities to use fast token checks instead of external storage calls
-            var cancellationTokenSource = new CancellationTokenSource();
-            if (cancellationState.IsCancelled)
-            {
-                cancellationTokenSource.Cancel();
-            }
+            // Simplified cancellation handling - we'll check via activities
 
             try
             {
@@ -164,31 +160,20 @@ public static class MigrationDurableOrchestrator
                 logger.LogInformation("Processing entity type: {EntityType} for MigrationId: {MigrationId}", 
                     entityType, migrationId);
 
-                // Fast cancellation check using token (microseconds vs milliseconds for external storage)
-                if (cancellationTokenSource.Token.IsCancellationRequested)
+                // Check for cancellation before processing each entity
+                var isEntityCancelled = await context.CallActivityAsync<bool>("CheckMigrationCancellation", migrationId);
+                if (isEntityCancelled)
                 {
-                    logger.LogInformation("Migration {MigrationId} was cancelled during {EntityType} processing via fast token check", 
+                    logger.LogInformation("Migration {MigrationId} was cancelled during {EntityType} processing", 
                         migrationId, entityType);
                     
-                    return (MigrationOrchestrationResult)CancelledResultFactory.CreateCancelledMigrationResult(
-                        cancellationState, context.CurrentUtcDateTime);
-                }
-
-                // Periodically refresh cancellation state from external storage for long-running migrations
-                // Only check external storage every few entities to balance performance with responsiveness
-                if (entityOrder.IndexOf(entityType) % 3 == 0) // Check every 3rd entity
-                {
-                    var refreshedState = await context.CheckExternalCancellationOnceAsync(cancellationState);
-                    if (refreshedState.IsCancelled && !cancellationState.IsCancelled)
+                    return new MigrationOrchestrationResult
                     {
-                        cancellationState = refreshedState;
-                        cancellationTokenSource.Cancel();
-                        logger.LogInformation("Migration {MigrationId} cancellation detected via periodic refresh during {EntityType} processing", 
-                            migrationId, entityType);
-                        
-                        return (MigrationOrchestrationResult)CancelledResultFactory.CreateCancelledMigrationResult(
-                            cancellationState, context.CurrentUtcDateTime);
-                    }
+                        MigrationId = migrationId,
+                        Status = "Cancelled",
+                        EndTime = context.CurrentUtcDateTime,
+                        ErrorMessage = $"Migration cancelled during {entityType} processing"
+                    };
                 }
 
                 // Process the entity type using the entity-specific orchestrator
@@ -199,11 +184,7 @@ public static class MigrationDurableOrchestrator
                     SourceStore = input.MigrationRequest?.SourceStore ?? new StoreConfiguration(),
                     DestinationStore = input.MigrationRequest?.DestinationStore ?? new StoreConfiguration(),
                     CategoryTreeContext = input.CategoryTreeContext ?? new CategoryTreeContext(),
-                    Settings = input.MigrationRequest?.Settings,
-                    // Pass cancellation state for fast token-based checking in sub-orchestrator and activities
-                    IsCancelled = cancellationState.IsCancelled,
-                    CancellationReason = cancellationState.CancellationReason,
-                    CancelledAt = cancellationState.CancelledAt
+                    Settings = input.MigrationRequest?.Settings
                 };
 
                 try

@@ -29,13 +29,7 @@ namespace BigCommerce.Migration.Core.Interfaces
         /// <returns>Queue message ready for output binding</returns>
         QueueMessage CreateEntityBatchMessage(EntityBatchMessage batchMessage);
 
-        /// <summary>
-        /// Creates a migration cancellation message for queue output binding
-        /// </summary>
-        /// <param name="migrationId">Migration ID to cancel</param>
-        /// <param name="reason">Cancellation reason</param>
-        /// <returns>Queue message ready for output binding</returns>
-        QueueMessage CreateCancellationMessage(string migrationId, string reason);
+
 
         /// <summary>
         /// Creates a batch completion message for queue output binding
@@ -70,12 +64,7 @@ namespace BigCommerce.Migration.Core.Interfaces
         /// <returns>Processed message result</returns>
         Task<MessageProcessingResult> ProcessEntityBatchMessageAsync(QueueMessage queueMessage);
 
-        /// <summary>
-        /// Processes a cancellation message received from queue trigger
-        /// </summary>
-        /// <param name="queueMessage">Queue message from trigger</param>
-        /// <returns>Processed message result</returns>
-        Task<MessageProcessingResult> ProcessCancellationMessageAsync(QueueMessage queueMessage);
+
 
         /// <summary>
         /// Processes a batch completion message received from queue trigger
@@ -133,13 +122,7 @@ namespace BigCommerce.Migration.Core.Interfaces
         /// <returns>Task representing the send operation</returns>
         Task SendMigrationStartMessageAsync(string migrationId, MigrationRequest migrationRequest, CategoryTreeContext? categoryTreeContext = null);
 
-        /// <summary>
-        /// Sends a cancellation message directly to the cancellation queue
-        /// </summary>
-        /// <param name="migrationId">Migration ID</param>
-        /// <param name="reason">Cancellation reason</param>
-        /// <returns>Task representing the send operation</returns>
-        Task SendCancellationMessageAsync(string migrationId, string reason);
+
 
         #endregion
 

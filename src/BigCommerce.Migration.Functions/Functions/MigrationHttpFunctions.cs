@@ -509,12 +509,8 @@ public class MigrationHttpFunctions
             migrationEntry.UpdatedAt = DateTime.UtcNow;
             await _migrationStorageService.UpdateMigrationAsync(migrationEntry);
 
-            // Create cancellation token for tracking
-            await _migrationStorageService.CreateCancellationTokenAsync(migrationId, "User requested cancellation");
-
-            // Send cancellation message to queue for processing
-            await _queueService.SendCancellationMessageAsync(migrationId, "User requested cancellation");
-            _logger.LogInformation("Migration cancellation message sent to queue. MigrationId: {MigrationId}", migrationId);
+            // TODO: Implement native Durable Functions cancellation in Phase 1
+            _logger.LogInformation("Migration status updated to cancelled. MigrationId: {MigrationId}", migrationId);
             
             var response = req.CreateResponse(HttpStatusCode.OK);
             response.Headers.Add("Content-Type", "application/json; charset=utf-8");

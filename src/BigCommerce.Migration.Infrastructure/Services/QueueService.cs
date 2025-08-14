@@ -22,7 +22,6 @@ public class QueueService : IQueueService
     private const string MigrationStartQueueName = "migration-start";
     private const string EntityBatchQueueName = "entity-batch";
     private const string BatchCompletionQueueName = "batch-completion";
-    private const string CancellationQueueName = "migration-cancellation";
     private const string DeadLetterQueueName = "dead-letter";
 
     /// <summary>
@@ -851,19 +850,7 @@ public class QueueService : IQueueService
         _logger.LogInformation("Migration start message sent to queue for MigrationId: {MigrationId}", migrationId);
     }
 
-    /// <summary>
-    /// Sends a cancellation message directly to the cancellation queue
-    /// </summary>
-    /// <param name="migrationId">Migration ID</param>
-    /// <param name="reason">Cancellation reason</param>
-    /// <returns>Task representing the send operation</returns>
-    public async Task SendCancellationMessageAsync(string migrationId, string reason)
-    {
-        var queueMessage = CreateCancellationMessage(migrationId, reason);
-        await SendMessageAsync(CancellationQueueName, queueMessage);
-        
-        _logger.LogInformation("Cancellation message sent to queue for MigrationId: {MigrationId}", migrationId);
-    }
+
 
     #endregion
 

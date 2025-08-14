@@ -28,7 +28,6 @@ services:
       - MigrationStartQueueName=migration-start-prod
       - EntityBatchQueueName=entity-batch-prod
       - BatchCompletionQueueName=batch-completion-prod
-      - CancellationQueueName=cancellation-prod
       - ProgressUpdateQueueName=progress-update-prod
       - DeadLetterQueueName=dead-letter-prod
       - RetryQueueName=retry-prod

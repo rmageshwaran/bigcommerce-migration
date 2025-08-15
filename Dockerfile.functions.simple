@@ -10,7 +10,7 @@ ENV DOTNET_CLI_TELEMETRY_OPTOUT=true
 # Copy core project files only (exclude CodeAnalysis)
 COPY src/BigCommerce.Migration.Core/BigCommerce.Migration.Core.csproj src/BigCommerce.Migration.Core/
 COPY src/BigCommerce.Migration.Infrastructure/BigCommerce.Migration.Infrastructure.csproj src/BigCommerce.Migration.Infrastructure/
-COPY src/BigCommerce.Migration.Orchestration/BigCommerce.Migration.Orchestration.csproj src/BigCommerce.Migration.Orchestration/
+COPY src/BigCommerce.Migration.Activities/BigCommerce.Migration.Activities.csproj src/BigCommerce.Migration.Activities/
 
 # Create a temporary Functions project without analyzer reference
 COPY src/BigCommerce.Migration.Functions/BigCommerce.Migration.Functions.csproj src/BigCommerce.Migration.Functions/BigCommerce.Migration.Functions.csproj.original
@@ -26,7 +26,7 @@ RUN dotnet restore src/BigCommerce.Migration.Functions/BigCommerce.Migration.Fun
 # Copy source code (exclude CodeAnalysis)
 COPY src/BigCommerce.Migration.Core/ src/BigCommerce.Migration.Core/
 COPY src/BigCommerce.Migration.Infrastructure/ src/BigCommerce.Migration.Infrastructure/
-COPY src/BigCommerce.Migration.Orchestration/ src/BigCommerce.Migration.Orchestration/
+COPY src/BigCommerce.Migration.Activities/ src/BigCommerce.Migration.Activities/
 COPY src/BigCommerce.Migration.Functions/ src/BigCommerce.Migration.Functions/
 
 # Build and publish

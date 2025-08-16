@@ -121,6 +121,11 @@ public class PrimaryEntityProgress
     public int FailureCount { get; set; }
 
     /// <summary>
+    /// Skipped entities (duplicates, etc.)
+    /// </summary>
+    public int SkippedCount { get; set; }
+
+    /// <summary>
     /// Processing status
     /// </summary>
     public string Status { get; set; } = "pending"; // pending, processing, completed
@@ -175,6 +180,11 @@ public class ComprehensiveEntityProgress
     /// Failed sub-entities
     /// </summary>
     public int FailureCount { get; set; }
+
+    /// <summary>
+    /// Skipped sub-entities
+    /// </summary>
+    public int SkippedCount { get; set; }
 
     /// <summary>
     /// Processing status

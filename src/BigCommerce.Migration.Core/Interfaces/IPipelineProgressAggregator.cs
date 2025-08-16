@@ -99,6 +99,11 @@ public class SubEntityProgressUpdate
     public int FailureCount { get; set; }
 
     /// <summary>
+    /// Number of skipped entities in this update
+    /// </summary>
+    public int SkippedCount { get; set; }
+
+    /// <summary>
     /// Processing time for this update
     /// </summary>
     public TimeSpan ProcessingTime { get; set; }

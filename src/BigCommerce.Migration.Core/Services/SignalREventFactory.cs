@@ -163,6 +163,7 @@ namespace BigCommerce.Migration.Core.Services
                 BatchSize = options.BatchSize,
                 ProcessedCount = options.ProcessedCount,
                 FailedCount = options.FailedCount,
+                SkippedCount = options.SkippedCount,  // 🚨 FIX: Include SkippedCount
                 Status = options.Status ?? "processing",
                 ProcessingTime = options.ProcessingTime
             };
@@ -194,8 +195,12 @@ namespace BigCommerce.Migration.Core.Services
                 Status = options.Status ?? "processing",
                 ProcessedCount = options.ProcessedCount,
                 TotalCount = options.TotalCount,
-                SuccessCount = options.ProcessedCount, // Map ProcessedCount to SuccessCount
-                FailureCount = options.TotalCount - options.ProcessedCount, // Calculate failures
+                // 🚨 FIX: Use actual success/failure/skipped counts from options, don't calculate incorrectly
+                // The old logic assumed ProcessedCount = SuccessCount and TotalCount - ProcessedCount = FailureCount
+                // But this is wrong when entities are processed but some fail or are skipped
+                SuccessCount = options.SuccessCount ?? 0,
+                FailureCount = options.FailureCount ?? 0,
+                SkippedCount = options.SkippedCount ?? 0,
                 ProcessingTime = options.ProcessingTime
             };
 

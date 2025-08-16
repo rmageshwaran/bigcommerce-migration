@@ -301,6 +301,7 @@ public class MigrationHttpFunctions
                     ProcessedEntities = migrationEntry.Entities?.Count() ?? 0,
                     SuccessfulEntities = migrationEntry.Entities?.Count() ?? 0, // Assume all succeeded for completed migrations
                     FailedEntities = 0, // Could be refined if we store failure counts
+                    SkippedEntities = 0, // 🚨 FIX: Include SkippedEntities in reconstructed progress
                     StartTime = migrationEntry.CreatedAt,
                     LastUpdated = migrationEntry.UpdatedAt,
                     ElapsedTime = migrationEntry.UpdatedAt - migrationEntry.CreatedAt,
@@ -318,6 +319,7 @@ public class MigrationHttpFunctions
                             ProcessedCount = 1,
                             SuccessCount = 1,
                             FailureCount = 0,
+                            SkippedCount = 0, // 🚨 FIX: Include SkippedCount in reconstructed entity progress
                             ProgressPercentage = 100,
                             Status = "completed",
                             StartTime = migrationEntry.CreatedAt,
@@ -371,6 +373,7 @@ public class MigrationHttpFunctions
                     completedEntities = detailedProgress?.SuccessfulEntities ?? 0,
                     totalEntities = detailedProgress?.TotalEntities ?? 0,
                     failedEntities = detailedProgress?.FailedEntities ?? 0,
+                    skippedEntities = detailedProgress?.SkippedEntities ?? 0,  // 🚨 FIX: Include skippedEntities
                     processedEntities = detailedProgress?.ProcessedEntities ?? 0,
                     estimatedTimeRemaining = detailedProgress?.EstimatedTimeRemaining.TotalMinutes > 0 
                         ? $"{Math.Ceiling(detailedProgress.EstimatedTimeRemaining.TotalMinutes)} minutes" 
@@ -385,6 +388,7 @@ public class MigrationHttpFunctions
                         processedCount = kvp.Value.ProcessedCount,
                         successCount = kvp.Value.SuccessCount,
                         failureCount = kvp.Value.FailureCount,
+                        skippedCount = kvp.Value.SkippedCount,  // 🚨 FIX: Include skippedCount
                         progressPercentage = kvp.Value.ProgressPercentage,
                         status = kvp.Value.Status,
                         startTime = kvp.Value.StartTime,
@@ -678,6 +682,7 @@ public class MigrationHttpFunctions
                 processedEntities = detailedProgress.ProcessedEntities,
                 successfulEntities = detailedProgress.SuccessfulEntities,
                 failedEntities = detailedProgress.FailedEntities,
+                skippedEntities = detailedProgress.SkippedEntities, // 🚨 FIX: Include SkippedEntities in latest migration response
                 message = "Latest migration retrieved successfully"
             };
 
@@ -770,6 +775,7 @@ public class MigrationHttpFunctions
                     processedEntities = detailedProgress.ProcessedEntities,
                     successfulEntities = detailedProgress.SuccessfulEntities,
                     failedEntities = detailedProgress.FailedEntities,
+                    skippedEntities = detailedProgress.SkippedEntities, // 🚨 FIX: Include SkippedEntities in migration history
                     percentageCompleted = detailedProgress.OverallProgressPercentage,
                     entities = migration.Entities
                 });
@@ -839,12 +845,22 @@ public class MigrationHttpFunctions
             // Get detailed progress
             var detailedProgress = await GetDetailedProgressAsync(migrationId);
             
+            // 🔍 DEBUG: Log detailed progress data
+            _logger.LogInformation("🔍 [ENTITY-BREAKDOWN-DEBUG] Migration {MigrationId}: DetailedProgress null? {IsNull}", 
+                migrationId, detailedProgress == null);
+            
             // Build entity breakdown
             var entityBreakdown = new List<object>();
-            if (detailedProgress.EntityProgress != null)
+            if (detailedProgress?.EntityProgress != null)
             {
+                _logger.LogInformation("🔍 [ENTITY-BREAKDOWN-DEBUG] Migration {MigrationId}: Found {EntityCount} entities in progress", 
+                    migrationId, detailedProgress.EntityProgress.Count);
+                    
                 foreach (var entityProgress in detailedProgress.EntityProgress)
                 {
+                    _logger.LogInformation("🔍 [ENTITY-BREAKDOWN-DEBUG] Migration {MigrationId}: Entity {EntityType} - Success: {Success}, Failed: {Failed}, Skipped: {Skipped}", 
+                        migrationId, entityProgress.Key, entityProgress.Value.SuccessCount, entityProgress.Value.FailureCount, entityProgress.Value.SkippedCount);
+                        
                     entityBreakdown.Add(new
                     {
                         entity = entityProgress.Key,
@@ -854,11 +870,15 @@ public class MigrationHttpFunctions
                         totalEntities = entityProgress.Value.TotalCount,
                         successfulEntities = entityProgress.Value.SuccessCount,
                         failedEntities = entityProgress.Value.FailureCount,
-                        skippedEntities = 0, // EntityProgress doesn't have SkippedEntities
+                        skippedEntities = entityProgress.Value.SkippedCount, // 🚨 FIX: Use actual SkippedCount from EntityProgress
                         percentageCompleted = entityProgress.Value.ProgressPercentage,
                         hasErrors = entityProgress.Value.FailureCount > 0
                     });
                 }
+            }
+            else
+            {
+                _logger.LogWarning("🔍 [ENTITY-BREAKDOWN-DEBUG] Migration {MigrationId}: EntityProgress is null or empty", migrationId);
             }
             
             var response = req.CreateResponse(HttpStatusCode.OK);
@@ -1823,8 +1843,8 @@ public class MigrationHttpFunctions
             // Try to get from progress tracker first
             var progress = await _progressTracker.GetProgressAsync(migrationId, CancellationToken.None);
             
-            // If progress tracker has meaningful data, use it
-            if (progress != null && progress.TotalEntities > 0)
+            // If progress tracker has meaningful data, use it (but skip for completed migrations to ensure fresh data from storage)
+            if (progress != null && progress.TotalEntities > 0 && progress.Status != "completed")
             {
                 return progress;
             }
@@ -1837,6 +1857,16 @@ public class MigrationHttpFunctions
                 var entityProgressEntries = await _migrationStorageService.GetEntityProgressAsync(migrationId);
                 var entityProgress = new Dictionary<string, EntityProgress>();
                 
+                // 🔍 DEBUG: Log entity progress entries from database
+                _logger.LogInformation("🔍 [GET-DETAILED-PROGRESS-DEBUG] Migration {MigrationId}: Found {EntryCount} entity progress entries from storage", 
+                    migrationId, entityProgressEntries.Count);
+                
+                foreach (var entry in entityProgressEntries)
+                {
+                    _logger.LogInformation("🔍 [GET-DETAILED-PROGRESS-DEBUG] Migration {MigrationId}: Entry {EntityType} - Success: {Success}, Failed: {Failed}, Skipped: {Skipped}", 
+                        migrationId, entry.EntityType, entry.SuccessCount, entry.FailureCount, entry.SkippedCount);
+                }
+                
                 foreach (var entry in entityProgressEntries)
                 {
                     entityProgress[entry.EntityType] = new EntityProgress
@@ -1846,6 +1876,7 @@ public class MigrationHttpFunctions
                         ProcessedCount = entry.ProcessedCount,
                         SuccessCount = entry.SuccessCount,
                         FailureCount = entry.FailureCount,
+                        SkippedCount = entry.SkippedCount, // 🚨 FIX: Include SkippedCount from storage
                         ProgressPercentage = entry.ProgressPercentage,
                         Status = entry.Status,
                         StartTime = entry.StartTime,
@@ -1863,8 +1894,9 @@ public class MigrationHttpFunctions
                     OverallProgressPercentage = migrationEntry.ProgressPercentage,
                     TotalEntities = migrationEntry.TotalEntities,
                     ProcessedEntities = migrationEntry.ProcessedEntities,
-                    SuccessfulEntities = migrationEntry.ProcessedEntities - migrationEntry.FailedEntities,
+                    SuccessfulEntities = migrationEntry.ProcessedEntities - migrationEntry.FailedEntities - migrationEntry.SkippedEntities,
                     FailedEntities = migrationEntry.FailedEntities,
+                    SkippedEntities = migrationEntry.SkippedEntities, // 🚨 FIX: Include SkippedEntities in migration summary
                     CurrentPhase = migrationEntry.CurrentPhase ?? "completed",
                     EntityProgress = entityProgress
                 };
@@ -1881,6 +1913,7 @@ public class MigrationHttpFunctions
                 ProcessedEntities = 0,
                 SuccessfulEntities = 0,
                 FailedEntities = 0,
+                SkippedEntities = 0, // 🚨 FIX: Include SkippedEntities in fallback
                 CurrentPhase = "unknown",
                 EntityProgress = new Dictionary<string, EntityProgress>()
             };
@@ -1899,6 +1932,7 @@ public class MigrationHttpFunctions
                 ProcessedEntities = 0,
                 SuccessfulEntities = 0,
                 FailedEntities = 0,
+                SkippedEntities = 0, // 🚨 FIX: Include SkippedEntities in fallback
                 CurrentPhase = "unknown",
                 EntityProgress = new Dictionary<string, EntityProgress>()
             };

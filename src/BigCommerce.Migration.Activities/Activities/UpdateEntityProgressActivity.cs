@@ -45,8 +45,8 @@ public class UpdateEntityProgressActivity
                 return;
             }
             
-            _logger.LogInformation("🔄 [UPDATE-PROGRESS] Starting progress update for {EntityType} in migration {MigrationId}: Phase={Phase}, Processed={ProcessedEntities}/{TotalEntities}, Success={SuccessfulEntities}, Failed={FailedEntities}", 
-                entityType, migrationId, progressUpdate.Phase, progressUpdate.ProcessedEntities, progressUpdate.TotalEntities, progressUpdate.SuccessfulEntities, progressUpdate.FailedEntities);
+            _logger.LogInformation("🔄 [UPDATE-PROGRESS] Starting progress update for {EntityType} in migration {MigrationId}: Phase={Phase}, Processed={ProcessedEntities}/{TotalEntities}, Success={SuccessfulEntities}, Failed={FailedEntities}, Skipped={SkippedEntities}", 
+                entityType, migrationId, progressUpdate.Phase, progressUpdate.ProcessedEntities, progressUpdate.TotalEntities, progressUpdate.SuccessfulEntities, progressUpdate.FailedEntities, progressUpdate.SkippedEntities);
 
             // Create progress update object
             var update = new ProgressUpdate
@@ -57,6 +57,7 @@ public class UpdateEntityProgressActivity
                 ProcessedCount = progressUpdate.ProcessedEntities,
                 SuccessCount = progressUpdate.SuccessfulEntities,
                 FailureCount = progressUpdate.FailedEntities,
+                SkippedCount = progressUpdate.SkippedEntities,
                 CurrentBatch = progressUpdate.CurrentBatch,
                 TotalBatches = progressUpdate.TotalBatches,
                 StatusMessage = $"Processing {entityType}: {progressUpdate.ProcessedEntities}/{progressUpdate.TotalEntities} entities",

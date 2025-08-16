@@ -58,6 +58,7 @@ interface MigrationHistoryItem {
   processedEntities: number;
   successfulEntities: number;
   failedEntities: number;
+  skippedEntities: number;
   percentageCompleted: number;
   entities: string[];
 }
@@ -477,6 +478,7 @@ export const HistoryView: React.FC = () => {
                     <TableCell sx={{ fontWeight: 600, py: 2 }}>Status</TableCell>
                     <TableCell sx={{ fontWeight: 600, py: 2 }}>Success</TableCell>
                     <TableCell sx={{ fontWeight: 600, py: 2 }}>Fail</TableCell>
+                    <TableCell sx={{ fontWeight: 600, py: 2 }}>Skipped</TableCell>
                     <TableCell sx={{ fontWeight: 600, py: 2 }}>Total</TableCell>
                     <TableCell sx={{ fontWeight: 600, py: 2 }}>Success Rate</TableCell>
                     <TableCell sx={{ fontWeight: 600, py: 2 }}>Progress</TableCell>
@@ -531,16 +533,19 @@ export const HistoryView: React.FC = () => {
                       <TableCell sx={{ fontSize: '0.875rem', color: 'error.main' }}>
                         {migration.failedEntities}
                       </TableCell>
+                      <TableCell sx={{ fontSize: '0.875rem', color: 'warning.main' }}>
+                        {migration.skippedEntities || 0}
+                      </TableCell>
                       <TableCell sx={{ fontSize: '0.875rem' }}>
                         {migration.totalEntities}
                       </TableCell>
                       <TableCell sx={{ 
                         fontSize: '0.875rem',
-                        color: migration.successfulEntities === migration.totalEntities ? 'success.main' : 
+                        color: (migration.successfulEntities + (migration.skippedEntities || 0)) === migration.totalEntities ? 'success.main' : 
                                migration.failedEntities === migration.totalEntities ? 'error.main' : 'warning.main',
                         fontWeight: 500,
                       }}>
-                        {formatSuccessRate(migration.successfulEntities, migration.totalEntities)}
+                        {formatSuccessRate(migration.successfulEntities + (migration.skippedEntities || 0), migration.totalEntities)}
                       </TableCell>
                       <TableCell sx={{ fontSize: '0.875rem' }}>
                         {migration.percentageCompleted.toFixed(1)}%

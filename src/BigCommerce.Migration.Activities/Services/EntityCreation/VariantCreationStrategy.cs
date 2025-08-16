@@ -93,11 +93,32 @@ public class VariantCreationStrategy : IEntityCreationStrategy
                     // 1. Transform all 50 variants (bulk ID mapping)
                     var transformedVariants = await TransformVariantsBulkAsync(batch50Variants, migrationId, ct);
                     
-                    // 2. Single batch API call (PUT /catalog/variants) 
+                    // 2. 🔧 FIX: Skip API call if all variants were skipped (empty array)
+                    if (!transformedVariants.Any())
+                    {
+                        _logger.LogInformation("🚫 [ALL-SKIPPED] All {Count} variants in batch were skipped as duplicates - no API call needed", 
+                            batch50Variants.Count);
+                        
+                        // Return success result representing the skipped variants
+                        var skippedResults = new List<Dictionary<string, object>>();
+                        for (int i = 0; i < batch50Variants.Count; i++)
+                        {
+                            skippedResults.Add(new Dictionary<string, object>
+                            {
+                                ["status"] = "skipped",
+                                ["reason"] = "duplicate_default_variant",
+                                ["source_index"] = i
+                            });
+                        }
+                        return skippedResults;
+                    }
+                    
+                    // 3. Single batch API call (PUT /catalog/variants) - only if we have variants to create
                     var url = $"{destinationStore.GetApiBaseUrl()}/catalog/variants";
                     requestPayload = JsonSerializer.Serialize(transformedVariants);
                     
-                    //_logger.LogDebug("🚀 Batch API Call: PUT {Url} with {Count} variants", url, transformedVariants.Count);
+                    _logger.LogInformation("🚀 Batch API Call: PUT {Url} with {Count} variants (out of {OriginalCount} after skipping duplicates)", 
+                        url, transformedVariants.Count, batch50Variants.Count);
                     
                     var response = await _apiRequestHandler.ExecuteRequestAsync<Dictionary<string, object>>(
                         ApiRequest.CreatePut(url, requestPayload, destinationStore), 
@@ -108,8 +129,26 @@ public class VariantCreationStrategy : IEntityCreationStrategy
                     
                     _logger.LogInformation("✅ Successfully created {Count} variants via batch API", createdVariants.Count);
                     
-                    // 3. ❌ NO MAPPING STORAGE - Variants are leaf entities with no dependents
-                    return createdVariants;
+                    // 🚨 STATUS FIX: Include skipped entities in the result for proper counting
+                    var allResults = new List<Dictionary<string, object>>(createdVariants);
+                    
+                    // Add skipped entities (those that were filtered out during transformation)
+                    var skippedCount = batch50Variants.Count - transformedVariants.Count;
+                    for (int i = 0; i < skippedCount; i++)
+                    {
+                        allResults.Add(new Dictionary<string, object>
+                        {
+                            ["status"] = "skipped",
+                            ["reason"] = "duplicate_default_variant",
+                            ["source_index"] = transformedVariants.Count + i
+                        });
+                    }
+                    
+                    _logger.LogInformation("📊 [SKIPPED-FIX] Returning {TotalCount} results: {CreatedCount} created + {SkippedCount} skipped", 
+                        allResults.Count, createdVariants.Count, skippedCount);
+                    
+                    // 4. ❌ NO MAPPING STORAGE - Variants are leaf entities with no dependents
+                    return allResults;
                 }
                 catch (Exception ex)
                 {
@@ -166,6 +205,10 @@ public class VariantCreationStrategy : IEntityCreationStrategy
         CancellationToken cancellationToken)
     {
         var transformedVariants = new List<Dictionary<string, object>>();
+        
+        // 🔍 DEBUG: Transformation input
+        _logger.LogInformation("🔍 [VARIANT-TRANSFORM-DEBUG] Starting transformation of {InputCount} variants for migration {MigrationId}", 
+            variants.Count, migrationId);
 
         foreach (var variant in variants)
         {
@@ -181,19 +224,25 @@ public class VariantCreationStrategy : IEntityCreationStrategy
                     transformedVariant["product_id"] = int.Parse(destinationProductId);
                     //_logger.LogDebug("🔗 Mapped product_id: {SourceId} → {DestinationId}", sourceProductId, destinationProductId);
                     
-                    // 🚫 DUPLICATE PREVENTION: Skip variant if it matches the product's default SKU
-                    // When a product is created in Phase 1, BigCommerce automatically creates a default variant with the product's SKU
-                    if (variant.TryGetValue("sku", out var variantSku) && variantSku != null)
-                    {
-                        var mappingData = await GetProductMappingDataAsync(sourceProductId.ToString()!, migrationId);
-                        if (!string.IsNullOrEmpty(mappingData.ProductSku) && 
-                            string.Equals(variantSku.ToString(), mappingData.ProductSku, StringComparison.OrdinalIgnoreCase))
+                                            // 🚫 DUPLICATE PREVENTION: Skip variant if it matches the product's default SKU
+                        // When a product is created in Phase 1, BigCommerce automatically creates a default variant with the product's SKU
+                        if (variant.TryGetValue("sku", out var variantSku) && variantSku != null)
                         {
-                            _logger.LogInformation("🚫 [DUPLICATE-SKIP] Skipping variant with SKU '{VariantSku}' - matches product default SKU (already created in Phase 1)", 
-                                variantSku);
-                            continue; // Skip this variant - it's already created as the default variant
+                            var mappingData = await GetProductMappingDataAsync(sourceProductId.ToString()!, migrationId);
+                            
+                            // 🔍 DEBUG: Duplicate check details
+                            _logger.LogInformation("🔍 [DUPLICATE-CHECK-DEBUG] Variant SKU='{VariantSku}', Product SKU='{ProductSku}', Match={IsMatch}", 
+                                variantSku, mappingData.ProductSku ?? "null", 
+                                !string.IsNullOrEmpty(mappingData.ProductSku) && string.Equals(variantSku.ToString(), mappingData.ProductSku, StringComparison.OrdinalIgnoreCase));
+                            
+                            if (!string.IsNullOrEmpty(mappingData.ProductSku) && 
+                                string.Equals(variantSku.ToString(), mappingData.ProductSku, StringComparison.OrdinalIgnoreCase))
+                            {
+                                _logger.LogInformation("🚫 [DUPLICATE-SKIP] Skipping variant with SKU '{VariantSku}' - matches product default SKU (already created in Phase 1)", 
+                                    variantSku);
+                                continue; // Skip this variant - it's already created as the default variant
+                            }
                         }
-                    }
                 }
                 else
                 {
@@ -366,8 +415,9 @@ public class VariantCreationStrategy : IEntityCreationStrategy
             }
         }
 
-        //_logger.LogDebug("✅ Successfully transformed {TransformedCount}/{TotalCount} variants", 
-        //    transformedVariants.Count, variants.Count);
+        // 🔍 DEBUG: Transformation results
+        _logger.LogInformation("🔍 [VARIANT-TRANSFORM-DEBUG] Transformation completed: {InputCount} input → {OutputCount} transformed ({SkippedCount} skipped) for migration {MigrationId}", 
+            variants.Count, transformedVariants.Count, variants.Count - transformedVariants.Count, migrationId);
 
         return transformedVariants;
     }

@@ -14,6 +14,7 @@ export interface MigrationProgress {
   processedEntities: number;
   successfulEntities: number;
   failedEntities: number;
+  skippedEntities: number;
   overallProgressPercentage: number;
   entityProgress: Record<string, EntityProgress>;
   currentPhase: string;
@@ -28,6 +29,7 @@ export interface EntityProgress {
   processedCount: number;
   successCount: number;
   failureCount: number;
+  skippedCount: number;
   progressPercentage: number;
   status: string;
   startTime: Date;

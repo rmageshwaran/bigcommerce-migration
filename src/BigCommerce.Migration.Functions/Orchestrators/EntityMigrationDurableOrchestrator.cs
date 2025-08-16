@@ -148,6 +148,9 @@ public static class EntityMigrationDurableOrchestrator
             logger.LogInformation("Discovered {EntityCount} {EntityType} entities for MigrationId: {MigrationId}", 
                 discoverResult.TotalCount, entityType, migrationId);
 
+            // 🚨 FIX: Set TotalEntities from discovery result
+            result.TotalEntities = discoverResult.TotalCount;
+
             // Step 5: Start entity progress tracking
             await context.CallActivityAsync(
                 "StartEntityProcessingActivity",
@@ -418,13 +421,14 @@ public static class EntityMigrationDurableOrchestrator
                 parallelResult.TotalProcessed, discoverResult?.TotalCount ?? 0);
 
             // Update result with parallel processing results
-            // 🚨 FIX: Use actual cumulative processed count, not wrong TotalProcessed value
-            result.ProcessedEntities = parallelResult.SuccessfulEntities + parallelResult.FailedEntities;  // Actual processed count
+            // 🚨 STATUS FIX: Include SkippedEntities in ProcessedEntities calculation for proper status tracking
             result.SuccessfulEntities = parallelResult.SuccessfulEntities;
             result.FailedEntities = parallelResult.FailedEntities;
+            result.SkippedEntities = parallelResult.SkippedEntities;
+            result.ProcessedEntities = result.SuccessfulEntities + result.FailedEntities + result.SkippedEntities;  // Complete count for status calculation
             
-            logger.LogInformation("🚨 [DURABLE-ORCHESTRATOR-FIX] Fixed ProcessedEntities: TotalProcessed={TotalProcessed} (WRONG) -> ProcessedEntities={ProcessedEntities} (CORRECT) = Successful={Successful} + Failed={Failed}", 
-                parallelResult.TotalProcessed, result.ProcessedEntities, result.SuccessfulEntities, result.FailedEntities);
+            logger.LogInformation("🚨 [STATUS-FIX] Updated ProcessedEntities calculation: Successful={Successful} + Failed={Failed} + Skipped={Skipped} = ProcessedEntities={ProcessedEntities} out of TotalEntities={TotalEntities}", 
+                result.SuccessfulEntities, result.FailedEntities, result.SkippedEntities, result.ProcessedEntities, discoverResult?.TotalCount ?? 0);
 
             // Step 6: Complete entity processing
             await context.CallActivityAsync(
@@ -435,9 +439,12 @@ public static class EntityMigrationDurableOrchestrator
                     EntityType = entityType,
                     Phase = "Completed",
                     TotalEntities = discoverResult?.TotalCount ?? 0,
+                    // 🚨 STATUS FIX: ProcessedEntities now includes successful + failed + skipped for proper status calculation
+                    // This ensures ProcessedEntities matches TotalEntities when all entities are accounted for
                     ProcessedEntities = result.ProcessedEntities,
                     SuccessfulEntities = result.SuccessfulEntities,
                     FailedEntities = result.FailedEntities,
+                    SkippedEntities = result.SkippedEntities,
                     CurrentBatch = totalBatches,
                     TotalBatches = totalBatches,
                     Timestamp = context.CurrentUtcDateTime,

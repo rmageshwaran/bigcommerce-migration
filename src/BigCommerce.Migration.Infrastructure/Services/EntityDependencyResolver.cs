@@ -180,6 +180,55 @@ public class EntityDependencyResolver : IEntityDependencyResolver
                 RequiresPreviousPhaseCompletion = true
             },
             
+            // ✨ Individual component type configurations
+            ["options"] = new EntityPhaseConfiguration
+            {
+                PhaseType = "options",
+                PhaseName = "Product Options",
+                PhaseNumber = 2,
+                PageSize = 10, // Reduced due to comprehensive includes
+                Include = "options,modifiers,images,reviews", // Include all to get full product data
+                CreatesNewEntities = true,
+                TargetEntityTypes = new List<string> { "options" },
+                RequiresPreviousPhaseCompletion = true
+            },
+            
+            ["modifiers"] = new EntityPhaseConfiguration
+            {
+                PhaseType = "modifiers",
+                PhaseName = "Product Modifiers",
+                PhaseNumber = 2,
+                PageSize = 10,
+                Include = "options,modifiers,images,reviews",
+                CreatesNewEntities = true,
+                TargetEntityTypes = new List<string> { "modifiers" },
+                RequiresPreviousPhaseCompletion = true
+            },
+            
+            ["images"] = new EntityPhaseConfiguration
+            {
+                PhaseType = "images",
+                PhaseName = "Product Images",
+                PhaseNumber = 2,
+                PageSize = 10,
+                Include = "options,modifiers,images,reviews",
+                CreatesNewEntities = true,
+                TargetEntityTypes = new List<string> { "images" },
+                RequiresPreviousPhaseCompletion = true
+            },
+            
+            ["reviews"] = new EntityPhaseConfiguration
+            {
+                PhaseType = "reviews",
+                PhaseName = "Product Reviews",
+                PhaseNumber = 2,
+                PageSize = 10,
+                Include = "options,modifiers,images,reviews",
+                CreatesNewEntities = true,
+                TargetEntityTypes = new List<string> { "reviews" },
+                RequiresPreviousPhaseCompletion = true
+            },
+            
             ["product-related"] = new EntityPhaseConfiguration
             {
                 PhaseType = "product-related",

@@ -16,6 +16,8 @@ public class EntityDiscoveryStrategyFactory : IEntityDiscoveryStrategyFactory
     private readonly ILogger<V2DirectPaginationStrategy> _v2Logger;
     private readonly ILogger<V3EfficientPaginationStrategy> _v3EfficientLogger;
     private readonly ILogger<V3HierarchicalStrategy> _v3HierarchicalLogger;
+    private readonly ILogger<V3ProductComponentsDiscoveryStrategy> _v3ProductComponentsLogger;
+    private readonly ICancellationStore _cancellationStore;
 
     /// <summary>
     /// Initializes a new instance of EntityDiscoveryStrategyFactory
@@ -25,18 +27,24 @@ public class EntityDiscoveryStrategyFactory : IEntityDiscoveryStrategyFactory
     /// <param name="v2Logger">Logger for V2 strategy</param>
     /// <param name="v3EfficientLogger">Logger for V3 efficient strategy</param>
     /// <param name="v3HierarchicalLogger">Logger for V3 hierarchical strategy</param>
+    /// <param name="v3ProductComponentsLogger">Logger for V3 product components strategy</param>
+    /// <param name="cancellationStore">Cancellation store for blob-based cancellation</param>
     public EntityDiscoveryStrategyFactory(
         IBigCommerceApiClient apiClient,
         ILogger<EntityDiscoveryStrategyFactory> logger,
         ILogger<V2DirectPaginationStrategy> v2Logger,
         ILogger<V3EfficientPaginationStrategy> v3EfficientLogger,
-        ILogger<V3HierarchicalStrategy> v3HierarchicalLogger)
+        ILogger<V3HierarchicalStrategy> v3HierarchicalLogger,
+        ILogger<V3ProductComponentsDiscoveryStrategy> v3ProductComponentsLogger,
+        ICancellationStore cancellationStore)
     {
         _apiClient = apiClient ?? throw new ArgumentNullException(nameof(apiClient));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _v2Logger = v2Logger ?? throw new ArgumentNullException(nameof(v2Logger));
         _v3EfficientLogger = v3EfficientLogger ?? throw new ArgumentNullException(nameof(v3EfficientLogger));
         _v3HierarchicalLogger = v3HierarchicalLogger ?? throw new ArgumentNullException(nameof(v3HierarchicalLogger));
+        _v3ProductComponentsLogger = v3ProductComponentsLogger ?? throw new ArgumentNullException(nameof(v3ProductComponentsLogger));
+        _cancellationStore = cancellationStore ?? throw new ArgumentNullException(nameof(cancellationStore));
     }
 
     /// <summary>
@@ -95,6 +103,15 @@ public class EntityDiscoveryStrategyFactory : IEntityDiscoveryStrategyFactory
     private IEntityDiscoveryStrategy CreateV3Strategy(string entityType)
     {
         _logger.LogInformation("🏭 [STRATEGY-FACTORY-DEBUG] Selecting V3 strategy for EntityType: {EntityType}", entityType);
+        
+        // 🔧 SPECIAL CASE: product-components and individual component types are not real BigCommerce API endpoints
+        // They are logical entities that represent components within products (options, modifiers, images, reviews)
+        var componentTypes = new[] { "product-components", "options", "modifiers", "images", "reviews" };
+        if (componentTypes.Contains(entityType, StringComparer.OrdinalIgnoreCase))
+        {
+            _logger.LogInformation("🏭 [STRATEGY-FACTORY-DEBUG] ✅ Creating V3 product-components strategy for {EntityType} - will extract components from products", entityType);
+            return new V3ProductComponentsDiscoveryStrategy(_apiClient, _v3ProductComponentsLogger, _cancellationStore);
+        }
         
         // 🎯 EXPLICIT STRATEGY SELECTION: Ensure correct processing approach
         if (IsHierarchicalEntity(entityType))

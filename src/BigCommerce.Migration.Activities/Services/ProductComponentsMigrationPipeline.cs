@@ -56,6 +56,7 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
         string migrationId,
         StoreConfiguration sourceStore,
         StoreConfiguration destinationStore,
+        string requestedEntityType,
         CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
@@ -165,6 +166,36 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
             // Phase 3.2.4: Report final completion status
             var totalSuccessful = result.SubEntityStatistics.Values.Sum(s => s.SuccessfulCount);
             var totalProcessed = result.SubEntityStatistics.Values.Sum(s => s.TotalProcessed);
+            var totalFailed = result.SubEntityStatistics.Values.Sum(s => s.FailedCount);
+            
+            // 🚨 FIX: Return component-specific statistics based on requested entityType
+            // This ensures individual component types get correct counts in the dashboard
+            var entityTypeKey = requestedEntityType?.ToLowerInvariant() ?? "product-components";
+            
+            if (result.SubEntityStatistics.ContainsKey(entityTypeKey))
+            {
+                // Return statistics for the specific component type being processed
+                var componentStats = result.SubEntityStatistics[entityTypeKey];
+                result.SuccessfulEntities = componentStats.SuccessfulCount;
+                result.FailedEntities = componentStats.FailedCount;
+                result.TotalProcessed = componentStats.TotalProcessed;
+                
+                _logger.LogInformation("🔧 [COMPONENT-SPECIFIC-RESULT] Returning {EntityType}-specific statistics: " +
+                                     "TotalProcessed={TotalProcessed}, Successful={Successful}, Failed={Failed}",
+                    entityTypeKey, componentStats.TotalProcessed, componentStats.SuccessfulCount, componentStats.FailedCount);
+            }
+            else
+            {
+                // Fallback to aggregated statistics for 'product-components' or unknown types
+                result.SuccessfulEntities = totalSuccessful;
+                result.FailedEntities = totalFailed;
+                result.TotalProcessed = totalProcessed;
+                
+                _logger.LogInformation("🔧 [AGGREGATED-RESULT] Returning aggregated component statistics for '{EntityType}': " +
+                                     "TotalProcessed={TotalProcessed}, Successful={Successful}, Failed={Failed}",
+                    entityTypeKey, totalProcessed, totalSuccessful, totalFailed);
+            }
+            
             await PublishPipelineProgressAsync(migrationId, "completed", 
                 $"Successfully processed {totalSuccessful}/{totalProcessed} components", 100);
 

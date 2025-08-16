@@ -390,17 +390,35 @@ public class EntityFetchService : IEntityFetchService
                 paginationRequest.CategoryTreeId = request.CategoryTreeContext.SourceCategoryTreeId;
             }
             
-            // ✅ ENHANCED PRODUCTS: Add include parameter from configuration for additional entity data
-            if (!string.IsNullOrEmpty(config.Include))
+            // ✅ COMPONENT HANDLING: Individual component types fetch products with includes
+            string actualEntityType = request.EntityType;
+            var componentTypes = new[] { "images", "options", "modifiers", "reviews" };
+            if (componentTypes.Contains(request.EntityType.ToLowerInvariant()))
             {
-                paginationRequest.Include = config.Include;
-                _logger.LogDebug("🔗 [ENHANCED-FETCH] Using include parameter from config for {EntityType}: {Include}", 
-                    request.EntityType, config.Include);
+                _logger.LogInformation("🔗 [COMPONENT-FETCH] Individual component '{ComponentType}' - fetching products with includes", 
+                    request.EntityType);
+                
+                actualEntityType = "products"; // Fetch products instead of the component type
+                paginationRequest.Include = "options,modifiers,images,reviews"; // Include all components
+                paginationRequest.Limit = 10; // BigCommerce limitation with includes
+                
+                _logger.LogDebug("🔗 [COMPONENT-FETCH] Modified fetch: EntityType=products, Include={Include}, Limit={Limit}", 
+                    paginationRequest.Include, paginationRequest.Limit);
+            }
+            else
+            {
+                // ✅ ENHANCED PRODUCTS: Add include parameter from configuration for additional entity data
+                if (!string.IsNullOrEmpty(config.Include))
+                {
+                    paginationRequest.Include = config.Include;
+                    _logger.LogDebug("🔗 [ENHANCED-FETCH] Using include parameter from config for {EntityType}: {Include}", 
+                        request.EntityType, config.Include);
+                }
             }
 
             var response = await _apiClient.GetPaginatedEntitiesAsync(
                 request.SourceStore,
-                request.EntityType,
+                actualEntityType,
                 paginationRequest,
                 cancellationToken);
 

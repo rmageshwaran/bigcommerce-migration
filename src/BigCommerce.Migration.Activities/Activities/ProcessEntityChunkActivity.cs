@@ -169,6 +169,7 @@ public class ProcessEntityChunkActivity
                     ProcessedCount = result.TotalProcessed,
                     SuccessCount = result.SuccessfulEntities,
                     FailureCount = result.FailedEntities,
+                    SkippedCount = result.SkippedEntities,  // 🚨 FIX: Include SkippedCount
                     Status = result.SuccessfulEntities == result.TotalProcessed ? "completed" : "processing",
                     ThroughputPerSecond = result.TotalProcessed / Math.Max(result.ProcessingTime.TotalSeconds, 1),
                     ProcessingTime = result.ProcessingTime
@@ -305,8 +306,14 @@ public class ProcessEntityChunkActivity
                     batchRequest.EntityType,
                     batchRequest.MigrationId);
 
-                _logger.LogInformation("✅ [CHUNK-{ChunkNumber}] Sub-batch transformation completed: {TransformedCount}/{TotalCount} {EntityType} entities transformed successfully",
-                    chunkNumber, transformedEntities.Count, entities.Count, batchRequest.EntityType);
+                            // 🔍 DEBUG: Transformation phase results
+            var transformationSkippedCount = entities.Count - transformedEntities.Count - result.FailedEntities;
+            
+            _logger.LogInformation("🔍 [TRANSFORM-DEBUG] CHUNK-{ChunkNumber} {EntityType}: InputEntities={InputCount}, TransformedEntities={TransformedCount}, TransformationFailures={TransformFailures}, TransformationSkips={TransformSkips}",
+                chunkNumber, batchRequest.EntityType, entities.Count, transformedEntities.Count, result.FailedEntities, transformationSkippedCount);
+            
+            _logger.LogInformation("✅ [CHUNK-{ChunkNumber}] Sub-batch transformation completed: {TransformedCount} transformed + {SkippedCount} skipped = {SuccessfulCount}/{TotalCount} {EntityType} entities processed successfully, {FailedCount} failed",
+                chunkNumber, transformedEntities.Count, transformationSkippedCount, transformedEntities.Count + transformationSkippedCount, entities.Count, batchRequest.EntityType, result.FailedEntities);
             }
             catch (Exception ex)
             {
@@ -332,13 +339,44 @@ public class ProcessEntityChunkActivity
 
                 if (createdEntities != null && createdEntities.Any())
                 {
-                    result.SuccessfulEntities = createdEntities.Count;
+                    // 🚨 FIX: Count both created and skipped entities as successes
+                    var actuallyCreated = createdEntities.Count(e => 
+                        !e.ContainsKey("status") || !e["status"].ToString().Equals("skipped"));
+                    var skippedEntities = createdEntities.Count(e => 
+                        e.ContainsKey("status") && e["status"].ToString().Equals("skipped"));
                     
-                    _logger.LogInformation("✅ [CHUNK-{ChunkNumber}] Bulk entity creation completed: {CreatedCount}/{TransformedCount} {EntityType} entities created successfully",
-                        chunkNumber, createdEntities.Count, transformedEntities.Count, batchRequest.EntityType);
+                    // 🔍 DEBUG: Creation phase results
+                    _logger.LogInformation("🔍 [CREATION-DEBUG] CHUNK-{ChunkNumber} {EntityType}: CreatedEntities={CreatedCount}, ActuallyCreated={ActualCreated}, CreationSkipped={CreationSkipped}",
+                        chunkNumber, batchRequest.EntityType, createdEntities.Count, actuallyCreated, skippedEntities);
                     
-                    // Store mappings for successfully created entities
-                    await StoreMappingsForCreatedEntities(entities, createdEntities, batchRequest, chunkNumber);
+                    // ✅ SIMPLE CORRECT LOGIC: 
+                    // Transformation skips = input entities that didn't get transformed (and weren't failures)
+                    var transformationFailures = result.FailedEntities; // Failures accumulated from transformation phase
+                    var transformationSkippedCount = entities.Count - transformedEntities.Count - transformationFailures;
+                    
+                    // 🔍 DEBUG: Final calculation values
+                    _logger.LogInformation("🔍 [FINAL-CALC-DEBUG] CHUNK-{ChunkNumber} {EntityType}: InputCount={Input}, TransformedCount={Transformed}, CreatedCount={Created}, TransformFailures={TFailures}, TransformSkips={TSkips}",
+                        chunkNumber, batchRequest.EntityType, entities.Count, transformedEntities.Count, createdEntities.Count, transformationFailures, transformationSkippedCount);
+                    
+                    // 🚨 STATUS FIX: Track skipped entities separately from successful entities
+                    result.SuccessfulEntities = actuallyCreated; // Only entities that were actually created (not skipped)
+                    result.FailedEntities = transformationFailures; // Only actual failures
+                    result.SkippedEntities = skippedEntities + Math.Max(0, transformationSkippedCount); // Creation skips + transformation skips
+                    
+                    // 🔍 DEBUG: Final result values with skipped entities tracked separately
+                    _logger.LogInformation("🔍 [RESULT-DEBUG] CHUNK-{ChunkNumber} {EntityType}: FinalSuccessful={Successful}, FinalFailed={Failed}, FinalSkipped={Skipped}, FinalTotal={Total}",
+                        chunkNumber, batchRequest.EntityType, result.SuccessfulEntities, result.FailedEntities, result.SkippedEntities, result.TotalProcessed);
+                    
+                    _logger.LogInformation("✅ [CHUNK-{ChunkNumber}] Entity processing completed: {CreatedCount} API-created + {CreationSkippedCount} creation-skipped + {TransformSkippedCount} transform-skipped = {SuccessCount} successful, {FailedCount} failed, {SkippedCount} skipped out of {InputCount} {EntityType} input entities",
+                        chunkNumber, actuallyCreated, skippedEntities, transformationSkippedCount, result.SuccessfulEntities, result.FailedEntities, result.SkippedEntities, entities.Count, batchRequest.EntityType);
+                    
+                    // Store mappings only for actually created entities (not skipped)
+                    var createdOnlyEntities = createdEntities.Where(e => 
+                        !e.ContainsKey("status") || !e["status"].ToString().Equals("skipped")).ToList();
+                    if (createdOnlyEntities.Any())
+                    {
+                        await StoreMappingsForCreatedEntities(entities, createdOnlyEntities, batchRequest, chunkNumber);
+                    }
                 }
                 else
                 {
@@ -354,8 +392,9 @@ public class ProcessEntityChunkActivity
                     chunkNumber, batchRequest.EntityType);
             }
 
-            // Update failed entities count (successful + failed should equal total)
-            result.FailedEntities = result.TotalProcessed - result.SuccessfulEntities;
+            // ✅ SIMPLE FIX: Don't override failed count - it's already correct from entity creation
+            // If skipped entities are counted as successful, then failed count should remain 0
+            // result.FailedEntities is already correctly set by the entity creation logic above
 
             return result;
         }
@@ -607,15 +646,20 @@ public class ProcessEntityChunkActivity
             switch (entityType)
             {
                 case "product-components":
-                    // Special pipeline for product components (options, modifiers, images, reviews)
-                    _logger.LogInformation("🔗 [CHUNK-{ChunkNumber}] Routing to ProductComponentsMigrationPipeline for comprehensive component processing", 
-                        chunkNumber);
+                case "images":
+                case "options":
+                case "modifiers":
+                case "reviews":
+                    // Special pipeline for product components (includes individual component types)
+                    _logger.LogInformation("🔗 [CHUNK-{ChunkNumber}] Routing {EntityType} to ProductComponentsMigrationPipeline for component extraction and processing", 
+                        chunkNumber, batchRequest.EntityType);
                     
                     return await _productComponentsPipeline.ProcessProductComponentsAsync(
                         entities,
                         batchRequest.MigrationId,
                         batchRequest.SourceStore,
                         batchRequest.DestinationStore,
+                        batchRequest.EntityType,
                         CancellationToken.None);
 
                 case "products":

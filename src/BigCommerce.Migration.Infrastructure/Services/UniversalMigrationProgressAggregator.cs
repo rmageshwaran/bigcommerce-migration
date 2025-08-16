@@ -86,6 +86,7 @@ public class UniversalMigrationProgressAggregator : IUniversalMigrationProgressA
                 ProcessedEntities = progress.ProcessedCount,
                 SuccessfulEntities = progress.SuccessCount,
                 FailedEntities = progress.FailureCount,
+                SkippedEntities = progress.SkippedCount,  // 🚨 FIX: Include SkippedEntities
                 Status = progress.Status,
                 StartTime = DateTime.UtcNow.Subtract(progress.ProcessingTime ?? TimeSpan.Zero),
                 CompletionTime = progress.Status == "completed" ? DateTime.UtcNow : null
@@ -99,6 +100,7 @@ public class UniversalMigrationProgressAggregator : IUniversalMigrationProgressA
                 existing.ProcessedEntities = entityProgress.ProcessedEntities;
                 existing.SuccessfulEntities = entityProgress.SuccessfulEntities;
                 existing.FailedEntities = entityProgress.FailedEntities;
+                existing.SkippedEntities = entityProgress.SkippedEntities;  // 🚨 FIX: Include SkippedEntities
                 existing.Status = entityProgress.Status;
                 existing.CompletionTime = entityProgress.CompletionTime;
                 return existing;

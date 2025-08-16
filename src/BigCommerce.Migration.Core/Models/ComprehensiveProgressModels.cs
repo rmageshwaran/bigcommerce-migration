@@ -334,6 +334,12 @@ public class EntityTypeProgress
     public int FailedEntities { get; set; }
 
     /// <summary>
+    /// Number of skipped entity migrations
+    /// </summary>
+    [JsonPropertyName("skippedEntities")]
+    public int SkippedEntities { get; set; }
+
+    /// <summary>
     /// Current processing status
     /// </summary>
     [JsonPropertyName("status")]

@@ -889,6 +889,7 @@ public class MigrationStorageService : IMigrationStorageService
                         ["ProcessedCount"] = progressEntry.ProcessedCount,
                         ["SuccessCount"] = progressEntry.SuccessCount,
                         ["FailureCount"] = progressEntry.FailureCount,
+                        ["SkippedCount"] = progressEntry.SkippedCount,
                         ["ProgressPercentage"] = progressEntry.ProgressPercentage,
                         ["Status"] = progressEntry.Status,
                         ["StartTime"] = progressEntry.StartTime,
@@ -912,6 +913,7 @@ public class MigrationStorageService : IMigrationStorageService
                         ["ProcessedCount"] = progressEntry.ProcessedCount,
                         ["SuccessCount"] = progressEntry.SuccessCount,
                         ["FailureCount"] = progressEntry.FailureCount,
+                        ["SkippedCount"] = progressEntry.SkippedCount,
                         ["ProgressPercentage"] = progressEntry.ProgressPercentage,
                         ["Status"] = progressEntry.Status,
                         ["StartTime"] = progressEntry.StartTime,
@@ -1001,6 +1003,7 @@ public class MigrationStorageService : IMigrationStorageService
                     ProcessedCount = entity.GetInt32("ProcessedCount") ?? 0,
                     SuccessCount = entity.GetInt32("SuccessCount") ?? 0,
                     FailureCount = entity.GetInt32("FailureCount") ?? 0,
+                    SkippedCount = entity.GetInt32("SkippedCount") ?? 0,
                     ProgressPercentage = entity.GetDouble("ProgressPercentage") ?? 0.0,
                     Status = entity.GetString("Status") ?? string.Empty,
                     StartTime = entity.GetDateTime("StartTime") ?? DateTime.UtcNow,
@@ -1150,7 +1153,8 @@ public class MigrationStorageService : IMigrationStorageService
             ["ErrorMessage"] = migration.ErrorMessage,
             ["TotalEntities"] = migration.TotalEntities,
             ["ProcessedEntities"] = migration.ProcessedEntities,
-            ["FailedEntities"] = migration.FailedEntities
+            ["FailedEntities"] = migration.FailedEntities,
+            ["SkippedEntities"] = migration.SkippedEntities  // 🚨 FIX: Include SkippedEntities in table storage
         };
     }
 
@@ -1177,7 +1181,8 @@ public class MigrationStorageService : IMigrationStorageService
             ErrorMessage = entity.GetString("ErrorMessage"),
             TotalEntities = entity.GetInt32("TotalEntities") ?? 0,
             ProcessedEntities = entity.GetInt32("ProcessedEntities") ?? 0,
-            FailedEntities = entity.GetInt32("FailedEntities") ?? 0
+            FailedEntities = entity.GetInt32("FailedEntities") ?? 0,
+            SkippedEntities = entity.GetInt32("SkippedEntities") ?? 0  // 🚨 FIX: Include SkippedEntities from table storage
         };
     }
 

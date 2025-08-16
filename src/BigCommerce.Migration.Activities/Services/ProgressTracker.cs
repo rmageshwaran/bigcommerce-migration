@@ -124,8 +124,9 @@ public class ProgressTracker : IProgressTracker
                             progress.OverallProgressPercentage = migrationEntry.ProgressPercentage;
                             progress.TotalEntities = migrationEntry.TotalEntities;
                             progress.ProcessedEntities = migrationEntry.ProcessedEntities;
-                            progress.SuccessfulEntities = migrationEntry.ProcessedEntities - migrationEntry.FailedEntities;
+                            progress.SuccessfulEntities = migrationEntry.ProcessedEntities - migrationEntry.FailedEntities - migrationEntry.SkippedEntities;  // 🚨 FIX: Subtract SkippedEntities
                             progress.FailedEntities = migrationEntry.FailedEntities;
+                            progress.SkippedEntities = migrationEntry.SkippedEntities;  // 🚨 FIX: Include SkippedEntities
                             progress.CurrentPhase = migrationEntry.CurrentPhase ?? "completed";
                             
                             // Reconstruct entity progress
@@ -139,6 +140,7 @@ public class ProgressTracker : IProgressTracker
                                     ProcessedCount = entry.ProcessedCount,
                                     SuccessCount = entry.SuccessCount,
                                     FailureCount = entry.FailureCount,
+                                    SkippedCount = entry.SkippedCount,  // 🚨 FIX: Include SkippedCount
                                     ProgressPercentage = entry.ProgressPercentage,
                                     Status = entry.Status,
                                     StartTime = entry.StartTime,
@@ -213,6 +215,7 @@ public class ProgressTracker : IProgressTracker
                         ProcessedCount = 0,
                         SuccessCount = 0,
                         FailureCount = 0,
+                        SkippedCount = 0,  // 🚨 FIX: Initialize SkippedCount
                         ProgressPercentage = 0.0,
                         Status = "processing",
                         StartTime = DateTime.UtcNow
@@ -234,64 +237,7 @@ public class ProgressTracker : IProgressTracker
         }
     }
     
-    /// <inheritdoc />
-    public async Task RecordBatchCompletionAsync(string migrationId, string entityType, int batchNumber, 
-        int processedCount, int successCount, int failureCount, CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        
-        if (string.IsNullOrEmpty(migrationId))
-            throw new ArgumentException("Migration ID cannot be null or empty", nameof(migrationId));
-        
-        if (string.IsNullOrEmpty(entityType))
-            throw new ArgumentException("Entity type cannot be null or empty", nameof(entityType));
-        
-        if (successCount + failureCount > processedCount)
-            throw new ArgumentException("Success count plus failure count cannot exceed processed count");
-        
-        _logger.LogDebug("Recording batch completion for migration {MigrationId}, {EntityType} batch {BatchNumber}: " +
-            "processed {ProcessedCount}, success {SuccessCount}, failures {FailureCount}", 
-            migrationId, entityType, batchNumber, processedCount, successCount, failureCount);
-        
-        try
-        {
-            var progress = GetOrCreateProgress(migrationId);
-            lock (_lock)
-            {
-                if (progress.EntityProgress.ContainsKey(entityType))
-                {
-                    var entityProgress = progress.EntityProgress[entityType];
-                    entityProgress.ProcessedCount += processedCount;
-                    entityProgress.SuccessCount += successCount;
-                    entityProgress.FailureCount += failureCount;
-                    
-                    // Update entity progress percentage
-                    if (entityProgress.TotalCount > 0)
-                    {
-                        entityProgress.ProgressPercentage = (double)entityProgress.ProcessedCount / entityProgress.TotalCount * 100.0;
-                    }
-                    
-                    entityProgress.ProcessingTime = DateTime.UtcNow - entityProgress.StartTime;
-                }
-                
-                // Update overall progress
-                progress.ProcessedEntities += processedCount;
-                progress.SuccessfulEntities += successCount;
-                progress.FailedEntities += failureCount;
-                
-                // 🎯 ESTIMATED TIME FIX: CalculateOverallProgress now automatically calculates processing speed before time estimation
-                CalculateOverallProgress(progress);
-            }
-            
-            // Publish batch completion event to queue for SignalR broadcasting
-            await PublishBatchProgressEventAsync(migrationId, entityType, batchNumber, processedCount, successCount, failureCount, cancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            _logger.LogInformation("RecordBatchCompletionAsync was cancelled for migration {MigrationId}", migrationId);
-            throw;
-        }
-    }
+
     
     /// <inheritdoc />
     public async Task CompleteEntityProcessingAsync(string migrationId, string entityType, CancellationToken cancellationToken = default)
@@ -333,6 +279,8 @@ public class ProgressTracker : IProgressTracker
             
             // Publish entity completion event to queue for SignalR broadcasting
             await PublishEntityProgressEventAsync(migrationId, entityType, progress, cancellationToken);
+            
+            // NOTE: Database persistence is handled by UpdateProgressAsync flow, not needed here
         }
         catch (OperationCanceledException)
         {
@@ -341,32 +289,7 @@ public class ProgressTracker : IProgressTracker
         }
     }
     
-    /// <inheritdoc />
-    public async Task NotifyProgressUpdateAsync(string migrationId, MigrationProgress progress, CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        
-        if (string.IsNullOrEmpty(migrationId))
-            throw new ArgumentException("Migration ID cannot be null or empty", nameof(migrationId));
-        
-        if (progress == null)
-            throw new ArgumentNullException(nameof(progress));
-        
-        try
-        {
-            // Publish progress notification event to queue for SignalR broadcasting
-            await PublishMigrationProgressEventAsync(migrationId, progress, cancellationToken);
-            
-            _logger.LogInformation("Progress notification for {MigrationId}: {OverallProgress}% complete, " +
-                "{ProcessedEntities}/{TotalEntities} entities processed", 
-                migrationId, progress.OverallProgressPercentage, progress.ProcessedEntities, progress.TotalEntities);
-        }
-        catch (OperationCanceledException)
-        {
-            _logger.LogInformation("NotifyProgressUpdateAsync was cancelled for migration {MigrationId}", migrationId);
-            throw;
-        }
-    }
+
     
     /// <summary>
     /// Gets or creates a progress object for the specified migration
@@ -420,11 +343,23 @@ public class ProgressTracker : IProgressTracker
             entityProgress.ProcessedCount = update.ProcessedCount;
             entityProgress.SuccessCount = update.SuccessCount;
             entityProgress.FailureCount = update.FailureCount;
+            entityProgress.SkippedCount = update.SkippedCount;
             
-            // Calculate entity progress percentage
+            // 🚨 STATUS FIX: Calculate entity progress percentage using total processed (including skipped)
+            // This ensures proper completion when ProcessedCount = SuccessCount + FailureCount + SkippedCount
             if (entityProgress.TotalCount > 0)
             {
                 entityProgress.ProgressPercentage = (double)entityProgress.ProcessedCount / entityProgress.TotalCount * 100.0;
+            }
+            
+            // 🚨 STATUS FIX: Update entity status based on whether all entities are accounted for
+            if (entityProgress.ProcessedCount >= entityProgress.TotalCount)
+            {
+                entityProgress.Status = "completed";
+            }
+            else if (entityProgress.ProcessedCount > 0)
+            {
+                entityProgress.Status = "processing";
             }
         }
     }
@@ -439,6 +374,7 @@ public class ProgressTracker : IProgressTracker
         progress.ProcessedEntities = progress.EntityProgress.Values.Sum(e => e.ProcessedCount);
         progress.SuccessfulEntities = progress.EntityProgress.Values.Sum(e => e.SuccessCount);
         progress.FailedEntities = progress.EntityProgress.Values.Sum(e => e.FailureCount);
+        progress.SkippedEntities = progress.EntityProgress.Values.Sum(e => e.SkippedCount);
         
         if (progress.TotalEntities > 0)
         {
@@ -508,6 +444,7 @@ public class ProgressTracker : IProgressTracker
             ProcessedEntities = original.ProcessedEntities,
             SuccessfulEntities = original.SuccessfulEntities,
             FailedEntities = original.FailedEntities,
+            SkippedEntities = original.SkippedEntities,  // 🚨 FIX: Include SkippedEntities
             OverallProgressPercentage = original.OverallProgressPercentage,
             EntityProgress = original.EntityProgress.ToDictionary(
                 kvp => kvp.Key,
@@ -518,6 +455,7 @@ public class ProgressTracker : IProgressTracker
                     ProcessedCount = kvp.Value.ProcessedCount,
                     SuccessCount = kvp.Value.SuccessCount,
                     FailureCount = kvp.Value.FailureCount,
+                    SkippedCount = kvp.Value.SkippedCount,  // 🚨 FIX: Include SkippedCount
                     ProgressPercentage = kvp.Value.ProgressPercentage,
                     Status = kvp.Value.Status,
                     StartTime = kvp.Value.StartTime,
@@ -551,6 +489,7 @@ public class ProgressTracker : IProgressTracker
                 migrationEntry.TotalEntities = progress.TotalEntities;
                 migrationEntry.ProcessedEntities = progress.ProcessedEntities;
                 migrationEntry.FailedEntities = progress.FailedEntities;
+                migrationEntry.SkippedEntities = progress.SkippedEntities; // 🚨 FIX: Include SkippedEntities in migration summary
                 migrationEntry.UpdatedAt = DateTime.UtcNow;
                 
                 // Update the migration in storage
@@ -571,6 +510,7 @@ public class ProgressTracker : IProgressTracker
                         ProcessedCount = entityProgress.Value.ProcessedCount,
                         SuccessCount = entityProgress.Value.SuccessCount,
                         FailureCount = entityProgress.Value.FailureCount,
+                        SkippedCount = entityProgress.Value.SkippedCount, // 🚨 FIX: Include SkippedCount in persistence
                         ProgressPercentage = entityProgress.Value.ProgressPercentage,
                         Status = entityProgress.Value.Status,
                         StartTime = entityProgress.Value.StartTime,
@@ -664,6 +604,10 @@ public class ProgressTracker : IProgressTracker
                 EntityType = entityType,
                 TotalCount = entityProgress?.TotalCount ?? 0,
                 ProcessedCount = entityProgress?.ProcessedCount ?? 0,
+                // 🚨 FIX: Pass actual success/failure/skipped counts from EntityProgress instead of letting factory calculate incorrectly
+                SuccessCount = entityProgress?.SuccessCount ?? 0,
+                FailureCount = entityProgress?.FailureCount ?? 0,
+                SkippedCount = entityProgress?.SkippedCount ?? 0,
                 Status = entityProgress?.Status ?? "starting",
                 ProcessingTime = entityProgress?.ProcessingTime,
                 // Phase 4.2: Include soft cancellation state in entity progress event
@@ -671,7 +615,7 @@ public class ProgressTracker : IProgressTracker
                 CancellationReason = progress.CancellationReason,
                 CancelledAt = progress.CancelledAt
                 // ✅ Base properties (Timestamp, HubMethod) auto-populated by factory
-                // ✅ SuccessCount/FailureCount calculated from ProcessedCount/TotalCount
+                // ✅ SuccessCount/FailureCount/SkippedCount now passed from actual EntityProgress data
                 // ✅ Validation built-in
                 // ✅ Consistent naming enforced
             });
@@ -685,44 +629,5 @@ public class ProgressTracker : IProgressTracker
         }
     }
 
-    /// <summary>
-    /// Publishes a batch progress event to the queue for SignalR broadcasting
-    /// SOLID: Single Responsibility - handles only batch progress event publishing
-    /// Phase 4.2: Enhanced to include soft cancellation state in batch progress events
-    /// </summary>
-    private async Task PublishBatchProgressEventAsync(string migrationId, string entityType, int batchNumber, int processedCount, int successCount, int failureCount, CancellationToken cancellationToken)
-    {
-        try
-        {
-            var progress = GetOrCreateProgress(migrationId);
-            var entityProgress = progress.EntityProgress.ContainsKey(entityType) ? progress.EntityProgress[entityType] : null;
-            
-            // ✅ CENTRALIZED SIGNALR: Use factory for consistent event creation with auto-populated base properties
-            var batchEvent = _signalREventFactory.CreateBatchProgress(migrationId, new BatchProgressOptions
-            {
-                EntityType = entityType,
-                BatchNumber = batchNumber,
-                TotalBatches = 0, // This could be calculated if we track total batches
-                BatchSize = processedCount,
-                ProcessedCount = processedCount,
-                FailedCount = failureCount,
-                Status = failureCount > 0 ? "completed_with_errors" : "completed",
-                ProcessingTime = TimeSpan.FromSeconds(1), // Approximate - could be tracked more precisely
-                // Phase 4.2: Include soft cancellation state in batch progress event
-                IsCancelled = progress.IsCancelled ?? false,
-                CancellationReason = progress.CancellationReason,
-                CancelledAt = progress.CancelledAt
-                // ✅ Base properties (Timestamp, HubMethod) auto-populated by factory
-                // ✅ Validation built-in
-                // ✅ Consistent naming enforced
-            });
 
-            await _progressEventPublisher.PublishBatchProgressAsync(batchEvent, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to publish batch progress event for migration {MigrationId}, entity {EntityType}, batch {BatchNumber}", migrationId, entityType, batchNumber);
-            // Don't rethrow - progress events should not break the migration
-        }
-    }
 } 

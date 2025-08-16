@@ -52,6 +52,7 @@ interface MigrationDetail {
   processedEntities: number;
   successfulEntities: number;
   failedEntities: number;
+  skippedEntities: number;
   percentageCompleted: number;
   entities: string[];
 }
@@ -72,6 +73,7 @@ interface EntitySummary {
   processedCount: number;
   successCount: number;
   failureCount: number;
+  skippedCount: number;
 }
 
 // Status configuration matching history page
@@ -168,6 +170,7 @@ export const MigrationDetailView: React.FC = () => {
         processedCount: (entity.successfulEntities || 0) + (entity.failedEntities || 0) + (entity.skippedEntities || 0),
         successCount: entity.successfulEntities || 0,
         failureCount: entity.failedEntities || 0,
+        skippedCount: entity.skippedEntities || 0,  // 🚨 FIX: Map skippedEntities to skippedCount
       }));
       
       setEntitySummary(transformedEntities);
@@ -500,6 +503,7 @@ export const MigrationDetailView: React.FC = () => {
                     <TableCell sx={{ fontWeight: 600, textAlign: 'center' }}>Total</TableCell>
                     <TableCell sx={{ fontWeight: 600, textAlign: 'center' }}>Success</TableCell>
                     <TableCell sx={{ fontWeight: 600, textAlign: 'center' }}>Failed</TableCell>
+                    <TableCell sx={{ fontWeight: 600, textAlign: 'center' }}>Skipped</TableCell>
                     <TableCell sx={{ fontWeight: 600, textAlign: 'center' }}>Success Rate</TableCell>
                     <TableCell sx={{ fontWeight: 600, textAlign: 'center' }}>Status</TableCell>
                   </TableRow>
@@ -523,7 +527,8 @@ export const MigrationDetailView: React.FC = () => {
                         <TableCell sx={{ textAlign: 'center' }}>{entity.totalCount}</TableCell>
                         <TableCell sx={{ textAlign: 'center', color: 'success.main', fontWeight: 600 }}>{entity.successCount}</TableCell>
                         <TableCell sx={{ textAlign: 'center', color: 'error.main', fontWeight: 600 }}>{entity.failureCount}</TableCell>
-                        <TableCell sx={{ textAlign: 'center' }}>{entity.totalCount > 0 ? `${Math.round((entity.successCount / entity.totalCount) * 100)}%` : '0%'}</TableCell>
+                        <TableCell sx={{ textAlign: 'center', color: 'warning.main', fontWeight: 600 }}>{entity.skippedCount || 0}</TableCell>
+                        <TableCell sx={{ textAlign: 'center' }}>{entity.totalCount > 0 ? `${Math.round(((entity.successCount + (entity.skippedCount || 0)) / entity.totalCount) * 100)}%` : '0%'}</TableCell>
                         <TableCell sx={{ textAlign: 'center' }}>
                           <Chip 
                             label={entity.failureCount > 0 ? 'Failed' : entity.successCount > 0 ? 'Completed' : 'Pending'} 
@@ -534,7 +539,7 @@ export const MigrationDetailView: React.FC = () => {
                         </TableCell>
                       </TableRow>,
                     <TableRow key={`expand-${entity.entityType}`}>
-                      <TableCell colSpan={6} sx={{ p: 0, border: 0 }}>
+                      <TableCell colSpan={7} sx={{ p: 0, border: 0 }}>
                         <Collapse in={expandedEntity === entity.entityType} timeout="auto" unmountOnExit>
                           <Box sx={{ p: 2, backgroundColor: 'background.default' }}>
                             {entityErrorsLoading[entity.entityType] ? (

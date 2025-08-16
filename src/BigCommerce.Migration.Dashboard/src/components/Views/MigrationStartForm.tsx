@@ -50,26 +50,16 @@ interface MigrationFormData {
 
 // Hardcoded store configurations for development
 const storeConfigurations = {
-  production: {
-    storeId: "j0itxkyhku",
-    accessToken: "15db0coi6b5mobshq4z66ytc001gk6y",
+  staging: {
+    storeId: "4diwbwzw1t", 
+    accessToken: "4ym1thwfbm941mfj8jpvwzm5zlxecmk",
     channelId: "1"
   },
-  /*production: {
-    storeId: "tmdsef6c6o",
-    accessToken: "ar247sdrwg6b5oo4c8h2n2nu2yat0w7",
-    channelId: "1"
-  },*/
-  staging: {
-    storeId: "v6q95r5n91", 
-    accessToken: "2jxzl0n457l7dbz9jgeo8tzbj6xw6ba",
+  development: {
+    storeId: "in2msaitrc",
+    accessToken: "bntqbbjvnnap8agkdbo5bekqehb473z",
     channelId: "1"
   }
-  /*development: {
-    storeId: "tmdsef6c6o",
-    accessToken: "ar247sdrwg6b5oo4c8h2n2nu2yat0w7",
-    channelId: "1"
-  }*/
 };
 
 const EntitySelectionCard: React.FC<{

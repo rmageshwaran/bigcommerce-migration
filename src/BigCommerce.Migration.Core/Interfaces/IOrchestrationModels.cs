@@ -120,6 +120,11 @@ public class BatchProcessingResult
     public int FailedEntities { get; set; }
     
     /// <summary>
+    /// Number of entities skipped during processing (e.g., duplicates, transformations)
+    /// </summary>
+    public int SkippedEntities { get; set; }
+    
+    /// <summary>
     /// Entity mappings created during processing
     /// </summary>
     public List<EntityMapping> EntityMappings { get; set; } = new();

@@ -311,7 +311,8 @@ public class MigrationQueueFunctions
                 batchNumber = batchData?.BatchNumber ?? 0,
                 processingDuration = processingResult.ProcessingDuration.TotalMilliseconds,
                 successCount = processingResult.Metadata.GetValueOrDefault("SuccessCount", 0),
-                failureCount = processingResult.Metadata.GetValueOrDefault("FailureCount", 0)
+                failureCount = processingResult.Metadata.GetValueOrDefault("FailureCount", 0),
+                skippedCount = processingResult.Metadata.GetValueOrDefault("SkippedCount", 0)  // 🚨 FIX: Include SkippedCount
             }, cancellationToken);
 
             _logger.LogInformation("Successfully processed entity batch message. MessageId: {MessageId}, MigrationId: {MigrationId}, EntityType: {EntityType}", 

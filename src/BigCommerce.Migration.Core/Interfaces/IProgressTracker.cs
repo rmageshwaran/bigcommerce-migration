@@ -30,19 +30,7 @@ public interface IProgressTracker
     /// <param name="cancellationToken">Cancellation token</param>
     Task StartEntityProcessingAsync(string migrationId, string entityType, int totalCount, CancellationToken cancellationToken = default);
     
-    /// <summary>
-    /// Records the completion of a batch
-    /// </summary>
-    /// <param name="migrationId">Migration identifier</param>
-    /// <param name="entityType">Type of entity</param>
-    /// <param name="batchNumber">Batch number</param>
-    /// <param name="processedCount">Number of entities processed in batch</param>
-    /// <param name="successCount">Number of successful entities</param>
-    /// <param name="failureCount">Number of failed entities</param>
-    /// <param name="cancellationToken">Cancellation token</param>
-    Task RecordBatchCompletionAsync(string migrationId, string entityType, int batchNumber, 
-        int processedCount, int successCount, int failureCount, CancellationToken cancellationToken = default);
-    
+
     /// <summary>
     /// Marks an entity type as completed
     /// </summary>
@@ -51,13 +39,7 @@ public interface IProgressTracker
     /// <param name="cancellationToken">Cancellation token</param>
     Task CompleteEntityProcessingAsync(string migrationId, string entityType, CancellationToken cancellationToken = default);
     
-    /// <summary>
-    /// Notifies progress update to real-time dashboard
-    /// </summary>
-    /// <param name="migrationId">Migration identifier</param>
-    /// <param name="progress">Progress information</param>
-    /// <param name="cancellationToken">Cancellation token</param>
-    Task NotifyProgressUpdateAsync(string migrationId, MigrationProgress progress, CancellationToken cancellationToken = default);
+
 }
 
 /// <summary>
@@ -95,6 +77,11 @@ public class ProgressUpdate
     /// Number of failed entities
     /// </summary>
     public int FailureCount { get; set; }
+    
+    /// <summary>
+    /// Number of skipped entities
+    /// </summary>
+    public int SkippedCount { get; set; }
     
     /// <summary>
     /// Current batch being processed
@@ -189,6 +176,11 @@ public class MigrationProgress
     public int FailedEntities { get; set; }
     
     /// <summary>
+    /// Number of skipped entities
+    /// </summary>
+    public int SkippedEntities { get; set; }
+    
+    /// <summary>
     /// Overall progress percentage (0.0 to 100.0)
     /// </summary>
     public double OverallProgressPercentage { get; set; }
@@ -264,6 +256,11 @@ public class EntityProgress
     /// Number of failed entities
     /// </summary>
     public int FailureCount { get; set; }
+    
+    /// <summary>
+    /// Number of skipped entities (e.g., duplicates, transformations)
+    /// </summary>
+    public int SkippedCount { get; set; }
     
     /// <summary>
     /// Progress percentage for this entity type (0.0 to 100.0)

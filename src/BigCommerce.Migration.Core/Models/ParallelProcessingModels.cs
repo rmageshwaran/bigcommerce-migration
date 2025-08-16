@@ -121,6 +121,12 @@ public class ParallelProcessingResult
     public int TotalEntitiesFailed { get; set; }
 
     /// <summary>
+    /// Total entities that were skipped during processing
+    /// </summary>
+    [JsonPropertyName("totalEntitiesSkipped")]
+    public int TotalEntitiesSkipped { get; set; }
+
+    /// <summary>
     /// Total processing time for all parallel batches
     /// </summary>
     [JsonPropertyName("totalProcessingTime")]
@@ -181,6 +187,27 @@ public class ParallelProcessingResult
     public double SuccessRate => TotalBatchesProcessed > 0 
         ? (double)SuccessfulBatches / TotalBatchesProcessed 
         : 0.0;
+
+    /// <summary>
+    /// Convenience property for compatibility with EntityMigrationDurableOrchestrator
+    /// Maps to TotalEntitiesProcessed - TotalEntitiesFailed for successful entities
+    /// </summary>
+    [JsonIgnore]
+    public int SuccessfulEntities => TotalEntitiesProcessed - TotalEntitiesFailed;
+
+    /// <summary>
+    /// Convenience property for compatibility with EntityMigrationDurableOrchestrator
+    /// Maps to TotalEntitiesFailed
+    /// </summary>
+    [JsonIgnore]
+    public int FailedEntities => TotalEntitiesFailed;
+
+    /// <summary>
+    /// Convenience property for compatibility with EntityMigrationDurableOrchestrator
+    /// Maps to TotalEntitiesSkipped
+    /// </summary>
+    [JsonIgnore]
+    public int SkippedEntities => TotalEntitiesSkipped;
 }
 
 /// <summary>

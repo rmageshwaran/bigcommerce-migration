@@ -479,6 +479,11 @@ public class MigrationEntry
     /// Number of entities that failed
     /// </summary>
     public int FailedEntities { get; set; }
+
+    /// <summary>
+    /// Number of entities that were skipped (duplicates, etc.)
+    /// </summary>
+    public int SkippedEntities { get; set; }
 }
 
 /// <summary>
@@ -658,6 +663,11 @@ public class BatchCompletionMessage
     /// Number of entities that failed processing
     /// </summary>
     public int FailureCount { get; set; }
+
+    /// <summary>
+    /// Number of entities that were skipped
+    /// </summary>
+    public int SkippedCount { get; set; }
 
     /// <summary>
     /// List of failed entity IDs with error details
@@ -1251,6 +1261,11 @@ public class EntityProgressEntry
     /// Number of failed entities
     /// </summary>
     public int FailureCount { get; set; }
+
+    /// <summary>
+    /// Number of skipped entities (e.g., duplicates, transformations)
+    /// </summary>
+    public int SkippedCount { get; set; }
 
     /// <summary>
     /// Progress percentage for this entity type (0.0 to 100.0)

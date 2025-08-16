@@ -17,6 +17,7 @@ public interface IProductComponentsMigrationPipeline
     /// <param name="migrationId">Migration identifier</param>
     /// <param name="sourceStore">Source store configuration</param>
     /// <param name="destinationStore">Destination store configuration</param>
+    /// <param name="requestedEntityType">The specific component type being processed (images, options, modifiers, reviews)</param>
     /// <param name="cancellationToken">Cancellation token for operation cancellation</param>
     /// <returns>Comprehensive batch processing result with component statistics</returns>
     Task<BatchProcessingResult> ProcessProductComponentsAsync(
@@ -24,6 +25,7 @@ public interface IProductComponentsMigrationPipeline
         string migrationId,
         StoreConfiguration sourceStore,
         StoreConfiguration destinationStore,
+        string requestedEntityType,
         CancellationToken cancellationToken);
 
     /// <summary>

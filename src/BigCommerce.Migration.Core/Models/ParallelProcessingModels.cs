@@ -127,6 +127,12 @@ public class ParallelProcessingResult
     public int TotalEntitiesSkipped { get; set; }
 
     /// <summary>
+    /// Total entities that were cancelled during processing
+    /// </summary>
+    [JsonPropertyName("totalEntitiesCancelled")]
+    public int TotalEntitiesCancelled { get; set; }
+
+    /// <summary>
     /// Total processing time for all parallel batches
     /// </summary>
     [JsonPropertyName("totalProcessingTime")]
@@ -208,6 +214,13 @@ public class ParallelProcessingResult
     /// </summary>
     [JsonIgnore]
     public int SkippedEntities => TotalEntitiesSkipped;
+
+    /// <summary>
+    /// Convenience property for compatibility with EntityMigrationDurableOrchestrator
+    /// Maps to TotalEntitiesCancelled
+    /// </summary>
+    [JsonIgnore]
+    public int CancelledEntities => TotalEntitiesCancelled;
 }
 
 /// <summary>

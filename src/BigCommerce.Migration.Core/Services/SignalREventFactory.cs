@@ -164,6 +164,7 @@ namespace BigCommerce.Migration.Core.Services
                 ProcessedCount = options.ProcessedCount,
                 FailedCount = options.FailedCount,
                 SkippedCount = options.SkippedCount,  // 🚨 FIX: Include SkippedCount
+                CancelledCount = options.CancelledCount,  // 🚨 CANCELLATION FIX: Include CancelledCount
                 Status = options.Status ?? "processing",
                 ProcessingTime = options.ProcessingTime
             };
@@ -201,6 +202,7 @@ namespace BigCommerce.Migration.Core.Services
                 SuccessCount = options.SuccessCount ?? 0,
                 FailureCount = options.FailureCount ?? 0,
                 SkippedCount = options.SkippedCount ?? 0,
+                CancelledCount = options.CancelledCount ?? 0,  // 🚨 CANCELLATION FIX: Include CancelledCount
                 ProcessingTime = options.ProcessingTime
             };
 

@@ -99,6 +99,7 @@ public class PipelineProgressAggregator : IPipelineProgressAggregator
                     SuccessCount = progress.SuccessCount,
                     FailureCount = progress.FailureCount,
                     SkippedCount = progress.SkippedCount,  // 🚨 FIX: Include SkippedCount
+                    CancelledCount = progress.CancelledCount,  // 🚨 CANCELLATION FIX: Include CancelledCount
                     Status = progress.Status,
                     ProcessingChannel = progress.ProcessingChannel,
                     ActiveChannels = 1,
@@ -113,6 +114,7 @@ public class PipelineProgressAggregator : IPipelineProgressAggregator
                     existing.SuccessCount += progress.SuccessCount;
                     existing.FailureCount += progress.FailureCount;
                     existing.SkippedCount += progress.SkippedCount;  // 🚨 FIX: Include SkippedCount
+                    existing.CancelledCount += progress.CancelledCount;  // 🚨 CANCELLATION FIX: Include CancelledCount
                     existing.Status = progress.Status;
                     existing.ProcessingChannel = progress.ProcessingChannel;
                     existing.ProcessingTime = existing.ProcessingTime?.Add(progress.ProcessingTime) ?? progress.ProcessingTime;

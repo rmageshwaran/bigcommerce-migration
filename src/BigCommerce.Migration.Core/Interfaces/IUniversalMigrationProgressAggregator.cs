@@ -126,6 +126,11 @@ public class PrimaryEntityProgress
     public int SkippedCount { get; set; }
 
     /// <summary>
+    /// Cancelled entities (migration stopped)
+    /// </summary>
+    public int CancelledCount { get; set; }
+
+    /// <summary>
     /// Processing status
     /// </summary>
     public string Status { get; set; } = "pending"; // pending, processing, completed
@@ -185,6 +190,11 @@ public class ComprehensiveEntityProgress
     /// Skipped sub-entities
     /// </summary>
     public int SkippedCount { get; set; }
+
+    /// <summary>
+    /// Cancelled sub-entities
+    /// </summary>
+    public int CancelledCount { get; set; }
 
     /// <summary>
     /// Processing status

@@ -571,6 +571,7 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
           successfulEntities: 0,
           failedEntities: 0,
           skippedEntities: 0,
+          cancelledEntities: 0,  // 🚨 CANCELLATION FIX: Add cancelledEntities
           startTime: new Date(),
           lastUpdated: new Date(),
           entitiesPerSecond: 0,
@@ -672,6 +673,7 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
           successfulEntities: entityData.SuccessCount || entityData.successCount || 0,
           failedEntities: entityData.FailureCount || entityData.failureCount || 0,
           skippedEntities: entityData.SkippedCount || entityData.skippedCount || 0,
+          cancelledEntities: entityData.CancelledCount || entityData.cancelledCount || 0,  // 🚨 CANCELLATION FIX: Add cancelledEntities
           startTime: new Date(),
           lastUpdated: new Date(),
           entitiesPerSecond: 0,

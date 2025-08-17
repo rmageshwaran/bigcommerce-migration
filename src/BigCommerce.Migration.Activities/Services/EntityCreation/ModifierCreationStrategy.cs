@@ -118,9 +118,34 @@ public class ModifierCreationStrategy : IEntityCreationStrategy
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "⚙️ [MOD-{ExecutionId}] Failed to create individual modifier for migration {MigrationId}", 
-                        executionId, migrationId);
-                    // Continue with next modifier instead of failing entire batch
+                    // 🚫 CANCELLATION FIX: Distinguish between actual failures and cancellation-induced failures
+                    bool isCancellationError = ex.Message.Contains("Migration cancelled", StringComparison.OrdinalIgnoreCase) ||
+                                             ex.Message.Contains("User requested cancellation", StringComparison.OrdinalIgnoreCase) ||
+                                             ex is OperationCanceledException;
+                    
+                    if (isCancellationError)
+                    {
+                        var modifierName = modifier.TryGetValue("display_name", out var name) ? name?.ToString() : "unknown";
+                        var productId = modifier.TryGetValue("product_id", out var prodId) ? prodId?.ToString() : "unknown";
+                        
+                        _logger.LogInformation("🚫 [MOD-{ExecutionId}] Modifier '{ModifierName}' for product {ProductId} was cancelled in migration {MigrationId}: {ErrorMessage}",
+                            executionId, modifierName, productId, migrationId, ex.Message);
+                        
+                        // Return a special object to indicate cancellation
+                        createdModifiers.Add(new Dictionary<string, object>
+                        {
+                            ["status"] = "cancelled",
+                            ["reason"] = "migration_cancelled",
+                            ["original_product_id"] = productId,
+                            ["display_name"] = modifierName
+                        });
+                    }
+                    else
+                    {
+                        _logger.LogError(ex, "⚙️ [MOD-{ExecutionId}] Failed to create individual modifier for migration {MigrationId}", 
+                            executionId, migrationId);
+                        // Continue with next modifier instead of failing entire batch
+                    }
                 }
             }
 

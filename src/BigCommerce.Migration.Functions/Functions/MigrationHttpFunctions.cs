@@ -302,6 +302,7 @@ public class MigrationHttpFunctions
                     SuccessfulEntities = migrationEntry.Entities?.Count() ?? 0, // Assume all succeeded for completed migrations
                     FailedEntities = 0, // Could be refined if we store failure counts
                     SkippedEntities = 0, // 🚨 FIX: Include SkippedEntities in reconstructed progress
+                    CancelledEntities = 0, // 🚨 CANCELLATION FIX: Include CancelledEntities in reconstructed progress
                     StartTime = migrationEntry.CreatedAt,
                     LastUpdated = migrationEntry.UpdatedAt,
                     ElapsedTime = migrationEntry.UpdatedAt - migrationEntry.CreatedAt,
@@ -320,6 +321,7 @@ public class MigrationHttpFunctions
                             SuccessCount = 1,
                             FailureCount = 0,
                             SkippedCount = 0, // 🚨 FIX: Include SkippedCount in reconstructed entity progress
+                            CancelledCount = 0, // 🚨 CANCELLATION FIX: Include CancelledCount in reconstructed entity progress
                             ProgressPercentage = 100,
                             Status = "completed",
                             StartTime = migrationEntry.CreatedAt,
@@ -374,6 +376,7 @@ public class MigrationHttpFunctions
                     totalEntities = detailedProgress?.TotalEntities ?? 0,
                     failedEntities = detailedProgress?.FailedEntities ?? 0,
                     skippedEntities = detailedProgress?.SkippedEntities ?? 0,  // 🚨 FIX: Include skippedEntities
+                    cancelledEntities = detailedProgress?.CancelledEntities ?? 0,  // 🚫 ADD: Include cancelledEntities
                     processedEntities = detailedProgress?.ProcessedEntities ?? 0,
                     estimatedTimeRemaining = detailedProgress?.EstimatedTimeRemaining.TotalMinutes > 0 
                         ? $"{Math.Ceiling(detailedProgress.EstimatedTimeRemaining.TotalMinutes)} minutes" 
@@ -683,6 +686,7 @@ public class MigrationHttpFunctions
                 successfulEntities = detailedProgress.SuccessfulEntities,
                 failedEntities = detailedProgress.FailedEntities,
                 skippedEntities = detailedProgress.SkippedEntities, // 🚨 FIX: Include SkippedEntities in latest migration response
+                cancelledEntities = detailedProgress.CancelledEntities, // 🚫 ADD: Include CancelledEntities in latest migration response
                 message = "Latest migration retrieved successfully"
             };
 
@@ -776,6 +780,7 @@ public class MigrationHttpFunctions
                     successfulEntities = detailedProgress.SuccessfulEntities,
                     failedEntities = detailedProgress.FailedEntities,
                     skippedEntities = detailedProgress.SkippedEntities, // 🚨 FIX: Include SkippedEntities in migration history
+                    cancelledEntities = detailedProgress.CancelledEntities, // 🚫 ADD: Include CancelledEntities in migration history
                     percentageCompleted = detailedProgress.OverallProgressPercentage,
                     entities = migration.Entities
                 });
@@ -871,6 +876,7 @@ public class MigrationHttpFunctions
                         successfulEntities = entityProgress.Value.SuccessCount,
                         failedEntities = entityProgress.Value.FailureCount,
                         skippedEntities = entityProgress.Value.SkippedCount, // 🚨 FIX: Use actual SkippedCount from EntityProgress
+                        cancelledEntities = entityProgress.Value.CancelledCount, // 🚫 ADD: Use actual CancelledCount from EntityProgress
                         percentageCompleted = entityProgress.Value.ProgressPercentage,
                         hasErrors = entityProgress.Value.FailureCount > 0
                     });

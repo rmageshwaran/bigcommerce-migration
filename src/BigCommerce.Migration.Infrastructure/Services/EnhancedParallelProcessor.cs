@@ -894,6 +894,7 @@ public class EnhancedParallelProcessor : BigCommerce.Migration.Core.Interfaces.I
             TotalEntitiesProcessed = batchResults.Sum(r => r.TotalProcessed),
             TotalEntitiesFailed = batchResults.Sum(r => r.FailedEntities),
             TotalEntitiesSkipped = batchResults.Sum(r => r.SkippedEntities),
+            TotalEntitiesCancelled = batchResults.Sum(r => r.CancelledEntities),
             TotalProcessingTime = totalTime,
             AverageBatchProcessingTime = TimeSpan.FromMilliseconds(batchResults.Average(r => r.ProcessingTime.TotalMilliseconds)),
             PeakConcurrency = semaphore.CurrentCount > 0 ? (batchResults.Length - semaphore.CurrentCount) : batchResults.Length,

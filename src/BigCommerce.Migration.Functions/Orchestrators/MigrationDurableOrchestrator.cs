@@ -232,7 +232,11 @@ public static class MigrationDurableOrchestrator
                     SourceStore = input.MigrationRequest?.SourceStore ?? new StoreConfiguration(),
                     DestinationStore = input.MigrationRequest?.DestinationStore ?? new StoreConfiguration(),
                     CategoryTreeContext = input.CategoryTreeContext ?? new CategoryTreeContext(),
-                    Settings = input.MigrationRequest?.Settings
+                    Settings = input.MigrationRequest?.Settings,
+                    // 🚫 CANCELLATION FIX: Propagate cancellation state to child orchestrators
+                    IsCancelled = cancellationState.IsCancelled,
+                    CancellationReason = cancellationState.CancellationReason,
+                    CancelledAt = cancellationState.CancelledAt
                 };
 
                 try
@@ -245,9 +249,30 @@ public static class MigrationDurableOrchestrator
 
                     if (!entityResult.IsSuccess)
                     {
-                        logger.LogWarning("Entity {EntityType} migration completed with errors for MigrationId: {MigrationId}. " +
-                                        "Success: {SuccessCount}, Failed: {FailureCount}", 
-                            entityType, migrationId, entityResult.SuccessfulEntities, entityResult.FailedEntities);
+                        // 🚫 CANCELLATION FIX: Check if entity failure was due to cancellation
+                        bool wasEntityCancelled = entityResult.ErrorMessage?.Contains("cancelled", StringComparison.OrdinalIgnoreCase) == true ||
+                                                 entityResult.Errors?.Any(e => e.Contains("cancelled", StringComparison.OrdinalIgnoreCase)) == true;
+                        
+                        if (wasEntityCancelled)
+                        {
+                            logger.LogInformation("🚫 Entity {EntityType} migration was cancelled for MigrationId: {MigrationId}. " +
+                                                "Updating cancellation state to stop dependent phases.", 
+                                entityType, migrationId);
+                            
+                            // Update cancellation state to stop subsequent entity phases
+                            cancellationState = new {
+                                IsCancelled = true,
+                                CancellationReason = entityResult.ErrorMessage ?? "Entity migration was cancelled",
+                                CancellationSource = "EntityCancellation",
+                                CancelledAt = (DateTime?)context.CurrentUtcDateTime
+                            };
+                        }
+                        else
+                        {
+                            logger.LogWarning("Entity {EntityType} migration completed with errors for MigrationId: {MigrationId}. " +
+                                            "Success: {SuccessCount}, Failed: {FailureCount}", 
+                                entityType, migrationId, entityResult.SuccessfulEntities, entityResult.FailedEntities);
+                        }
                     }
                     else
                     {
@@ -258,24 +283,61 @@ public static class MigrationDurableOrchestrator
                 }
                 catch (Exception ex)
                 {
-                    logger.LogError(ex, "Failed to process entity {EntityType} for MigrationId: {MigrationId}", 
-                        entityType, migrationId);
-
-                    result.EntityResults[entityType] = new EntityMigrationResult
+                    // 🚫 ENTITY ORCHESTRATOR CANCELLATION FIX: Distinguish between cancellation and actual failures
+                    bool isCancellationError = ex.Message.Contains("Migration cancelled", StringComparison.OrdinalIgnoreCase) ||
+                                             ex.Message.Contains("User requested cancellation", StringComparison.OrdinalIgnoreCase) ||
+                                             ex is OperationCanceledException;
+                    
+                    if (isCancellationError)
                     {
-                        EntityType = entityType,
-                        IsSuccess = false,
-                        ErrorMessage = ex.Message,
-                        ProcessedEntities = 0,
-                        SuccessfulEntities = 0,
-                        FailedEntities = 0,
-                        StartTime = context.CurrentUtcDateTime,
-                        EndTime = context.CurrentUtcDateTime
-                    };
+                        logger.LogInformation("🚫 Entity {EntityType} processing was cancelled for MigrationId: {MigrationId}: {ErrorMessage}", 
+                            entityType, migrationId, ex.Message);
 
-                    // Continue processing other entities (continue-on-failure pattern)
-                    logger.LogInformation("Continuing with next entity type after {EntityType} failure for MigrationId: {MigrationId}", 
-                        entityType, migrationId);
+                        result.EntityResults[entityType] = new EntityMigrationResult
+                        {
+                            EntityType = entityType,
+                            IsSuccess = false,
+                            ErrorMessage = $"{entityType} migration was cancelled: {ex.Message}",
+                            ProcessedEntities = 0,
+                            SuccessfulEntities = 0,
+                            FailedEntities = 0,  // 🚫 FIX: Don't mark cancelled entities as failed
+                            StartTime = context.CurrentUtcDateTime,
+                            EndTime = context.CurrentUtcDateTime
+                        };
+
+                        // Update cancellation state to stop subsequent entity phases
+                        cancellationState = new {
+                            IsCancelled = true,
+                            CancellationReason = ex.Message,
+                            CancellationSource = "EntityOrchestrationCancellation",
+                            CancelledAt = (DateTime?)context.CurrentUtcDateTime
+                        };
+                        
+                        logger.LogInformation("🚫 Cancellation detected during {EntityType}, stopping further entity processing for MigrationId: {MigrationId}", 
+                            entityType, migrationId);
+                        break; // Stop processing further entities
+                    }
+                    else
+                    {
+                        logger.LogError(ex, "Failed to process entity {EntityType} for MigrationId: {MigrationId}", 
+                            entityType, migrationId);
+
+                        result.EntityResults[entityType] = new EntityMigrationResult
+                        {
+                            EntityType = entityType,
+                            IsSuccess = false,
+                            ErrorMessage = ex.Message,
+                            ProcessedEntities = 0,
+                            SuccessfulEntities = 0,
+                            FailedEntities = 0,  // Let EntityMigrationOrchestrator handle the actual counts
+                            StartTime = context.CurrentUtcDateTime,
+                            EndTime = context.CurrentUtcDateTime
+                        };
+
+                        // Continue processing other entities (continue-on-failure pattern)
+                        logger.LogInformation("Continuing with next entity type after {EntityType} failure for MigrationId: {MigrationId}", 
+                            entityType, migrationId);
+                    }
                 }
             }
 

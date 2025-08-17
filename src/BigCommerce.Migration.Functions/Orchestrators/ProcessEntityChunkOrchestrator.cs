@@ -149,18 +149,42 @@ public static class ProcessEntityChunkOrchestrator
         {
             var processingTime = context.CurrentUtcDateTime - startTime;
             
-            logger.LogError(ex, "💥 [CHUNK-{ChunkNumber}] Chunk processing failed after {ProcessingTimeMs}ms: {ErrorMessage}",
-                input.ChunkNumber, processingTime.TotalMilliseconds, ex.Message);
-
-            // Return error result for this chunk
-            return new BatchProcessingResult
+            // 🚫 CHUNK ORCHESTRATOR CANCELLATION FIX: Distinguish between cancellation and actual failures
+            bool isCancellationError = ex.Message.Contains("Migration cancelled", StringComparison.OrdinalIgnoreCase) ||
+                                     ex.Message.Contains("User requested cancellation", StringComparison.OrdinalIgnoreCase) ||
+                                     ex is OperationCanceledException;
+            
+            if (isCancellationError)
             {
-                TotalProcessed = input.ChunkSize,
-                SuccessfulEntities = 0,
-                FailedEntities = input.ChunkSize,
-                ProcessingTime = processingTime,
-                Errors = new List<string> { $"Chunk {input.ChunkNumber} failed: {ex.Message}" }
-            };
+                logger.LogInformation("🚫 [CHUNK-{ChunkNumber}] Chunk orchestrator processing was cancelled after {ProcessingTimeMs}ms: {ErrorMessage}",
+                    input.ChunkNumber, processingTime.TotalMilliseconds, ex.Message);
+
+                return new BatchProcessingResult
+                {
+                    TotalProcessed = input.ChunkSize,
+                    SuccessfulEntities = 0,
+                    FailedEntities = 0,  // 🚫 FIX: Don't mark cancelled entities as failed
+                    SkippedEntities = 0,
+                    CancelledEntities = input.ChunkSize,  // 🚫 FIX: Mark entire chunk as cancelled
+                    ProcessingTime = processingTime,
+                    Errors = new List<string> { $"Chunk {input.ChunkNumber} orchestrator cancelled: {ex.Message}" }
+                };
+            }
+            else
+            {
+                logger.LogError(ex, "💥 [CHUNK-{ChunkNumber}] Chunk processing failed after {ProcessingTimeMs}ms: {ErrorMessage}",
+                    input.ChunkNumber, processingTime.TotalMilliseconds, ex.Message);
+
+                // Return error result for this chunk
+                return new BatchProcessingResult
+                {
+                    TotalProcessed = input.ChunkSize,
+                    SuccessfulEntities = 0,
+                    FailedEntities = input.ChunkSize,  // Only actual failures marked as failed
+                    ProcessingTime = processingTime,
+                    Errors = new List<string> { $"Chunk {input.ChunkNumber} failed: {ex.Message}" }
+                };
+            }
         }
     }
 }

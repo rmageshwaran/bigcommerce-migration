@@ -58,6 +58,7 @@ public class UpdateEntityProgressActivity
                 SuccessCount = progressUpdate.SuccessfulEntities,
                 FailureCount = progressUpdate.FailedEntities,
                 SkippedCount = progressUpdate.SkippedEntities,
+                CancelledCount = progressUpdate.CancelledEntities,  // 🚨 CANCELLATION FIX: Include CancelledCount
                 CurrentBatch = progressUpdate.CurrentBatch,
                 TotalBatches = progressUpdate.TotalBatches,
                 StatusMessage = $"Processing {entityType}: {progressUpdate.ProcessedEntities}/{progressUpdate.TotalEntities} entities",

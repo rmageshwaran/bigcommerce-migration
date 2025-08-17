@@ -160,6 +160,11 @@ namespace BigCommerce.Migration.Core.Models
         public int SkippedCount { get; set; }
 
         /// <summary>
+        /// Number of entities that were cancelled in this batch
+        /// </summary>
+        public int CancelledCount { get; set; }
+
+        /// <summary>
         /// Batch processing status (starting, processing, completed, failed)
         /// Default: "processing"
         /// </summary>
@@ -224,6 +229,12 @@ namespace BigCommerce.Migration.Core.Models
         /// If not provided, will default to 0
         /// </summary>
         public int? SkippedCount { get; set; }
+
+        /// <summary>
+        /// Number of entities that were cancelled during processing (optional)
+        /// If not provided, will default to 0
+        /// </summary>
+        public int? CancelledCount { get; set; }
 
         /// <summary>
         /// Error message if processing failed

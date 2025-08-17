@@ -170,6 +170,7 @@ public class ProcessEntityChunkActivity
                     SuccessCount = result.SuccessfulEntities,
                     FailureCount = result.FailedEntities,
                     SkippedCount = result.SkippedEntities,  // 🚨 FIX: Include SkippedCount
+                    CancelledCount = result.CancelledEntities,  // 🚨 CANCELLATION FIX: Include CancelledCount
                     Status = result.SuccessfulEntities == result.TotalProcessed ? "completed" : "processing",
                     ThroughputPerSecond = result.TotalProcessed / Math.Max(result.ProcessingTime.TotalSeconds, 1),
                     ProcessingTime = result.ProcessingTime
@@ -194,17 +195,41 @@ public class ProcessEntityChunkActivity
         {
             var processingTime = DateTime.UtcNow - startTime;
             
-            _logger.LogError(ex, "💥 [CHUNK-{ChunkNumber}] Chunk processing failed after {ProcessingTimeMs}ms: {ErrorMessage}",
-                request.ChunkNumber, processingTime.TotalMilliseconds, ex.Message);
-
-            return new BatchProcessingResult
+            // 🚫 CHUNK-LEVEL CANCELLATION FIX: Distinguish between cancellation and actual failures
+            bool isCancellationError = ex.Message.Contains("Migration cancelled", StringComparison.OrdinalIgnoreCase) ||
+                                     ex.Message.Contains("User requested cancellation", StringComparison.OrdinalIgnoreCase) ||
+                                     ex is OperationCanceledException;
+            
+            if (isCancellationError)
             {
-                TotalProcessed = request.ChunkSize,
-                SuccessfulEntities = 0,
-                FailedEntities = request.ChunkSize,
-                ProcessingTime = processingTime,
-                Errors = new List<string> { $"Chunk {request.ChunkNumber} failed: {ex.Message}" }
-            };
+                _logger.LogInformation("🚫 [CHUNK-{ChunkNumber}] Chunk processing was cancelled after {ProcessingTimeMs}ms: {ErrorMessage}",
+                    request.ChunkNumber, processingTime.TotalMilliseconds, ex.Message);
+
+                return new BatchProcessingResult
+                {
+                    TotalProcessed = request.ChunkSize,
+                    SuccessfulEntities = 0,
+                    FailedEntities = 0,  // 🚫 FIX: Don't mark cancelled entities as failed
+                    SkippedEntities = 0,
+                    CancelledEntities = request.ChunkSize,  // 🚫 FIX: Mark entire chunk as cancelled
+                    ProcessingTime = processingTime,
+                    Errors = new List<string> { $"Chunk {request.ChunkNumber} cancelled: {ex.Message}" }
+                };
+            }
+            else
+            {
+                _logger.LogError(ex, "💥 [CHUNK-{ChunkNumber}] Chunk processing failed after {ProcessingTimeMs}ms: {ErrorMessage}",
+                    request.ChunkNumber, processingTime.TotalMilliseconds, ex.Message);
+
+                return new BatchProcessingResult
+                {
+                    TotalProcessed = request.ChunkSize,
+                    SuccessfulEntities = 0,
+                    FailedEntities = request.ChunkSize,  // Only actual failures marked as failed
+                    ProcessingTime = processingTime,
+                    Errors = new List<string> { $"Chunk {request.ChunkNumber} failed: {ex.Message}" }
+                };
+            }
         }
     }
 
@@ -261,6 +286,7 @@ public class ProcessEntityChunkActivity
 
             // Phase 3.1.2: Transform entities using sub-batch processing for better performance and cancellation responsiveness
             var transformedEntities = new List<Dictionary<string, object>>();
+            var cancelledTransformations = 0; // Track cancelled transformations
             
             // Phase 3.1.1: Check for cancellation before transformation
             await CheckCancellationAsync(batchRequest.MigrationId);
@@ -295,25 +321,56 @@ public class ProcessEntityChunkActivity
                         }
                         catch (Exception ex)
                         {
-                            result.FailedEntities++;
-                            result.Errors.Add($"Failed to transform entity: {ex.Message}");
+                            // 🚫 CANCELLATION FIX: Distinguish between actual failures and cancellation-induced failures
+                            bool isCancellationError = ex.Message.Contains("Migration cancelled", StringComparison.OrdinalIgnoreCase) ||
+                                                     ex.Message.Contains("User requested cancellation", StringComparison.OrdinalIgnoreCase) ||
+                                                     ex is OperationCanceledException;
                             
-                            _logger.LogError(ex, "❌ [CHUNK-{ChunkNumber}] Failed to transform individual entity: {ErrorMessage}",
-                                chunkNumber, ex.Message);
-                            return null; // Return null for failed transformations (will be filtered out)
+                            if (isCancellationError)
+                            {
+                                _logger.LogInformation("🚫 [CHUNK-{ChunkNumber}] Entity transformation was cancelled: {ErrorMessage}",
+                                    chunkNumber, ex.Message);
+                                
+                                // Return a special object to indicate cancellation during transformation
+                                return new Dictionary<string, object>
+                                {
+                                    ["status"] = "cancelled",
+                                    ["reason"] = "transformation_cancelled",
+                                    ["phase"] = "transformation",
+                                    ["original_entity"] = entity
+                                };
+                            }
+                            else
+                            {
+                                result.FailedEntities++;
+                                result.Errors.Add($"Failed to transform entity: {ex.Message}");
+                                
+                                _logger.LogError(ex, "❌ [CHUNK-{ChunkNumber}] Failed to transform individual entity: {ErrorMessage}",
+                                    chunkNumber, ex.Message);
+                                return null; // Return null for failed transformations (will be filtered out)
+                            }
                         }
                     },
                     batchRequest.EntityType,
                     batchRequest.MigrationId);
 
-                            // 🔍 DEBUG: Transformation phase results
+                            // 🚫 TRANSFORMATION CANCELLATION FIX: Filter out cancelled transformations
+            cancelledTransformations = transformedEntities.Count(e => 
+                e.ContainsKey("status") && e["status"].ToString().Equals("cancelled"));
+            var actuallyTransformed = transformedEntities.Where(e => 
+                !e.ContainsKey("status") || !e["status"].ToString().Equals("cancelled")).ToList();
+            
+            // 🔍 DEBUG: Transformation phase results including cancellations
             var transformationSkippedCount = entities.Count - transformedEntities.Count - result.FailedEntities;
             
-            _logger.LogInformation("🔍 [TRANSFORM-DEBUG] CHUNK-{ChunkNumber} {EntityType}: InputEntities={InputCount}, TransformedEntities={TransformedCount}, TransformationFailures={TransformFailures}, TransformationSkips={TransformSkips}",
-                chunkNumber, batchRequest.EntityType, entities.Count, transformedEntities.Count, result.FailedEntities, transformationSkippedCount);
+            _logger.LogInformation("🔍 [TRANSFORM-DEBUG] CHUNK-{ChunkNumber} {EntityType}: InputEntities={InputCount}, TransformedEntities={TransformedCount}, ActuallyTransformed={ActualTransformed}, TransformationCancelled={TransformCancelled}, TransformationFailures={TransformFailures}, TransformationSkips={TransformSkips}",
+                chunkNumber, batchRequest.EntityType, entities.Count, transformedEntities.Count, actuallyTransformed.Count, cancelledTransformations, result.FailedEntities, transformationSkippedCount);
             
-            _logger.LogInformation("✅ [CHUNK-{ChunkNumber}] Sub-batch transformation completed: {TransformedCount} transformed + {SkippedCount} skipped = {SuccessfulCount}/{TotalCount} {EntityType} entities processed successfully, {FailedCount} failed",
-                chunkNumber, transformedEntities.Count, transformationSkippedCount, transformedEntities.Count + transformationSkippedCount, entities.Count, batchRequest.EntityType, result.FailedEntities);
+            _logger.LogInformation("✅ [CHUNK-{ChunkNumber}] Sub-batch transformation completed: {ActualTransformed} actually transformed + {CancelledTransformed} cancelled during transform + {SkippedCount} skipped = {TotalProcessed}/{InputCount} {EntityType} entities processed, {FailedCount} failed",
+                chunkNumber, actuallyTransformed.Count, cancelledTransformations, transformationSkippedCount, actuallyTransformed.Count + cancelledTransformations + transformationSkippedCount, entities.Count, batchRequest.EntityType, result.FailedEntities);
+                
+            // Update transformedEntities to exclude cancelled ones
+            transformedEntities = actuallyTransformed;
             }
             catch (Exception ex)
             {
@@ -339,15 +396,17 @@ public class ProcessEntityChunkActivity
 
                 if (createdEntities != null && createdEntities.Any())
                 {
-                    // 🚨 FIX: Count both created and skipped entities as successes
+                    // 🚨 FIX: Count created, skipped, and cancelled entities separately
                     var actuallyCreated = createdEntities.Count(e => 
-                        !e.ContainsKey("status") || !e["status"].ToString().Equals("skipped"));
+                        !e.ContainsKey("status") || (!e["status"].ToString().Equals("skipped") && !e["status"].ToString().Equals("cancelled")));
                     var skippedEntities = createdEntities.Count(e => 
                         e.ContainsKey("status") && e["status"].ToString().Equals("skipped"));
+                    var cancelledEntities = createdEntities.Count(e => 
+                        e.ContainsKey("status") && e["status"].ToString().Equals("cancelled"));
                     
                     // 🔍 DEBUG: Creation phase results
-                    _logger.LogInformation("🔍 [CREATION-DEBUG] CHUNK-{ChunkNumber} {EntityType}: CreatedEntities={CreatedCount}, ActuallyCreated={ActualCreated}, CreationSkipped={CreationSkipped}",
-                        chunkNumber, batchRequest.EntityType, createdEntities.Count, actuallyCreated, skippedEntities);
+                    _logger.LogInformation("🔍 [CREATION-DEBUG] CHUNK-{ChunkNumber} {EntityType}: CreatedEntities={CreatedCount}, ActuallyCreated={ActualCreated}, CreationSkipped={CreationSkipped}, CreationCancelled={CreationCancelled}",
+                        chunkNumber, batchRequest.EntityType, createdEntities.Count, actuallyCreated, skippedEntities, cancelledEntities);
                     
                     // ✅ SIMPLE CORRECT LOGIC: 
                     // Transformation skips = input entities that didn't get transformed (and weren't failures)
@@ -358,21 +417,22 @@ public class ProcessEntityChunkActivity
                     _logger.LogInformation("🔍 [FINAL-CALC-DEBUG] CHUNK-{ChunkNumber} {EntityType}: InputCount={Input}, TransformedCount={Transformed}, CreatedCount={Created}, TransformFailures={TFailures}, TransformSkips={TSkips}",
                         chunkNumber, batchRequest.EntityType, entities.Count, transformedEntities.Count, createdEntities.Count, transformationFailures, transformationSkippedCount);
                     
-                    // 🚨 STATUS FIX: Track skipped entities separately from successful entities
-                    result.SuccessfulEntities = actuallyCreated; // Only entities that were actually created (not skipped)
+                    // 🚨 STATUS FIX: Track skipped and cancelled entities separately from successful entities
+                    result.SuccessfulEntities = actuallyCreated; // Only entities that were actually created (not skipped or cancelled)
                     result.FailedEntities = transformationFailures; // Only actual failures
                     result.SkippedEntities = skippedEntities + Math.Max(0, transformationSkippedCount); // Creation skips + transformation skips
+                    result.CancelledEntities = cancelledEntities + cancelledTransformations; // Entities cancelled during creation + transformation
                     
-                    // 🔍 DEBUG: Final result values with skipped entities tracked separately
-                    _logger.LogInformation("🔍 [RESULT-DEBUG] CHUNK-{ChunkNumber} {EntityType}: FinalSuccessful={Successful}, FinalFailed={Failed}, FinalSkipped={Skipped}, FinalTotal={Total}",
-                        chunkNumber, batchRequest.EntityType, result.SuccessfulEntities, result.FailedEntities, result.SkippedEntities, result.TotalProcessed);
+                    // 🔍 DEBUG: Final result values with skipped and cancelled entities tracked separately
+                    _logger.LogInformation("🔍 [RESULT-DEBUG] CHUNK-{ChunkNumber} {EntityType}: FinalSuccessful={Successful}, FinalFailed={Failed}, FinalSkipped={Skipped}, FinalCancelled={Cancelled}, FinalTotal={Total}",
+                        chunkNumber, batchRequest.EntityType, result.SuccessfulEntities, result.FailedEntities, result.SkippedEntities, result.CancelledEntities, result.TotalProcessed);
                     
-                    _logger.LogInformation("✅ [CHUNK-{ChunkNumber}] Entity processing completed: {CreatedCount} API-created + {CreationSkippedCount} creation-skipped + {TransformSkippedCount} transform-skipped = {SuccessCount} successful, {FailedCount} failed, {SkippedCount} skipped out of {InputCount} {EntityType} input entities",
-                        chunkNumber, actuallyCreated, skippedEntities, transformationSkippedCount, result.SuccessfulEntities, result.FailedEntities, result.SkippedEntities, entities.Count, batchRequest.EntityType);
+                    _logger.LogInformation("✅ [CHUNK-{ChunkNumber}] Entity processing completed: {CreatedCount} API-created + {CreationSkippedCount} creation-skipped + {CreationCancelledCount} creation-cancelled + {TransformCancelledCount} transform-cancelled + {TransformSkippedCount} transform-skipped = {SuccessCount} successful, {FailedCount} failed, {SkippedCount} skipped, {CancelledCount} cancelled out of {InputCount} {EntityType} input entities",
+                        chunkNumber, actuallyCreated, skippedEntities, cancelledEntities, cancelledTransformations, transformationSkippedCount, result.SuccessfulEntities, result.FailedEntities, result.SkippedEntities, result.CancelledEntities, entities.Count, batchRequest.EntityType);
                     
-                    // Store mappings only for actually created entities (not skipped)
+                    // Store mappings only for actually created entities (not skipped or cancelled)
                     var createdOnlyEntities = createdEntities.Where(e => 
-                        !e.ContainsKey("status") || !e["status"].ToString().Equals("skipped")).ToList();
+                        !e.ContainsKey("status") || (!e["status"].ToString().Equals("skipped") && !e["status"].ToString().Equals("cancelled"))).ToList();
                     if (createdOnlyEntities.Any())
                     {
                         await StoreMappingsForCreatedEntities(entities, createdOnlyEntities, batchRequest, chunkNumber);

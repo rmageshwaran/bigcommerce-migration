@@ -84,6 +84,11 @@ public class ProgressUpdate
     public int SkippedCount { get; set; }
     
     /// <summary>
+    /// Number of cancelled entities
+    /// </summary>
+    public int CancelledCount { get; set; }
+    
+    /// <summary>
     /// Current batch being processed
     /// </summary>
     public int CurrentBatch { get; set; }
@@ -181,6 +186,11 @@ public class MigrationProgress
     public int SkippedEntities { get; set; }
     
     /// <summary>
+    /// Number of cancelled entities
+    /// </summary>
+    public int CancelledEntities { get; set; }
+    
+    /// <summary>
     /// Overall progress percentage (0.0 to 100.0)
     /// </summary>
     public double OverallProgressPercentage { get; set; }
@@ -261,6 +271,11 @@ public class EntityProgress
     /// Number of skipped entities (e.g., duplicates, transformations)
     /// </summary>
     public int SkippedCount { get; set; }
+    
+    /// <summary>
+    /// Number of cancelled entities (e.g., due to migration cancellation)
+    /// </summary>
+    public int CancelledCount { get; set; }
     
     /// <summary>
     /// Progress percentage for this entity type (0.0 to 100.0)

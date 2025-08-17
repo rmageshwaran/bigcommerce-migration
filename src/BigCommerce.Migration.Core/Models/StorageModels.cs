@@ -484,6 +484,11 @@ public class MigrationEntry
     /// Number of entities that were skipped (duplicates, etc.)
     /// </summary>
     public int SkippedEntities { get; set; }
+
+    /// <summary>
+    /// Number of entities that were cancelled (due to migration cancellation)
+    /// </summary>
+    public int CancelledEntities { get; set; }
 }
 
 /// <summary>
@@ -1266,6 +1271,11 @@ public class EntityProgressEntry
     /// Number of skipped entities (e.g., duplicates, transformations)
     /// </summary>
     public int SkippedCount { get; set; }
+
+    /// <summary>
+    /// Number of cancelled entities (e.g., due to migration cancellation)
+    /// </summary>
+    public int CancelledCount { get; set; }
 
     /// <summary>
     /// Progress percentage for this entity type (0.0 to 100.0)

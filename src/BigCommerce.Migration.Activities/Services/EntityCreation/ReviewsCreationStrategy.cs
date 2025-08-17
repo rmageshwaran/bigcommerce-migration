@@ -119,9 +119,34 @@ public class ReviewsCreationStrategy : IEntityCreationStrategy
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "⭐ [REV-{ExecutionId}] Failed to create individual review for migration {MigrationId}", 
-                        executionId, migrationId);
-                    // Continue with next review instead of failing entire batch
+                    // 🚫 CANCELLATION FIX: Distinguish between actual failures and cancellation-induced failures
+                    bool isCancellationError = ex.Message.Contains("Migration cancelled", StringComparison.OrdinalIgnoreCase) ||
+                                             ex.Message.Contains("User requested cancellation", StringComparison.OrdinalIgnoreCase) ||
+                                             ex is OperationCanceledException;
+                    
+                    if (isCancellationError)
+                    {
+                        var reviewTitle = review.TryGetValue("title", out var title) ? title?.ToString() : "unknown";
+                        var productId = review.TryGetValue("product_id", out var prodId) ? prodId?.ToString() : "unknown";
+                        
+                        _logger.LogInformation("🚫 [REV-{ExecutionId}] Review '{ReviewTitle}' for product {ProductId} was cancelled in migration {MigrationId}: {ErrorMessage}",
+                            executionId, reviewTitle, productId, migrationId, ex.Message);
+                        
+                        // Return a special object to indicate cancellation
+                        createdReviews.Add(new Dictionary<string, object>
+                        {
+                            ["status"] = "cancelled",
+                            ["reason"] = "migration_cancelled",
+                            ["original_product_id"] = productId,
+                            ["title"] = reviewTitle
+                        });
+                    }
+                    else
+                    {
+                        _logger.LogError(ex, "⭐ [REV-{ExecutionId}] Failed to create individual review for migration {MigrationId}", 
+                            executionId, migrationId);
+                        // Continue with next review instead of failing entire batch
+                    }
                 }
             }
 

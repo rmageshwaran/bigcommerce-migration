@@ -216,6 +216,11 @@ namespace BigCommerce.Migration.Core.Models
         public int SkippedCount { get; set; }
 
         /// <summary>
+        /// Number of entities that were cancelled in this batch
+        /// </summary>
+        public int CancelledCount { get; set; }
+
+        /// <summary>
         /// Batch processing status (starting, processing, completed, failed)
         /// </summary>
         public string Status { get; set; } = string.Empty;
@@ -271,6 +276,11 @@ namespace BigCommerce.Migration.Core.Models
         /// Number of entities that were skipped during processing
         /// </summary>
         public int SkippedCount { get; set; }
+
+        /// <summary>
+        /// Number of entities that were cancelled during processing
+        /// </summary>
+        public int CancelledCount { get; set; }
 
         /// <summary>
         /// Entity processing status (starting, processing, completed)

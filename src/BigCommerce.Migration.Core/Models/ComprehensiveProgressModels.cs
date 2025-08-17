@@ -340,6 +340,12 @@ public class EntityTypeProgress
     public int SkippedEntities { get; set; }
 
     /// <summary>
+    /// Number of cancelled entity migrations
+    /// </summary>
+    [JsonPropertyName("cancelledEntities")]
+    public int CancelledEntities { get; set; }
+
+    /// <summary>
     /// Current processing status
     /// </summary>
     [JsonPropertyName("status")]

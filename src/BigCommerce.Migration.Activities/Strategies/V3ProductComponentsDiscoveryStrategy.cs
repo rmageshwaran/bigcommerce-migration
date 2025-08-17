@@ -218,12 +218,24 @@ public class V3ProductComponentsDiscoveryStrategy : IEntityDiscoveryStrategy
             _logger.LogError(ex, "❌ [PRODUCT-COMPONENTS-DISCOVERY] Failed to discover product components for migration {MigrationId}", 
                 request.MigrationId);
 
+            // 🚫 CANCELLATION FIX: Provide better error message for cancellation scenarios
+            string errorMessage;
+            if (ex is OperationCanceledException)
+            {
+                errorMessage = $"Product components discovery was cancelled: {ex.Message}";
+                _logger.LogInformation("🚫 [PRODUCT-COMPONENTS-DISCOVERY] Discovery cancelled for migration {MigrationId}", request.MigrationId);
+            }
+            else
+            {
+                errorMessage = $"Product components discovery failed: {ex.Message}";
+            }
+
             return new EntityDiscoveryResult
             {
                 EntityType = request.EntityType,
                 TotalCount = 0,
                 EntityIds = new List<string>(),
-                Errors = new List<string> { $"Product components discovery failed: {ex.Message}" }
+                Errors = new List<string> { errorMessage }
             };
         }
     }

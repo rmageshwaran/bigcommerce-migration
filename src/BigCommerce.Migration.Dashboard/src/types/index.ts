@@ -15,6 +15,7 @@ export interface MigrationProgress {
   successfulEntities: number;
   failedEntities: number;
   skippedEntities: number;
+  cancelledEntities: number;  // 🚨 CANCELLATION FIX: Add cancelledEntities
   overallProgressPercentage: number;
   entityProgress: Record<string, EntityProgress>;
   currentPhase: string;
@@ -30,6 +31,7 @@ export interface EntityProgress {
   successCount: number;
   failureCount: number;
   skippedCount: number;
+  cancelledCount: number;  // 🚨 CANCELLATION FIX: Add cancelledCount
   progressPercentage: number;
   status: string;
   startTime: Date;

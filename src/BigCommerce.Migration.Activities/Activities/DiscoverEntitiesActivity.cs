@@ -90,16 +90,36 @@ public class DiscoverEntitiesActivity
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error discovering entities for migration {MigrationId}, Entity Type: {EntityType}", 
-                request.MigrationId, request.EntityType);
-
-            return new EntityDiscoveryResult
+            // 🚫 DISCOVERY CANCELLATION FIX: Check for cancellation messages in general exceptions
+            bool isCancellationError = ex.Message.Contains("Migration cancelled", StringComparison.OrdinalIgnoreCase) ||
+                                     ex.Message.Contains("User requested cancellation", StringComparison.OrdinalIgnoreCase);
+            
+            if (isCancellationError)
             {
-                EntityType = request.EntityType,
-                TotalCount = 0,
-                EntityIds = new List<string>(),
-                Errors = new List<string> { ex.Message }
-            };
+                _logger.LogInformation("🚫 Entity discovery was cancelled for migration {MigrationId}, Entity Type: {EntityType}: {ErrorMessage}",
+                    request.MigrationId, request.EntityType, ex.Message);
+                
+                return new EntityDiscoveryResult
+                {
+                    EntityType = request.EntityType,
+                    TotalCount = 0,
+                    EntityIds = new List<string>(),
+                    Errors = new List<string> { $"Discovery was cancelled: {ex.Message}" }
+                };
+            }
+            else
+            {
+                _logger.LogError(ex, "Error discovering entities for migration {MigrationId}, Entity Type: {EntityType}", 
+                    request.MigrationId, request.EntityType);
+
+                return new EntityDiscoveryResult
+                {
+                    EntityType = request.EntityType,
+                    TotalCount = 0,
+                    EntityIds = new List<string>(),
+                    Errors = new List<string> { ex.Message }
+                };
+            }
         }
     }
 

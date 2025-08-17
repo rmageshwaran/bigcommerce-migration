@@ -448,6 +448,7 @@ public class MigrationResult
             summary.SuccessfulEntities += entityResult.SuccessfulEntities;
             summary.FailedEntities += entityResult.FailedEntities;
             summary.SkippedEntities += entityResult.SkippedEntities;
+            summary.CancelledEntities += entityResult.CancelledEntities;
         }
         
         if (summary.TotalEntities > 0)
@@ -520,6 +521,11 @@ public class EntityMigrationResult
     public int SkippedEntities { get; set; }
     
     /// <summary>
+    /// Number of entities cancelled during migration (e.g., due to cancellation)
+    /// </summary>
+    public int CancelledEntities { get; set; }
+    
+    /// <summary>
     /// Results from individual batch operations
     /// </summary>
     public List<BatchProcessingResult> BatchResults { get; set; } = new();
@@ -567,8 +573,8 @@ public class EntityMigrationResult
     {
         var errors = new List<string>();
         
-        if (SuccessfulEntities + FailedEntities + SkippedEntities > TotalEntities)
-            errors.Add("SuccessfulEntities + FailedEntities + SkippedEntities cannot exceed TotalEntities");
+        if (SuccessfulEntities + FailedEntities + SkippedEntities + CancelledEntities > TotalEntities)
+            errors.Add("SuccessfulEntities + FailedEntities + SkippedEntities + CancelledEntities cannot exceed TotalEntities");
             
         if (SuccessfulEntities < 0)
             errors.Add("SuccessfulEntities cannot be negative");
@@ -578,6 +584,9 @@ public class EntityMigrationResult
             
         if (SkippedEntities < 0)
             errors.Add("SkippedEntities cannot be negative");
+            
+        if (CancelledEntities < 0)
+            errors.Add("CancelledEntities cannot be negative");
             
         if (TotalEntities < 0)
             errors.Add("TotalEntities cannot be negative");
@@ -610,6 +619,11 @@ public class MigrationStatisticsSummary
     /// Skipped entities across all types
     /// </summary>
     public int SkippedEntities { get; set; }
+    
+    /// <summary>
+    /// Cancelled entities across all types
+    /// </summary>
+    public int CancelledEntities { get; set; }
     
     /// <summary>
     /// Overall success rate as percentage
@@ -679,6 +693,11 @@ public class UpdateEntityProgressRequest
     /// Number of entities that were skipped during processing
     /// </summary>
     public int SkippedEntities { get; set; }
+    
+    /// <summary>
+    /// Number of entities that were cancelled during processing
+    /// </summary>
+    public int CancelledEntities { get; set; }
     
     /// <summary>
     /// Current batch number (optional)

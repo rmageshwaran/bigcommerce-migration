@@ -125,6 +125,11 @@ public class BatchProcessingResult
     public int SkippedEntities { get; set; }
     
     /// <summary>
+    /// Number of entities cancelled during processing due to migration cancellation
+    /// </summary>
+    public int CancelledEntities { get; set; }
+    
+    /// <summary>
     /// Entity mappings created during processing
     /// </summary>
     public List<EntityMapping> EntityMappings { get; set; } = new();

@@ -121,9 +121,34 @@ public class OptionsCreationStrategy : IEntityCreationStrategy
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "🎛️ [OPT-{ExecutionId}] Failed to create individual option for migration {MigrationId}", 
-                        executionId, migrationId);
-                    // Continue with next option instead of failing entire batch
+                    // 🚫 CANCELLATION FIX: Distinguish between actual failures and cancellation-induced failures
+                    bool isCancellationError = ex.Message.Contains("Migration cancelled", StringComparison.OrdinalIgnoreCase) ||
+                                             ex.Message.Contains("User requested cancellation", StringComparison.OrdinalIgnoreCase) ||
+                                             ex is OperationCanceledException;
+                    
+                    if (isCancellationError)
+                    {
+                        var optionName = option.TryGetValue("display_name", out var name) ? name?.ToString() : "unknown";
+                        var productId = option.TryGetValue("product_id", out var prodId) ? prodId?.ToString() : "unknown";
+                        
+                        _logger.LogInformation("🚫 [OPT-{ExecutionId}] Option '{OptionName}' for product {ProductId} was cancelled in migration {MigrationId}: {ErrorMessage}",
+                            executionId, optionName, productId, migrationId, ex.Message);
+                        
+                        // Return a special object to indicate cancellation
+                        createdOptions.Add(new Dictionary<string, object>
+                        {
+                            ["status"] = "cancelled",
+                            ["reason"] = "migration_cancelled",
+                            ["original_product_id"] = productId,
+                            ["display_name"] = optionName
+                        });
+                    }
+                    else
+                    {
+                        _logger.LogError(ex, "🎛️ [OPT-{ExecutionId}] Failed to create individual option for migration {MigrationId}", 
+                            executionId, migrationId);
+                        // Continue with next option instead of failing entire batch
+                    }
                 }
             }
 

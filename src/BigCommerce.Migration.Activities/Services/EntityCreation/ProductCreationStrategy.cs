@@ -118,11 +118,34 @@ public class ProductCreationStrategy : IEntityCreationStrategy
                     var productId = product.TryGetValue("id", out var id) ? id?.ToString() : "unknown";
                     var sku = product.TryGetValue("sku", out var skuValue) ? skuValue?.ToString() : "no-sku";
                     
-                    _logger.LogError(ex, "🛒 [PROD-{ExecutionId}] ❌ Failed to create product '{ProductName}' (ID: {ProductId}, SKU: {Sku}) (INDIVIDUAL) in migration {MigrationId}: {ErrorMessage}",
-                        executionId, productName, productId, sku, migrationId, ex.Message);
+                    // 🚫 CANCELLATION FIX: Distinguish between actual failures and cancellation-induced failures
+                    bool isCancellationError = ex.Message.Contains("Migration cancelled", StringComparison.OrdinalIgnoreCase) ||
+                                             ex.Message.Contains("User requested cancellation", StringComparison.OrdinalIgnoreCase) ||
+                                             ex is OperationCanceledException;
+                    
+                    if (isCancellationError)
+                    {
+                        _logger.LogInformation("🚫 [PROD-{ExecutionId}] Product '{ProductName}' (ID: {ProductId}, SKU: {Sku}) was cancelled in migration {MigrationId}: {ErrorMessage}",
+                            executionId, productName, productId, sku, migrationId, ex.Message);
+                        
+                        // Return a special object to indicate cancellation
+                        return new Dictionary<string, object>
+                        {
+                            ["status"] = "cancelled",
+                            ["reason"] = "migration_cancelled",
+                            ["original_product_id"] = productId,
+                            ["sku"] = sku,
+                            ["name"] = productName
+                        };
+                    }
+                    else
+                    {
+                        _logger.LogError(ex, "🛒 [PROD-{ExecutionId}] ❌ Failed to create product '{ProductName}' (ID: {ProductId}, SKU: {Sku}) (INDIVIDUAL) in migration {MigrationId}: {ErrorMessage}",
+                            executionId, productName, productId, sku, migrationId, ex.Message);
 
-                    // Return null for failed products - sub-batch processor will filter them out
-                    return null;
+                        // Return null for actual failed products - sub-batch processor will filter them out
+                        return null;
+                    }
                 }
             }
 

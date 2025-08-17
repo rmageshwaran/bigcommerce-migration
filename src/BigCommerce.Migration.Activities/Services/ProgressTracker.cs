@@ -261,7 +261,18 @@ public class ProgressTracker : IProgressTracker
                 if (progress.EntityProgress.ContainsKey(entityType))
                 {
                     var entityProgress = progress.EntityProgress[entityType];
-                    entityProgress.Status = "completed";
+                    
+                    // 🚫 ENTITY STATUS CANCELLATION FIX: Check if migration was cancelled
+                    if (progress.IsCancelled == true)
+                    {
+                        entityProgress.Status = "cancelled";
+                        _logger.LogInformation("🚫 Marking {EntityType} status as 'cancelled' for migration {MigrationId}", entityType, migrationId);
+                    }
+                    else
+                    {
+                        entityProgress.Status = "completed";
+                    }
+                    
                     entityProgress.EndTime = DateTime.UtcNow;
                     entityProgress.ProcessingTime = entityProgress.EndTime.Value - entityProgress.StartTime;
                     entityProgress.ProgressPercentage = 100.0;
@@ -269,11 +280,22 @@ public class ProgressTracker : IProgressTracker
                 
                 CalculateOverallProgress(progress);
                 
-                // Check if all entities are completed
-                if (progress.EntityProgress.Values.All(e => e.Status == "completed"))
+                // Check if all entities are finished (completed or cancelled)
+                if (progress.EntityProgress.Values.All(e => e.Status == "completed" || e.Status == "cancelled"))
                 {
-                    progress.Status = "completed";
-                    progress.CurrentPhase = "completed";
+                    // 🚫 MIGRATION STATUS CANCELLATION FIX: Set overall status based on presence of cancelled entities
+                    bool hasAnyCancelled = progress.EntityProgress.Values.Any(e => e.Status == "cancelled");
+                    if (hasAnyCancelled || progress.IsCancelled == true)
+                    {
+                        progress.Status = "cancelled";
+                        progress.CurrentPhase = "cancelled";
+                        _logger.LogInformation("🚫 Setting overall migration status to 'cancelled' for migration {MigrationId}", migrationId);
+                    }
+                    else
+                    {
+                        progress.Status = "completed";
+                        progress.CurrentPhase = "completed";
+                    }
                 }
             }
             
@@ -352,10 +374,20 @@ public class ProgressTracker : IProgressTracker
                 entityProgress.ProgressPercentage = (double)entityProgress.ProcessedCount / entityProgress.TotalCount * 100.0;
             }
             
-            // 🚨 STATUS FIX: Update entity status based on whether all entities are accounted for
+            // 🚨 STATUS FIX: Update entity status based on whether all entities are accounted for and cancellation state
             if (entityProgress.ProcessedCount >= entityProgress.TotalCount)
             {
-                entityProgress.Status = "completed";
+                // 🚫 ENTITY STATUS CANCELLATION FIX: Check if migration was cancelled
+                if (progress.IsCancelled == true)
+                {
+                    entityProgress.Status = "cancelled";
+                    _logger.LogInformation("🚫 Setting {EntityType} status to 'cancelled' for migration {MigrationId} (all entities processed but migration was cancelled)", 
+                        update.EntityType, update.MigrationId);
+                }
+                else
+                {
+                    entityProgress.Status = "completed";
+                }
             }
             else if (entityProgress.ProcessedCount > 0)
             {

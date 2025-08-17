@@ -39,7 +39,8 @@ const mockMigrationProgress = {
   processedEntities: 18750,
   successfulEntities: 18650,
   failedEntities: 100,
-  skippedEntities: 0,
+          skippedEntities: 0,
+        cancelledEntities: 0,  // 🚨 CANCELLATION FIX: Add cancelledEntities
   overallProgressPercentage: 37.5,
   entityProgress: {
     Categories: {
@@ -49,6 +50,7 @@ const mockMigrationProgress = {
       successCount: 495,
       failureCount: 5,
       skippedCount: 0,
+      cancelledCount: 0,  // 🚨 CANCELLATION FIX: Add cancelledCount
       progressPercentage: 100,
       status: 'completed',
       startTime: new Date(Date.now() - 300000),
@@ -62,6 +64,7 @@ const mockMigrationProgress = {
       successCount: 9300,
       failureCount: 75,
       skippedCount: 0,
+      cancelledCount: 0,  // 🚨 CANCELLATION FIX: Add cancelledCount
       progressPercentage: 37.5,
       status: 'running',
       startTime: new Date(Date.now() - 240000),
@@ -74,6 +77,7 @@ const mockMigrationProgress = {
       successCount: 7475,
       failureCount: 25,
       skippedCount: 0,
+      cancelledCount: 0,  // 🚨 CANCELLATION FIX: Add cancelledCount
       progressPercentage: 37.5,
       status: 'running',
       startTime: new Date(Date.now() - 180000),
@@ -86,6 +90,7 @@ const mockMigrationProgress = {
       successCount: 1350,
       failureCount: 25,
       skippedCount: 0,
+      cancelledCount: 0,  // 🚨 CANCELLATION FIX: Add cancelledCount
       progressPercentage: 34.4,
       status: 'running',
       startTime: new Date(Date.now() - 120000),
@@ -98,6 +103,7 @@ const mockMigrationProgress = {
       successCount: 0,
       failureCount: 0,
       skippedCount: 0,
+      cancelledCount: 0,  // 🚨 CANCELLATION FIX: Add cancelledCount
       progressPercentage: 0,
       status: 'pending',
       startTime: new Date(),

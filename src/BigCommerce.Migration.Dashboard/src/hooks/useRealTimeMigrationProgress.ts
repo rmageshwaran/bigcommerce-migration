@@ -419,6 +419,7 @@ export const useRealTimeMigrationProgress = (
               successCount: entityProgress.successCount || 0,
               failureCount: entityProgress.failureCount || 0,
               skippedCount: entityProgress.skippedCount || 0,
+              cancelledCount: entityProgress.cancelledCount || 0,  // 🚨 CANCELLATION FIX: Add cancelledCount
               progressPercentage: entityProgress.progressPercentage || 0,
               status: mappedStatus,
               startTime: new Date(entityProgress.startTime || Date.now()),
@@ -496,6 +497,7 @@ export const useRealTimeMigrationProgress = (
             successCount: 0,
             failureCount: 0,
             skippedCount: 0,
+            cancelledCount: 0,  // 🚨 CANCELLATION FIX: Add cancelledCount
             progressPercentage: 0,
             status: 'pending',
             startTime: new Date(),

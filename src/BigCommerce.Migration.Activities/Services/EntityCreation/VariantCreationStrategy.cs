@@ -152,13 +152,46 @@ public class VariantCreationStrategy : IEntityCreationStrategy
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "❌ Failed to create batch of {Count} variants", batch50Variants.Count);
+                    // 🚫 CANCELLATION FIX: Distinguish between actual failures and cancellation-induced failures
+                    bool isCancellationError = ex.Message.Contains("Migration cancelled", StringComparison.OrdinalIgnoreCase) ||
+                                             ex.Message.Contains("User requested cancellation", StringComparison.OrdinalIgnoreCase) ||
+                                             ex is OperationCanceledException;
                     
-                    // ✅ ENHANCED ERROR HANDLING: Categorize and log with structured data
-                    await HandleBatchErrorAsync(ex, batch50Variants, migrationId, destinationStore, requestPayload, responsePayload, ct);
-                    
-                    // Continue-on-error policy: return empty list to continue with other batches
-                    return new List<Dictionary<string, object>>();
+                    if (isCancellationError)
+                    {
+                        _logger.LogInformation("🚫 Batch of {Count} variants was cancelled in migration {MigrationId}: {ErrorMessage}",
+                            batch50Variants.Count, migrationId, ex.Message);
+                        
+                        // Return cancelled entities instead of empty list
+                        var cancelledVariants = new List<Dictionary<string, object>>();
+                        for (int i = 0; i < batch50Variants.Count; i++)
+                        {
+                            var variant = batch50Variants[i];
+                            var sku = variant.TryGetValue("sku", out var skuValue) ? skuValue?.ToString() : "unknown";
+                            var productId = variant.TryGetValue("product_id", out var prodId) ? prodId?.ToString() : "unknown";
+                            
+                            cancelledVariants.Add(new Dictionary<string, object>
+                            {
+                                ["status"] = "cancelled",
+                                ["reason"] = "migration_cancelled",
+                                ["original_product_id"] = productId,
+                                ["sku"] = sku,
+                                ["batch_index"] = i
+                            });
+                        }
+                        
+                        return cancelledVariants;
+                    }
+                    else
+                    {
+                        _logger.LogError(ex, "❌ Failed to create batch of {Count} variants", batch50Variants.Count);
+                        
+                        // ✅ ENHANCED ERROR HANDLING: Categorize and log with structured data
+                        await HandleBatchErrorAsync(ex, batch50Variants, migrationId, destinationStore, requestPayload, responsePayload, ct);
+                        
+                        // Continue-on-error policy: return empty list to continue with other batches
+                        return new List<Dictionary<string, object>>();
+                    }
                 }
             }
 

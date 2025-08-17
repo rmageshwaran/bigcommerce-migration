@@ -118,9 +118,34 @@ public class ImageCreationStrategy : IEntityCreationStrategy
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "🖼️ [IMG-{ExecutionId}] Failed to create individual image for migration {MigrationId}", 
-                        executionId, migrationId);
-                    // Continue with next image instead of failing entire batch
+                    // 🚫 CANCELLATION FIX: Distinguish between actual failures and cancellation-induced failures
+                    bool isCancellationError = ex.Message.Contains("Migration cancelled", StringComparison.OrdinalIgnoreCase) ||
+                                             ex.Message.Contains("User requested cancellation", StringComparison.OrdinalIgnoreCase) ||
+                                             ex is OperationCanceledException;
+                    
+                    if (isCancellationError)
+                    {
+                        var imageUrl = image.TryGetValue("image_url", out var url) ? url?.ToString() : "unknown";
+                        var productId = image.TryGetValue("product_id", out var prodId) ? prodId?.ToString() : "unknown";
+                        
+                        _logger.LogInformation("🚫 [IMG-{ExecutionId}] Image '{ImageUrl}' for product {ProductId} was cancelled in migration {MigrationId}: {ErrorMessage}",
+                            executionId, imageUrl, productId, migrationId, ex.Message);
+                        
+                        // Return a special object to indicate cancellation
+                        createdImages.Add(new Dictionary<string, object>
+                        {
+                            ["status"] = "cancelled",
+                            ["reason"] = "migration_cancelled",
+                            ["original_product_id"] = productId,
+                            ["image_url"] = imageUrl
+                        });
+                    }
+                    else
+                    {
+                        _logger.LogError(ex, "🖼️ [IMG-{ExecutionId}] Failed to create individual image for migration {MigrationId}", 
+                            executionId, migrationId);
+                        // Continue with next image instead of failing entire batch
+                    }
                 }
             }
 

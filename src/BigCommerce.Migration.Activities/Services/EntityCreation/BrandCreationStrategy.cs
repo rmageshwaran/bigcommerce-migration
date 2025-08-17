@@ -127,11 +127,33 @@ public class BrandCreationStrategy : IEntityCreationStrategy
                     var brandName = brand.TryGetValue("name", out var name) ? name?.ToString() : "unknown";
                     var brandId = brand.TryGetValue("id", out var id) ? id?.ToString() : "unknown";
                     
-                    _logger.LogError(ex, "🏪 [BRAND-{ExecutionId}] ❌ Failed to create brand '{BrandName}' (ID: {BrandId}) (SUB-BATCH) in migration {MigrationId}",
-                        executionId, brandName, brandId, migrationId);
+                    // 🚫 CANCELLATION FIX: Distinguish between actual failures and cancellation-induced failures
+                    bool isCancellationError = ex.Message.Contains("Migration cancelled", StringComparison.OrdinalIgnoreCase) ||
+                                             ex.Message.Contains("User requested cancellation", StringComparison.OrdinalIgnoreCase) ||
+                                             ex is OperationCanceledException;
+                    
+                    if (isCancellationError)
+                    {
+                        _logger.LogInformation("🚫 [BRAND-{ExecutionId}] Brand '{BrandName}' (ID: {BrandId}) was cancelled in migration {MigrationId}: {ErrorMessage}",
+                            executionId, brandName, brandId, migrationId, ex.Message);
+                        
+                        // Return a special object to indicate cancellation
+                        return new Dictionary<string, object>
+                        {
+                            ["status"] = "cancelled",
+                            ["reason"] = "migration_cancelled",
+                            ["original_brand_id"] = brandId,
+                            ["name"] = brandName
+                        };
+                    }
+                    else
+                    {
+                        _logger.LogError(ex, "🏪 [BRAND-{ExecutionId}] ❌ Failed to create brand '{BrandName}' (ID: {BrandId}) (SUB-BATCH) in migration {MigrationId}",
+                            executionId, brandName, brandId, migrationId);
 
-                    // Return null for failed brands - sub-batch processor will filter them out
-                    return null;
+                        // Return null for failed brands - sub-batch processor will filter them out
+                        return null;
+                    }
                 }
             }
 

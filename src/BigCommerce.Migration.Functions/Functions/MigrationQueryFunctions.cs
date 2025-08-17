@@ -329,6 +329,7 @@ public class MigrationQueryFunctions
                         SuccessCount = entry.SuccessCount,
                         FailureCount = entry.FailureCount,
                         SkippedCount = entry.SkippedCount, // 🚨 FIX: Include SkippedCount from storage
+                        CancelledCount = entry.CancelledCount, // 🚨 CANCELLATION FIX: Include CancelledCount from storage
                         ProgressPercentage = entry.ProgressPercentage,
                         Status = entry.Status,
                         StartTime = entry.StartTime,
@@ -346,9 +347,10 @@ public class MigrationQueryFunctions
                     OverallProgressPercentage = migrationEntry.ProgressPercentage,
                     TotalEntities = migrationEntry.TotalEntities,
                     ProcessedEntities = migrationEntry.ProcessedEntities,
-                    SuccessfulEntities = migrationEntry.ProcessedEntities - migrationEntry.FailedEntities - migrationEntry.SkippedEntities,
+                    SuccessfulEntities = migrationEntry.ProcessedEntities - migrationEntry.FailedEntities - migrationEntry.SkippedEntities - migrationEntry.CancelledEntities,
                     FailedEntities = migrationEntry.FailedEntities,
                     SkippedEntities = migrationEntry.SkippedEntities, // 🚨 FIX: Include SkippedEntities in migration summary
+                    CancelledEntities = migrationEntry.CancelledEntities, // 🚨 CANCELLATION FIX: Include CancelledEntities in migration summary
                     CurrentPhase = migrationEntry.CurrentPhase ?? "completed",
                     EntityProgress = entityProgress
                 };

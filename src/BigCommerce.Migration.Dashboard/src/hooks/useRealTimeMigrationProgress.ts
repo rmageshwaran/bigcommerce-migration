@@ -107,7 +107,7 @@ export const useRealTimeMigrationProgress = (
     autoConnect = true,
     enableNotifications = true,
     enablePerformanceTracking = true,
-    pollInterval = 30000 // 30 seconds fallback
+    pollInterval = 3000 // 🆕 TASK 4.2: Reduced to 3 seconds for better real-time experience
   } = options;
 
   // State management

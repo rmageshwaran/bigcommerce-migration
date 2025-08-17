@@ -268,7 +268,8 @@ public class MigrationHttpFunctions
             MigrationProgress? detailedProgress = null;
             try
             {
-                detailedProgress = await _progressTracker.GetProgressAsync(migrationId, CancellationToken.None);
+                // 🆕 TASK 4.1: Use enhanced progress with real-time aggregated data
+                detailedProgress = await _progressTracker.GetLatestAggregatedProgressAsync(migrationId, CancellationToken.None);
             }
             catch (Exception ex)
             {
@@ -1846,8 +1847,8 @@ public class MigrationHttpFunctions
     {
         try
         {
-            // Try to get from progress tracker first
-            var progress = await _progressTracker.GetProgressAsync(migrationId, CancellationToken.None);
+            // 🆕 TASK 4.1: Try to get enhanced progress with real-time aggregated data first
+            var progress = await _progressTracker.GetLatestAggregatedProgressAsync(migrationId, CancellationToken.None);
             
             // If progress tracker has meaningful data, use it (but skip for completed migrations to ensure fresh data from storage)
             if (progress != null && progress.TotalEntities > 0 && progress.Status != "completed")

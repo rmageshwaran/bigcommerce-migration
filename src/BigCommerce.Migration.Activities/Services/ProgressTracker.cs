@@ -18,6 +18,7 @@ public class ProgressTracker : IProgressTracker
     private readonly IProgressEventPublisher _progressEventPublisher;
     private readonly ISignalREventFactory _signalREventFactory; // 🎯 CENTRALIZED SIGNALR: Factory for consistent event creation
     private readonly IMigrationStorageService? _storageService;
+    private readonly IIncrementEventsService? _incrementEventsService; // 🆕 INCREMENTAL PROGRESS: Service for writing chunk increment events
     
     /// <summary>
     /// Initializes a new instance of the ProgressTracker
@@ -26,17 +27,20 @@ public class ProgressTracker : IProgressTracker
     /// <param name="progressEventPublisher">Progress event publisher for queue-based SignalR broadcasting</param>
     /// <param name="signalREventFactory">SignalR event factory for consistent event creation</param>
     /// <param name="storageService">Storage service for persisting progress</param>
+    /// <param name="incrementEventsService">Increment events service for real-time progress tracking</param>
     public ProgressTracker(
         ILogger<ProgressTracker> logger, 
         IProgressEventPublisher progressEventPublisher,
         ISignalREventFactory signalREventFactory, // 🎯 CENTRALIZED SIGNALR: Factory for consistent event creation
-        IMigrationStorageService? storageService = null)
+        IMigrationStorageService? storageService = null,
+        IIncrementEventsService? incrementEventsService = null) // 🆕 INCREMENTAL PROGRESS: Optional for backward compatibility
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _progressEventPublisher = progressEventPublisher ?? throw new ArgumentNullException(nameof(progressEventPublisher));
         _signalREventFactory = signalREventFactory ?? throw new ArgumentNullException(nameof(signalREventFactory)); // 🎯 CENTRALIZED SIGNALR: Store factory reference
         _progressCache = new ConcurrentDictionary<string, MigrationProgress>();
         _storageService = storageService; // Optional for backward compatibility
+        _incrementEventsService = incrementEventsService; // 🆕 INCREMENTAL PROGRESS: Optional for backward compatibility
     }
     
     /// <inheritdoc />
@@ -658,6 +662,195 @@ public class ProgressTracker : IProgressTracker
         {
             _logger.LogWarning(ex, "Failed to publish entity progress event for migration {MigrationId}, entity {EntityType}", migrationId, entityType);
             // Don't rethrow - progress events should not break the migration
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task IncrementProgressAsync(
+        string migrationId,
+        string entityType,
+        int chunkNumber,
+        int chunkStartIndex,
+        int chunkSize,
+        int successfulEntities,
+        int failedEntities,
+        int skippedEntities,
+        int cancelledEntities,
+        DateTime processingStartTime,
+        DateTime processingEndTime,
+        string sourceStore,
+        string destinationStore,
+        IList<string>? errors = null,
+        CancellationToken cancellationToken = default)
+    {
+        // Validate required parameters
+        if (string.IsNullOrEmpty(migrationId))
+            throw new ArgumentException("Migration ID cannot be null or empty", nameof(migrationId));
+        
+        if (string.IsNullOrEmpty(entityType))
+            throw new ArgumentException("Entity type cannot be null or empty", nameof(entityType));
+        
+        if (string.IsNullOrEmpty(sourceStore))
+            throw new ArgumentException("Source store cannot be null or empty", nameof(sourceStore));
+        
+        if (string.IsNullOrEmpty(destinationStore))
+            throw new ArgumentException("Destination store cannot be null or empty", nameof(destinationStore));
+
+        // If no increment events service available, log warning and return (backward compatibility)
+        if (_incrementEventsService == null)
+        {
+            _logger.LogWarning("❌ INCREMENTAL-PROGRESS: IncrementEventsService not available - skipping incremental progress update for {MigrationId}:{EntityType}:Chunk{ChunkNumber}. " +
+                "This means progress data will be lost on cancellation!", migrationId, entityType, chunkNumber);
+            return;
+        }
+        
+        _logger.LogInformation("✅ INCREMENTAL-PROGRESS: IncrementEventsService available - proceeding with incremental progress recording for {MigrationId}:{EntityType}:Chunk{ChunkNumber}",
+            migrationId, entityType, chunkNumber);
+
+        try
+        {
+            // Create chunk increment event
+            _logger.LogInformation("🔧 INCREMENTAL-PROGRESS: Creating ChunkIncrementEvent for {MigrationId}:{EntityType}:Chunk{ChunkNumber} " +
+                "with Success={Success}, Failed={Failed}, Skipped={Skipped}, Cancelled={Cancelled}",
+                migrationId, entityType, chunkNumber, successfulEntities, failedEntities, skippedEntities, cancelledEntities);
+                
+            var incrementEvent = ChunkIncrementEvent.Create(
+                migrationId, entityType, chunkNumber, chunkStartIndex, chunkSize,
+                successfulEntities, failedEntities, skippedEntities, cancelledEntities,
+                processingStartTime, processingEndTime, sourceStore, destinationStore, errors);
+
+            _logger.LogInformation("📋 INCREMENTAL-PROGRESS: ChunkIncrementEvent created successfully - PartitionKey={PartitionKey}, RowKey={RowKey}, Timestamp={Timestamp}",
+                incrementEvent.PartitionKey, incrementEvent.RowKey, incrementEvent.Timestamp);
+
+            // Fire-and-forget write to prevent blocking chunk processing
+            _logger.LogInformation("🚀 INCREMENTAL-PROGRESS: Starting async write to IncrementEventsService for {MigrationId}:{EntityType}:Chunk{ChunkNumber}",
+                migrationId, entityType, chunkNumber);
+                
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    _logger.LogInformation("📤 INCREMENTAL-PROGRESS: Calling IncrementEventsService.WriteChunkIncrementAsync for {MigrationId}:{EntityType}:Chunk{ChunkNumber}",
+                        migrationId, entityType, chunkNumber);
+                        
+                    await _incrementEventsService.WriteChunkIncrementAsync(incrementEvent, cancellationToken);
+                    
+                    _logger.LogInformation("✅ INCREMENTAL-PROGRESS: Chunk increment event written successfully for {MigrationId}:{EntityType}:Chunk{ChunkNumber} " +
+                                   "Success={Success}, Failed={Failed}, Skipped={Skipped}, Cancelled={Cancelled}",
+                        migrationId, entityType, chunkNumber, successfulEntities, failedEntities, skippedEntities, cancelledEntities);
+                }
+                catch (OperationCanceledException)
+                {
+                    _logger.LogInformation("🚫 INCREMENTAL-PROGRESS: Incremental progress write cancelled for {MigrationId}:{EntityType}:Chunk{ChunkNumber}",
+                        migrationId, entityType, chunkNumber);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "❌ INCREMENTAL-PROGRESS: Failed to write incremental progress for {MigrationId}:{EntityType}:Chunk{ChunkNumber} - migration continues. Error: {ErrorMessage}",
+                        migrationId, entityType, chunkNumber, ex.Message);
+                    // Don't throw - incremental progress failures should not break migration
+                }
+            }, cancellationToken);
+
+            // Log the immediate call completion (not the actual write completion)
+            _logger.LogDebug("🚀 Incremental progress write initiated for {MigrationId}:{EntityType}:Chunk{ChunkNumber}",
+                migrationId, entityType, chunkNumber);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to initiate incremental progress write for {MigrationId}:{EntityType}:Chunk{ChunkNumber} - migration continues",
+                migrationId, entityType, chunkNumber);
+            // Don't throw - incremental progress failures should not break migration
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<MigrationProgress> GetLatestAggregatedProgressAsync(string migrationId, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        
+        if (string.IsNullOrEmpty(migrationId))
+            throw new ArgumentException("Migration ID cannot be null or empty", nameof(migrationId));
+
+        try
+        {
+            // Start with cached progress as baseline
+            var cachedProgress = await GetProgressAsync(migrationId, cancellationToken);
+            
+            // If no increment events service available, return cached progress
+            if (_incrementEventsService == null)
+            {
+                _logger.LogDebug("IncrementEventsService not available - returning cached progress for {MigrationId}", migrationId);
+                return cachedProgress;
+            }
+
+            try
+            {
+                // Get aggregated increment events for real-time data
+                var aggregatedProgress = await _incrementEventsService.GetAggregatedProgressAsync(migrationId, cancellationToken);
+                
+                if (aggregatedProgress.Any())
+                {
+                    _logger.LogDebug("Found {EntityCount} entity types with incremental progress for migration {MigrationId}",
+                        aggregatedProgress.Count, migrationId);
+
+                    // Create enhanced progress by combining cached data with real-time aggregated data
+                    var enhancedProgress = CreateProgressCopy(cachedProgress);
+                    
+                    // Update entity progress with real-time aggregated data
+                    foreach (var (entityType, summary) in aggregatedProgress)
+                    {
+                        enhancedProgress.EntityProgress[entityType] = new EntityProgress
+                        {
+                            EntityType = entityType,
+                            TotalCount = enhancedProgress.EntityProgress.ContainsKey(entityType) 
+                                ? enhancedProgress.EntityProgress[entityType].TotalCount 
+                                : summary.TotalProcessed, // Use processed count as fallback if total unknown
+                            ProcessedCount = summary.TotalProcessed,
+                            SuccessCount = summary.TotalSuccessful,
+                            FailureCount = summary.TotalFailed,
+                            SkippedCount = summary.TotalSkipped,
+                            CancelledCount = summary.TotalCancelled,
+                            ProgressPercentage = enhancedProgress.EntityProgress.ContainsKey(entityType) && 
+                                                enhancedProgress.EntityProgress[entityType].TotalCount > 0
+                                ? (double)summary.TotalProcessed / enhancedProgress.EntityProgress[entityType].TotalCount * 100.0
+                                : summary.SuccessRate, // Use success rate as fallback
+                            Status = summary.TotalProcessed > 0 ? "processing" : "pending",
+                            StartTime = summary.FirstChunkStartTime ?? DateTime.UtcNow,
+                            EndTime = summary.LastChunkEndTime,
+                            ProcessingTime = summary.TotalProcessingTime
+                        };
+                    }
+
+                    // Recalculate overall progress based on real-time data
+                    lock (_lock)
+                    {
+                        CalculateOverallProgress(enhancedProgress);
+                        enhancedProgress.LastUpdated = DateTime.UtcNow;
+                        enhancedProgress.ElapsedTime = enhancedProgress.LastUpdated - enhancedProgress.StartTime;
+                    }
+
+                    _logger.LogDebug("✅ Enhanced progress with real-time data for migration {MigrationId}: {OverallProgress:F1}% complete",
+                        migrationId, enhancedProgress.OverallProgressPercentage);
+
+                    return enhancedProgress;
+                }
+                else
+                {
+                    _logger.LogDebug("No incremental progress data found for migration {MigrationId} - returning cached progress", migrationId);
+                    return cachedProgress;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to get aggregated incremental progress for migration {MigrationId} - falling back to cached progress", migrationId);
+                return cachedProgress;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("GetLatestAggregatedProgressAsync was cancelled for migration {MigrationId}", migrationId);
+            throw;
         }
     }
 

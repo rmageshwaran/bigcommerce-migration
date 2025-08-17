@@ -61,12 +61,17 @@ export const config = {
     enableDebugLogging: getEnvBoolean('VITE_ENABLE_DEBUG_LOGGING', import.meta.env.DEV),
   },
 
-  // Dashboard Configuration
+  // Dashboard Configuration - 🆕 TASK 4.2: Optimized for real-time incremental progress
   dashboard: {
-    defaultRefreshInterval: getEnvNumber('VITE_DEFAULT_REFRESH_INTERVAL', 10000),
-    pollingInterval: getEnvNumber('VITE_POLLING_INTERVAL', 5000),
+    // 🚀 TASK 4.2: Reduced from 10s to 3s for better real-time experience with incremental progress
+    defaultRefreshInterval: getEnvNumber('VITE_DEFAULT_REFRESH_INTERVAL', 3000),
+    // 🚀 TASK 4.2: Reduced from 5s to 2s for faster updates when SignalR unavailable  
+    pollingInterval: getEnvNumber('VITE_POLLING_INTERVAL', 2000),
     maxEventHistory: getEnvNumber('VITE_MAX_EVENT_HISTORY', 100),
     performanceBaseline: getEnvNumber('VITE_PERFORMANCE_BASELINE', 100),
+    // 🆕 TASK 4.2: New configuration for progressive loading
+    progressiveLoadingThreshold: getEnvNumber('VITE_PROGRESSIVE_LOADING_THRESHOLD', 10000), // 10k entities
+    maxConcurrentRequests: getEnvNumber('VITE_MAX_CONCURRENT_REQUESTS', 3),
   },
 };
 

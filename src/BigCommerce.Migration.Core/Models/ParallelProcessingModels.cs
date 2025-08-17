@@ -18,6 +18,13 @@ public class ParallelProcessingConfiguration
     public int? MaxConcurrentBatches { get; set; }
 
     /// <summary>
+    /// Migration identifier for progress tracking context
+    /// Task 3.2: Required for batch-level incremental progress updates
+    /// </summary>
+    [JsonPropertyName("migrationId")]
+    public string MigrationId { get; set; } = string.Empty;
+
+    /// <summary>
     /// Store ID for rate limit context from Phase 1 dynamic rate limiting
     /// </summary>
     [JsonPropertyName("storeId")]

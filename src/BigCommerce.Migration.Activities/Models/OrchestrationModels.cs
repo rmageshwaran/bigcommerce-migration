@@ -649,6 +649,24 @@ public class CheckRateLimitRequest
 }
 
 /// <summary>
+/// Request model for getting aggregated progress information
+/// Part of Task 3.3: Orchestrator Simplification
+/// </summary>
+public class GetProgressRequest
+{
+    /// <summary>
+    /// Migration identifier
+    /// </summary>
+    public string MigrationId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Optional entity type filter (e.g., "products", "categories")
+    /// If null or empty, returns progress for all entity types
+    /// </summary>
+    public string? EntityType { get; set; }
+}
+
+/// <summary>
 /// Request model for updating entity progress
 /// Phase 4.1: Enhanced with soft cancellation token support for efficient cancellation propagation
 /// </summary>

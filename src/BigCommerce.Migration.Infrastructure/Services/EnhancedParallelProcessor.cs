@@ -33,6 +33,7 @@ public class EnhancedParallelProcessor : BigCommerce.Migration.Core.Interfaces.I
     private readonly ISignalREventFactory _signalREventFactory; // 🎯 CENTRALIZED SIGNALR: Factory for consistent event creation
     private readonly ILogger<EnhancedParallelProcessor> _logger;
     private readonly IDateTimeProvider _dateTimeProvider;
+    private readonly IProgressTracker _progressTracker; // 🆕 TASK 3.2: Batch-level progress tracking
     
     // Concurrency management
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _storeSemaphores;
@@ -72,12 +73,14 @@ public class EnhancedParallelProcessor : BigCommerce.Migration.Core.Interfaces.I
         IDynamicRateLimiter dynamicRateLimiter,
         ISignalREventFactory signalREventFactory, // 🎯 CENTRALIZED SIGNALR: Factory for consistent event creation
         ILogger<EnhancedParallelProcessor> logger,
-        IDateTimeProvider dateTimeProvider)
+        IDateTimeProvider dateTimeProvider,
+        IProgressTracker progressTracker) // 🆕 TASK 3.2: Batch-level progress tracking
     {
         _dynamicRateLimiter = dynamicRateLimiter ?? throw new ArgumentNullException(nameof(dynamicRateLimiter));
         _signalREventFactory = signalREventFactory ?? throw new ArgumentNullException(nameof(signalREventFactory)); // 🎯 CENTRALIZED SIGNALR: Store factory reference
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _dateTimeProvider = dateTimeProvider ?? throw new ArgumentNullException(nameof(dateTimeProvider));
+        _progressTracker = progressTracker ?? throw new ArgumentNullException(nameof(progressTracker)); // 🆕 TASK 3.2: Store progress tracker reference
 
         _storeSemaphores = new ConcurrentDictionary<string, SemaphoreSlim>();
         _storeMetrics = new ConcurrentDictionary<string, ParallelPerformanceMetrics>();
@@ -885,6 +888,9 @@ public class EnhancedParallelProcessor : BigCommerce.Migration.Core.Interfaces.I
         var endTime = _dateTimeProvider.UtcNow;
         var totalTime = endTime - startTime;
 
+        // 🆕 TASK 3.2: Record aggregated batch progress for enhanced monitoring
+        await RecordAggregatedBatchProgress(config, batchResults, startTime, endTime);
+
         // Aggregate results
         var result = new ParallelProcessingResult
         {
@@ -1081,6 +1087,9 @@ public class EnhancedParallelProcessor : BigCommerce.Migration.Core.Interfaces.I
             await progressAggregator.ReportBatchCompletionAsync(
                 batchNumber, result.TotalProcessed, result.FailedEntities, 
                 result.ProcessingTime, result.Errors, cancellationToken);
+
+            // 🆕 TASK 3.2: Record batch-level incremental progress for finer granularity
+            await RecordBatchIncrementalProgress(config, batchNumber, result, batchStartTime, _dateTimeProvider.UtcNow);
 
             return result;
         }
@@ -1293,6 +1302,185 @@ public class EnhancedParallelProcessor : BigCommerce.Migration.Core.Interfaces.I
         
         // Weighted average
         return (healthConfidence * 0.4 + rateConfidence * 0.3 + systemConfidence * 0.2 + optimalRateConfidence * 0.1);
+    }
+
+    #endregion
+
+    #region Task 3.2: Batch-Level Incremental Progress Methods
+
+    /// <summary>
+    /// 🆕 TASK 3.2: Records incremental progress for a completed batch
+    /// Provides finer granularity than chunk-level updates by aggregating multiple chunks into batch-level updates
+    /// 
+    /// Design Principles:
+    /// - Fire-and-forget: Doesn't block batch processing if increment write fails
+    /// - Aggregated data: Combines multiple chunk results into batch summary
+    /// - Performance monitoring: Tracks batch-level throughput and success rates
+    /// - Enhanced analytics: Enables batch-level performance analysis
+    /// </summary>
+    /// <param name="config">Parallel processing configuration with migration context</param>
+    /// <param name="batchNumber">Batch number within the parallel processing run</param>
+    /// <param name="result">Batch processing result with aggregated chunk data</param>
+    /// <param name="batchStartTime">When batch processing started</param>
+    /// <param name="batchEndTime">When batch processing completed</param>
+    private Task RecordBatchIncrementalProgress(
+        ParallelProcessingConfiguration config,
+        int batchNumber,
+        BigCommerce.Migration.Core.Interfaces.BatchProcessingResult result,
+        DateTime batchStartTime,
+        DateTime batchEndTime)
+    {
+        // Skip if no migration context available
+        if (string.IsNullOrEmpty(config.MigrationId) || string.IsNullOrEmpty(config.EntityType))
+        {
+            _logger.LogDebug("🔍 [TASK-3.2] Skipping batch progress recording - no migration context available for batch {BatchNumber}", batchNumber);
+            return Task.CompletedTask;
+        }
+
+        try
+        {
+            // Extract store information from config (fallback to "unknown" if not available)
+            var sourceStoreId = config.StoreId ?? "unknown";
+            var destinationStoreId = config.StoreId ?? "unknown"; // In parallel processor, we typically only have one store context
+
+            // Collect error messages for detailed tracking
+            var errors = result.Errors?.Any() == true ? result.Errors : null;
+
+            _logger.LogDebug("🚀 [TASK-3.2] Recording batch-level incremental progress: Batch {BatchNumber} " +
+                           "Success={Success}, Failed={Failed}, Skipped={Skipped}, Cancelled={Cancelled}",
+                batchNumber, result.SuccessfulEntities, result.FailedEntities, 
+                result.SkippedEntities, result.CancelledEntities);
+
+            // Use a special batch-level chunk number (negative to distinguish from regular chunks)
+            var batchChunkNumber = -batchNumber; // Negative numbers indicate batch-level entries
+
+            // Fire-and-forget call to avoid blocking batch processing
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await _progressTracker.IncrementProgressAsync(
+                        migrationId: config.MigrationId,
+                        entityType: $"{config.EntityType}-batch", // Special entity type for batch-level tracking
+                        chunkNumber: batchChunkNumber,
+                        chunkStartIndex: batchNumber * 1000, // Estimated start index for batch
+                        chunkSize: result.TotalProcessed,
+                        successfulEntities: result.SuccessfulEntities,
+                        failedEntities: result.FailedEntities,
+                        skippedEntities: result.SkippedEntities,
+                        cancelledEntities: result.CancelledEntities,
+                        processingStartTime: batchStartTime,
+                        processingEndTime: batchEndTime,
+                        sourceStore: sourceStoreId,
+                        destinationStore: destinationStoreId,
+                        errors: errors);
+
+                    _logger.LogDebug("✅ [TASK-3.2] Batch-level progress recorded for {MigrationId}:{EntityType}:Batch{BatchNumber}",
+                        config.MigrationId, config.EntityType, batchNumber);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "⚠️ [TASK-3.2] Failed to record batch-level progress for {MigrationId}:{EntityType}:Batch{BatchNumber} - processing continues",
+                        config.MigrationId, config.EntityType, batchNumber);
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "⚠️ [TASK-3.2] Failed to initiate batch-level progress recording for {MigrationId}:{EntityType}:Batch{BatchNumber} - processing continues",
+                config.MigrationId, config.EntityType, batchNumber);
+            // Don't throw - batch-level progress failures should not break parallel processing
+        }
+        
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// 🆕 TASK 3.2: Records aggregated progress after all batches complete
+    /// Provides batch-level summary for performance monitoring and analytics
+    /// 
+    /// Design Principles:
+    /// - Summary analytics: Aggregates all batch results into summary metrics
+    /// - Performance insights: Tracks parallel processing efficiency
+    /// - Monitoring data: Enables batch-level performance analysis
+    /// - Non-blocking: Fire-and-forget to avoid impacting parallel processor performance
+    /// </summary>
+    /// <param name="config">Parallel processing configuration with migration context</param>
+    /// <param name="batchResults">Results from all completed batches</param>
+    /// <param name="processingStartTime">When parallel processing started</param>
+    /// <param name="processingEndTime">When parallel processing completed</param>
+    private Task RecordAggregatedBatchProgress(
+        ParallelProcessingConfiguration config,
+        BigCommerce.Migration.Core.Interfaces.BatchProcessingResult[] batchResults,
+        DateTime processingStartTime,
+        DateTime processingEndTime)
+    {
+        // Skip if no migration context available
+        if (string.IsNullOrEmpty(config.MigrationId) || string.IsNullOrEmpty(config.EntityType))
+        {
+            _logger.LogDebug("🔍 [TASK-3.2] Skipping aggregated batch progress recording - no migration context available");
+            return Task.CompletedTask;
+        }
+
+        try
+        {
+            // Calculate aggregated totals
+            var totalSuccessful = batchResults.Sum(r => r.SuccessfulEntities);
+            var totalFailed = batchResults.Sum(r => r.FailedEntities);
+            var totalSkipped = batchResults.Sum(r => r.SkippedEntities);
+            var totalCancelled = batchResults.Sum(r => r.CancelledEntities);
+            var totalProcessed = batchResults.Sum(r => r.TotalProcessed);
+
+            // Collect error summary
+            var allErrors = batchResults.SelectMany(r => r.Errors ?? new List<string>()).ToList();
+            var errorSummary = allErrors.Take(10).ToList(); // Limit to first 10 errors
+
+            _logger.LogDebug("🚀 [TASK-3.2] Recording aggregated batch progress: {BatchCount} batches, " +
+                           "Total: {Total}, Success: {Success}, Failed: {Failed}, Skipped: {Skipped}, Cancelled: {Cancelled}",
+                batchResults.Length, totalProcessed, totalSuccessful, totalFailed, totalSkipped, totalCancelled);
+
+            // Use a special aggregated chunk number (large negative number)
+            var aggregatedChunkNumber = -9999; // Special number for aggregated batch entries
+
+            // Fire-and-forget call to avoid blocking parallel processor
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await _progressTracker.IncrementProgressAsync(
+                        migrationId: config.MigrationId,
+                        entityType: $"{config.EntityType}-aggregated", // Special entity type for aggregated tracking
+                        chunkNumber: aggregatedChunkNumber,
+                        chunkStartIndex: 0,
+                        chunkSize: totalProcessed,
+                        successfulEntities: totalSuccessful,
+                        failedEntities: totalFailed,
+                        skippedEntities: totalSkipped,
+                        cancelledEntities: totalCancelled,
+                        processingStartTime: processingStartTime,
+                        processingEndTime: processingEndTime,
+                        sourceStore: config.StoreId ?? "unknown",
+                        destinationStore: config.StoreId ?? "unknown",
+                        errors: errorSummary);
+
+                    _logger.LogDebug("✅ [TASK-3.2] Aggregated batch progress recorded for {MigrationId}:{EntityType} - {BatchCount} batches",
+                        config.MigrationId, config.EntityType, batchResults.Length);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "⚠️ [TASK-3.2] Failed to record aggregated batch progress for {MigrationId}:{EntityType} - processing continues",
+                        config.MigrationId, config.EntityType);
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "⚠️ [TASK-3.2] Failed to initiate aggregated batch progress recording for {MigrationId}:{EntityType} - processing continues",
+                config.MigrationId, config.EntityType);
+            // Don't throw - aggregated progress failures should not break parallel processing
+        }
+        
+        return Task.CompletedTask;
     }
 
     #endregion

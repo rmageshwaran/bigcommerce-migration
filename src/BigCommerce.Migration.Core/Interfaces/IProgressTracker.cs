@@ -39,6 +39,63 @@ public interface IProgressTracker
     /// <param name="cancellationToken">Cancellation token</param>
     Task CompleteEntityProcessingAsync(string migrationId, string entityType, CancellationToken cancellationToken = default);
     
+    /// <summary>
+    /// Records incremental progress after a chunk of entities has been processed
+    /// This is the key method that enables real-time progress tracking and prevents data loss during cancellations
+    /// 
+    /// Design Principles:
+    /// - Fire-and-forget: Doesn't block chunk processing if increment write fails
+    /// - Immediate persistence: Writes to ChunkIncrementEvents table immediately
+    /// - Graceful failure: Increment failures don't break the migration
+    /// - Thread-safe: Safe to call from multiple concurrent chunks
+    /// </summary>
+    /// <param name="migrationId">Migration identifier</param>
+    /// <param name="entityType">Type of entity being processed</param>
+    /// <param name="chunkNumber">Sequential chunk number (1, 2, 3, ...)</param>
+    /// <param name="chunkStartIndex">Starting index of entities in this chunk</param>
+    /// <param name="chunkSize">Number of entities in this chunk</param>
+    /// <param name="successfulEntities">Number of entities successfully created</param>
+    /// <param name="failedEntities">Number of entities that failed to create</param>
+    /// <param name="skippedEntities">Number of entities skipped (duplicates, etc.)</param>
+    /// <param name="cancelledEntities">Number of entities cancelled mid-processing</param>
+    /// <param name="processingStartTime">When chunk processing started</param>
+    /// <param name="processingEndTime">When chunk processing completed</param>
+    /// <param name="sourceStore">Source BigCommerce store ID</param>
+    /// <param name="destinationStore">Destination BigCommerce store ID</param>
+    /// <param name="errors">List of error messages (optional)</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>Task that completes when increment is attempted (fire-and-forget)</returns>
+    Task IncrementProgressAsync(
+        string migrationId,
+        string entityType,
+        int chunkNumber,
+        int chunkStartIndex,
+        int chunkSize,
+        int successfulEntities,
+        int failedEntities,
+        int skippedEntities,
+        int cancelledEntities,
+        DateTime processingStartTime,
+        DateTime processingEndTime,
+        string sourceStore,
+        string destinationStore,
+        IList<string>? errors = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets the latest aggregated progress by combining increment events with cached progress
+    /// This method provides real-time progress that includes all completed chunks, even if migration was cancelled
+    /// 
+    /// Key Benefits:
+    /// - Shows accurate progress even after cancellation
+    /// - Combines incremental data with cached progress for complete picture
+    /// - Uses query-time aggregation for consistency
+    /// - Fallback to cached progress if increment events unavailable
+    /// </summary>
+    /// <param name="migrationId">Migration identifier</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>Migration progress with real-time incremental data</returns>
+    Task<MigrationProgress> GetLatestAggregatedProgressAsync(string migrationId, CancellationToken cancellationToken = default);
 
 }
 

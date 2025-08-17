@@ -52,6 +52,9 @@ public static class ServiceCollectionExtensions
         // Add core services
         services.AddCoreServices(configuration);
 
+        // Add incremental progress services (Task 2.1: Increment Events Infrastructure)
+        services.AddIncrementalProgressServices(configuration);
+
         // Add orchestration services (Strategy Pattern and Activity implementations)
         services.AddOrchestrationServices();
 
@@ -516,7 +519,8 @@ public static class ServiceCollectionExtensions
             var progressEventPublisher = serviceProvider.GetRequiredService<IProgressEventPublisher>();
             var signalREventFactory = serviceProvider.GetRequiredService<ISignalREventFactory>(); // 🎯 CENTRALIZED SIGNALR: Factory for consistent event creation
             var storageService = serviceProvider.GetService<IMigrationStorageService>(); // Optional dependency
-            return new ProgressTracker(logger, progressEventPublisher, signalREventFactory, storageService);
+            var incrementEventsService = serviceProvider.GetService<IIncrementEventsService>(); // 🆕 INCREMENTAL PROGRESS: Optional dependency for real-time progress
+            return new ProgressTracker(logger, progressEventPublisher, signalREventFactory, storageService, incrementEventsService);
         });
 
         // Register entity processing services (newly created during refactoring)
@@ -549,7 +553,17 @@ public static class ServiceCollectionExtensions
         
         // ✅ **P2.5: Phase 2 Enhanced Parallel Processing Pipeline** (Required for 17.0x throughput)
         // These services were moved from Orchestration project to ensure proper DI resolution
-        services.AddSingleton<IEnhancedParallelProcessor, EnhancedParallelProcessor>();
+        // 🆕 TASK 3.2: Enhanced with batch-level incremental progress tracking
+        services.AddSingleton<IEnhancedParallelProcessor>(serviceProvider =>
+        {
+            var dynamicRateLimiter = serviceProvider.GetRequiredService<IDynamicRateLimiter>();
+            var signalREventFactory = serviceProvider.GetRequiredService<ISignalREventFactory>();
+            var logger = serviceProvider.GetRequiredService<ILogger<EnhancedParallelProcessor>>();
+            var dateTimeProvider = serviceProvider.GetRequiredService<IDateTimeProvider>();
+            var progressTracker = serviceProvider.GetRequiredService<IProgressTracker>(); // 🆕 TASK 3.2: Batch-level progress tracking
+            
+            return new EnhancedParallelProcessor(dynamicRateLimiter, signalREventFactory, logger, dateTimeProvider, progressTracker);
+        });
         
 
         return services;

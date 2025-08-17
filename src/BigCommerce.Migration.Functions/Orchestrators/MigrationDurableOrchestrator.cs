@@ -341,14 +341,35 @@ public static class MigrationDurableOrchestrator
                 }
             }
 
-            // Step 6: Calculate final results with enhanced cancellation detection
-            var totalProcessed = result.EntityResults.Values.Sum(r => r.ProcessedEntities);
-            var totalSuccessful = result.EntityResults.Values.Sum(r => r.SuccessfulEntities);
-            var totalFailed = result.EntityResults.Values.Sum(r => r.FailedEntities);
+            // 🆕 TASK 3.3: Simplified final results using database as source of truth
+            // Get latest aggregated progress from database (includes real-time incremental updates)
+            try
+            {
+                var finalProgress = await context.CallActivityAsync<MigrationProgress>(
+                    "GetLatestAggregatedProgressActivity", 
+                    new GetProgressRequest { MigrationId = migrationId, EntityType = null }); // null = all entities
 
-            result.TotalEntitiesProcessed = totalProcessed;
-            result.TotalEntitiesSuccessful = totalSuccessful;
-            result.TotalEntitiesFailed = totalFailed;
+                // Simple assignment - database is the single source of truth
+                result.TotalEntitiesProcessed = finalProgress.ProcessedEntities;
+                result.TotalEntitiesSuccessful = finalProgress.SuccessfulEntities;
+                result.TotalEntitiesFailed = finalProgress.FailedEntities;
+                
+                logger.LogInformation("✅ [TASK-3.3] Final results from database: Processed={Processed}, Successful={Successful}, Failed={Failed}, Skipped={Skipped}, Cancelled={Cancelled}", 
+                    result.TotalEntitiesProcessed, result.TotalEntitiesSuccessful, result.TotalEntitiesFailed, finalProgress.SkippedEntities, finalProgress.CancelledEntities);
+            }
+            catch (Exception progressEx)
+            {
+                logger.LogWarning(progressEx, "⚠️ [TASK-3.3] Could not retrieve final progress from database, falling back to entity result aggregation");
+                
+                // Fallback to old method if database query fails
+                var totalProcessed = result.EntityResults.Values.Sum(r => r.ProcessedEntities);
+                var totalSuccessful = result.EntityResults.Values.Sum(r => r.SuccessfulEntities);
+                var totalFailed = result.EntityResults.Values.Sum(r => r.FailedEntities);
+
+                result.TotalEntitiesProcessed = totalProcessed;
+                result.TotalEntitiesSuccessful = totalSuccessful;
+                result.TotalEntitiesFailed = totalFailed;
+            }
             result.EndTime = context.CurrentUtcDateTime;
             result.Duration = result.EndTime.Value - result.StartTime;
 
@@ -371,7 +392,7 @@ public static class MigrationDurableOrchestrator
                     
                     logger.LogWarning("Migration was cancelled for MigrationId: {MigrationId} via {Source}. " +
                                     "Reason: {Reason}, Processed: {ProcessedCount}, Successful: {SuccessfulCount}", 
-                        migrationId, cancellationState.CancellationSource, cancellationState.CancellationReason, totalProcessed, totalSuccessful);
+                        migrationId, cancellationState.CancellationSource, cancellationState.CancellationReason, result.TotalEntitiesProcessed, result.TotalEntitiesSuccessful);
                 }
                 else
                 {
@@ -380,7 +401,7 @@ public static class MigrationDurableOrchestrator
                     
                     logger.LogWarning("Migration was cancelled for MigrationId: {MigrationId}. " +
                                     "Cancelled entities: {CancelledEntities}, Processed: {ProcessedCount}, Successful: {SuccessfulCount}", 
-                        migrationId, cancelledEntityTypes, totalProcessed, totalSuccessful);
+                        migrationId, cancelledEntityTypes, result.TotalEntitiesProcessed, result.TotalEntitiesSuccessful);
                 }
                 
                 // Complete migration as cancelled - update storage service for HTTP API
@@ -390,7 +411,7 @@ public static class MigrationDurableOrchestrator
             }
 
             // Determine final status for non-cancelled migrations
-            if (totalProcessed == 0)
+            if (result.TotalEntitiesProcessed == 0)
             {
                 result.Status = "Failed";
                 result.ErrorMessage = "No entities were processed";
@@ -400,37 +421,37 @@ public static class MigrationDurableOrchestrator
                 
                 // Migration failed event will be handled by queue-based system
             }
-            else if (totalFailed == 0)
+            else if (result.TotalEntitiesFailed == 0)
             {
                 result.Status = "Completed";
                 logger.LogInformation("Migration completed successfully for MigrationId: {MigrationId}. " +
                                     "Processed: {ProcessedCount}, Successful: {SuccessfulCount}", 
-                    migrationId, totalProcessed, totalSuccessful);
+                    migrationId, result.TotalEntitiesProcessed, result.TotalEntitiesSuccessful);
                 
                 // Complete migration - update storage service for HTTP API
                 await CompleteMigrationAsync(context, migrationId, result, MigrationStatus.Completed);
                 
                 // Migration completed event will be handled by queue-based system
             }
-            else if (totalSuccessful > 0)
+            else if (result.TotalEntitiesSuccessful > 0)
             {
                 result.Status = "CompletedWithErrors";
-                result.ErrorMessage = $"Migration completed with {totalFailed} failed entities out of {totalProcessed} total";
+                result.ErrorMessage = $"Migration completed with {result.TotalEntitiesFailed} failed entities out of {result.TotalEntitiesProcessed} total";
                 logger.LogWarning("Migration completed with errors for MigrationId: {MigrationId}. " +
                                 "Processed: {ProcessedCount}, Successful: {SuccessfulCount}, Failed: {FailedCount}", 
-                    migrationId, totalProcessed, totalSuccessful, totalFailed);
+                    migrationId, result.TotalEntitiesProcessed, result.TotalEntitiesSuccessful, result.TotalEntitiesFailed);
                 
                 // Complete migration - update storage service for HTTP API
                 await CompleteMigrationAsync(context, migrationId, result, MigrationStatus.Completed, result.ErrorMessage);
                 
                 // Migration completed with errors event will be handled by queue-based system
             }
-            else if (totalSuccessful == 0 && totalFailed > 0)
+            else if (result.TotalEntitiesSuccessful == 0 && result.TotalEntitiesFailed > 0)
             {
                 result.Status = "Failed";
-                result.ErrorMessage = $"All {totalFailed} entities failed to migrate";
+                result.ErrorMessage = $"All {result.TotalEntitiesFailed} entities failed to migrate";
                 logger.LogError("Migration failed - all entities failed for MigrationId: {MigrationId}. " +
-                              "Failed: {FailedCount}", migrationId, totalFailed);
+                              "Failed: {FailedCount}", migrationId, result.TotalEntitiesFailed);
                 
                 // Complete migration - update storage service for HTTP API
                 await CompleteMigrationAsync(context, migrationId, result, MigrationStatus.Failed, result.ErrorMessage);
@@ -441,10 +462,10 @@ public static class MigrationDurableOrchestrator
             {
                 // Fallback case - should not normally reach here, but handle gracefully
                 result.Status = "CompletedWithErrors";
-                result.ErrorMessage = $"Migration completed with unexpected status: {totalProcessed} processed, {totalSuccessful} successful, {totalFailed} failed";
+                result.ErrorMessage = $"Migration completed with unexpected status: {result.TotalEntitiesProcessed} processed, {result.TotalEntitiesSuccessful} successful, {result.TotalEntitiesFailed} failed";
                 logger.LogWarning("Migration completed with unexpected status for MigrationId: {MigrationId}. " +
                                 "Processed: {ProcessedCount}, Successful: {SuccessfulCount}, Failed: {FailedCount}", 
-                    migrationId, totalProcessed, totalSuccessful, totalFailed);
+                    migrationId, result.TotalEntitiesProcessed, result.TotalEntitiesSuccessful, result.TotalEntitiesFailed);
             }
 
                 return result;

@@ -80,7 +80,8 @@ public class MigrationQueryFunctions
             MigrationProgress? detailedProgress = null;
             try
             {
-                detailedProgress = await _progressTracker.GetProgressAsync(migrationId, CancellationToken.None);
+                // 🆕 TASK 4.1: Use enhanced progress with real-time aggregated data
+                detailedProgress = await _progressTracker.GetLatestAggregatedProgressAsync(migrationId, CancellationToken.None);
             }
             catch (Exception ex)
             {
@@ -303,7 +304,8 @@ public class MigrationQueryFunctions
         try
         {
             // Try to get from progress tracker first
-            var progress = await _progressTracker.GetProgressAsync(migrationId, CancellationToken.None);
+                            // 🆕 TASK 4.1: Use enhanced progress with real-time aggregated data
+                var progress = await _progressTracker.GetLatestAggregatedProgressAsync(migrationId, CancellationToken.None);
             
             // If progress tracker has meaningful data, use it
             if (progress != null && progress.TotalEntities > 0)

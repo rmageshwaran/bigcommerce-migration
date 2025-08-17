@@ -322,7 +322,7 @@ export const RealTimeMigrationDashboard: React.FC<RealTimeMigrationDashboardProp
     autoConnect,
     enableNotifications: notificationsEnabled,
     enablePerformanceTracking: true,
-    pollInterval: 30000 // 30 seconds fallback polling
+    pollInterval: 3000 // 🆕 TASK 4.2: Optimized to 3 seconds for real-time incremental progress
   });
 
   // Handle migration completion

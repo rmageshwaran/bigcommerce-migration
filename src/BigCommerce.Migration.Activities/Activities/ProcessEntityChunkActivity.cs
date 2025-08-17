@@ -33,6 +33,7 @@ public class ProcessEntityChunkActivity
     private readonly IUniversalMigrationProgressAggregator _universalAggregator; // ✅ P2-T1.5: Universal aggregator for Tier 2 progress
     private readonly ICancellationStore _cancellationStore; // ✅ Phase 3.1.1: Native cancellation support
     private readonly ISubBatchProcessor _subBatchProcessor; // ✅ Phase 3.1.2: Sub-batch processing for 50-100 entities per sub-batch
+    private readonly IProgressTracker _progressTracker; // 🆕 INCREMENTAL PROGRESS: Real-time progress tracking
 
     public ProcessEntityChunkActivity(
         ILogger<ProcessEntityChunkActivity> logger,
@@ -46,7 +47,8 @@ public class ProcessEntityChunkActivity
         IProductComponentsMigrationPipeline productComponentsPipeline,
         IUniversalMigrationProgressAggregator universalAggregator,
         ICancellationStore cancellationStore,
-        ISubBatchProcessor subBatchProcessor)
+        ISubBatchProcessor subBatchProcessor,
+        IProgressTracker progressTracker) // 🆕 INCREMENTAL PROGRESS: Real-time progress tracking
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _entityFetchService = entityFetchService ?? throw new ArgumentNullException(nameof(entityFetchService));
@@ -61,6 +63,7 @@ public class ProcessEntityChunkActivity
         _universalAggregator = universalAggregator ?? throw new ArgumentNullException(nameof(universalAggregator)); // ✅ P2-T1.5: Universal aggregator injection
         _cancellationStore = cancellationStore ?? throw new ArgumentNullException(nameof(cancellationStore)); // ✅ Phase 3.1.1: Native cancellation injection
         _subBatchProcessor = subBatchProcessor ?? throw new ArgumentNullException(nameof(subBatchProcessor)); // ✅ Phase 3.1.2: Sub-batch processing injection
+        _progressTracker = progressTracker ?? throw new ArgumentNullException(nameof(progressTracker)); // 🆕 INCREMENTAL PROGRESS: Real-time progress tracking injection
     }
 
     /// <summary>
@@ -153,16 +156,29 @@ public class ProcessEntityChunkActivity
             await CheckCancellationAsync(request.MigrationId);
 
             // Phase 3.1.3: Enhanced pipeline routing with comprehensive entity type support
+            _logger.LogInformation("🔄 [CHUNK-{ChunkNumber}] Starting entity processing for {EntityCount} {EntityType} entities", 
+                request.ChunkNumber, entities.Count, request.EntityType);
+            
             result = await RouteToAppropriatePipeline(entities, batchRequest, request.ChunkNumber);
             
-            // Phase 3.1.1: Final cancellation check before completion
-            await CheckCancellationAsync(request.MigrationId);
+            // 🚨 CRITICAL FIX: Record progress IMMEDIATELY after processing, BEFORE cancellation check
+            // This ensures that completed sub-batches are recorded even if cancellation occurs
+            var processingTime = DateTime.UtcNow - startTime;
+            result.ProcessingTime = processingTime;
+
+            _logger.LogInformation("📊 [CHUNK-{ChunkNumber}] Entity processing completed - Starting progress recording phase. " +
+                                 "Results: Success={SuccessCount}, Failed={FailedCount}, Skipped={SkippedCount}, Cancelled={CancelledCount}, Total={TotalProcessed}",
+                request.ChunkNumber, result.SuccessfulEntities, result.FailedEntities, result.SkippedEntities, 
+                result.CancelledEntities, result.TotalProcessed);
+
+            // ✅ Update Universal Aggregator (Tier 2) with entity progress - MOVED BEFORE cancellation check
+            // 🛡️ CRITICAL: Protect progress recording from exceptions to prevent data loss
+            _logger.LogInformation("🔄 [CHUNK-{ChunkNumber}] STEP 1/3: Updating Universal Aggregator with progress data for {MigrationId}:{EntityType}", 
+                request.ChunkNumber, request.MigrationId, request.EntityType);
             
-            // ✅ Update Universal Aggregator (Tier 2) with entity progress
-            await _universalAggregator.UpdatePrimaryEntityProgressAsync(
-                batchRequest.MigrationId,
-                batchRequest.EntityType,
-                new PrimaryEntityProgress
+            try
+            {
+                var progressData = new PrimaryEntityProgress
                 {
                     EntityType = batchRequest.EntityType,
                     TotalCount = result.TotalProcessed, // Will be aggregated across chunks
@@ -174,10 +190,29 @@ public class ProcessEntityChunkActivity
                     Status = result.SuccessfulEntities == result.TotalProcessed ? "completed" : "processing",
                     ThroughputPerSecond = result.TotalProcessed / Math.Max(result.ProcessingTime.TotalSeconds, 1),
                     ProcessingTime = result.ProcessingTime
-                });
+                };
 
-            var processingTime = DateTime.UtcNow - startTime;
-            result.ProcessingTime = processingTime;
+                _logger.LogInformation("📤 [CHUNK-{ChunkNumber}] Sending to Universal Aggregator: " +
+                    "Success={Success}, Failed={Failed}, Skipped={Skipped}, Cancelled={Cancelled}, " +
+                    "Total={Total}, Status={Status}, Throughput={Throughput:F1}/sec",
+                    request.ChunkNumber, progressData.SuccessCount, progressData.FailureCount, 
+                    progressData.SkippedCount, progressData.CancelledCount, progressData.TotalCount, 
+                    progressData.Status, progressData.ThroughputPerSecond);
+
+                await _universalAggregator.UpdatePrimaryEntityProgressAsync(
+                    batchRequest.MigrationId,
+                    batchRequest.EntityType,
+                    progressData);
+                    
+                _logger.LogInformation("✅ [CHUNK-{ChunkNumber}] STEP 1/3 COMPLETED: Universal aggregator updated successfully for {MigrationId}:{EntityType}", 
+                    request.ChunkNumber, request.MigrationId, request.EntityType);
+            }
+            catch (Exception progressEx)
+            {
+                _logger.LogError(progressEx, "❌ [CHUNK-{ChunkNumber}] STEP 1/3 FAILED: Universal aggregator update failed for {MigrationId}:{EntityType} - {ErrorMessage}",
+                    request.ChunkNumber, request.MigrationId, request.EntityType, progressEx.Message);
+                // Don't fail the chunk - continue with other progress recording
+            }
 
             _logger.LogInformation("✅ [CHUNK-{ChunkNumber}] Chunk processing completed: " +
                                  "{SuccessfulEntities}/{TotalProcessed} entities successful in {ProcessingTimeMs}ms " +
@@ -186,8 +221,60 @@ public class ProcessEntityChunkActivity
                 processingTime.TotalMilliseconds,
                 result.TotalProcessed > 0 ? processingTime.TotalMilliseconds / result.TotalProcessed : 0);
 
-            // Step 3: Publish progress update for this chunk
-            await PublishChunkProgress(request, result);
+            // Step 3: Publish progress update for this chunk - MOVED BEFORE cancellation check
+            // 🛡️ CRITICAL: Protect SignalR publishing from exceptions to prevent data loss
+            _logger.LogInformation("🔄 [CHUNK-{ChunkNumber}] STEP 2/3: Publishing SignalR progress update for {MigrationId}:{EntityType}", 
+                request.ChunkNumber, request.MigrationId, request.EntityType);
+            
+            try
+            {
+                await PublishChunkProgress(request, result);
+                _logger.LogInformation("✅ [CHUNK-{ChunkNumber}] STEP 2/3 COMPLETED: SignalR progress published successfully for {MigrationId}:{EntityType}", 
+                    request.ChunkNumber, request.MigrationId, request.EntityType);
+            }
+            catch (Exception signalREx)
+            {
+                _logger.LogError(signalREx, "❌ [CHUNK-{ChunkNumber}] STEP 2/3 FAILED: SignalR progress publishing failed for {MigrationId}:{EntityType} - {ErrorMessage}",
+                    request.ChunkNumber, request.MigrationId, request.EntityType, signalREx.Message);
+                // Don't fail the chunk - continue with other progress recording
+            }
+
+            // 🆕 INCREMENTAL PROGRESS: Record incremental progress immediately after chunk completion - MOVED BEFORE cancellation check
+            // This is the CRITICAL integration that enables real-time progress tracking and prevents data loss on cancellation
+            // 🛡️ CRITICAL: Protect incremental progress recording from exceptions to prevent data loss
+            _logger.LogInformation("🔄 [CHUNK-{ChunkNumber}] STEP 3/3: Recording incremental progress events for {MigrationId}:{EntityType}", 
+                request.ChunkNumber, request.MigrationId, request.EntityType);
+            
+            try
+            {
+                await RecordIncrementalProgress(request, result, startTime, DateTime.UtcNow);
+                _logger.LogInformation("✅ [CHUNK-{ChunkNumber}] STEP 3/3 COMPLETED: Incremental progress recorded successfully for {MigrationId}:{EntityType}", 
+                    request.ChunkNumber, request.MigrationId, request.EntityType);
+            }
+            catch (Exception incrementalEx)
+            {
+                _logger.LogError(incrementalEx, "❌ [CHUNK-{ChunkNumber}] STEP 3/3 FAILED: Incremental progress recording failed for {MigrationId}:{EntityType} - {ErrorMessage}",
+                    request.ChunkNumber, request.MigrationId, request.EntityType, incrementalEx.Message);
+                // Don't fail the chunk - this is non-critical for core functionality
+            }
+            
+            _logger.LogInformation("🎯 [CHUNK-{ChunkNumber}] ALL PROGRESS RECORDING STEPS COMPLETED - Now checking for cancellation for {MigrationId}:{EntityType}", 
+                request.ChunkNumber, request.MigrationId, request.EntityType);
+            
+            // Phase 3.1.1: Final cancellation check AFTER progress recording
+            // This ensures progress is saved even if cancellation occurs
+            try
+            {
+                await CheckCancellationAsync(request.MigrationId);
+                _logger.LogInformation("✅ [CHUNK-{ChunkNumber}] Cancellation check passed - chunk completed successfully for {MigrationId}:{EntityType}", 
+                    request.ChunkNumber, request.MigrationId, request.EntityType);
+            }
+            catch (Exception cancelEx)
+            {
+                _logger.LogInformation("🚫 [CHUNK-{ChunkNumber}] Cancellation detected AFTER progress recording for {MigrationId}:{EntityType} - Progress data preserved! Error: {ErrorMessage}", 
+                    request.ChunkNumber, request.MigrationId, request.EntityType, cancelEx.Message);
+                throw; // Re-throw to maintain cancellation behavior
+            }
 
             return result;
         }
@@ -755,6 +842,76 @@ public class ProcessEntityChunkActivity
                 ProcessingTime = TimeSpan.Zero,
                 Errors = new List<string> { $"Pipeline routing failed: {ex.Message}" }
             };
+        }
+    }
+
+    /// <summary>
+    /// 🆕 INCREMENTAL PROGRESS: Records incremental progress immediately after chunk completion
+    /// This is the CRITICAL method that enables real-time progress tracking and prevents data loss during cancellations
+    /// 
+    /// Design Principles:
+    /// - Fire-and-forget: Doesn't block chunk processing if increment write fails
+    /// - Graceful failure: Increment failures don't break the migration
+    /// - Immediate persistence: Writes to ChunkIncrementEvents table immediately
+    /// - Complete data: Records all chunk results for accurate progress tracking
+    /// </summary>
+    /// <param name="request">Original chunk processing request</param>
+    /// <param name="result">Chunk processing results</param>
+    /// <param name="processingStartTime">When chunk processing started</param>
+    /// <param name="processingEndTime">When chunk processing completed</param>
+    private async Task RecordIncrementalProgress(
+        ProcessEntityChunkRequest request,
+        BatchProcessingResult result,
+        DateTime processingStartTime,
+        DateTime processingEndTime)
+    {
+        try
+        {
+            // Extract store IDs from request
+            var sourceStoreId = request.SourceStore?.StoreId ?? "unknown";
+            var destinationStoreId = request.DestinationStore?.StoreId ?? "unknown";
+
+            // Collect error messages from result for detailed tracking
+            var errors = result.Errors?.Any() == true ? result.Errors : null;
+
+            _logger.LogInformation("📝 [CHUNK-{ChunkNumber}] INCREMENTAL-PROGRESS: Preparing chunk increment event - " +
+                           "Success={Success}, Failed={Failed}, Skipped={Skipped}, Cancelled={Cancelled}, " +
+                           "StartIndex={StartIndex}, ChunkSize={ChunkSize}, Source={Source}, Dest={Dest}",
+                request.ChunkNumber, result.SuccessfulEntities, result.FailedEntities, 
+                result.SkippedEntities, result.CancelledEntities, request.StartIndex, request.ChunkSize,
+                sourceStoreId, destinationStoreId);
+
+            // Call the ProgressTracker's IncrementProgressAsync method with all required data
+            _logger.LogInformation("📤 [CHUNK-{ChunkNumber}] INCREMENTAL-PROGRESS: Calling ProgressTracker.IncrementProgressAsync for {MigrationId}:{EntityType}",
+                request.ChunkNumber, request.MigrationId, request.EntityType);
+                
+            await _progressTracker.IncrementProgressAsync(
+                migrationId: request.MigrationId,
+                entityType: request.EntityType,
+                chunkNumber: request.ChunkNumber,
+                chunkStartIndex: request.StartIndex,
+                chunkSize: request.ChunkSize,
+                successfulEntities: result.SuccessfulEntities,
+                failedEntities: result.FailedEntities,
+                skippedEntities: result.SkippedEntities,
+                cancelledEntities: result.CancelledEntities,
+                processingStartTime: processingStartTime,
+                processingEndTime: processingEndTime,
+                sourceStore: sourceStoreId,
+                destinationStore: destinationStoreId,
+                errors: errors);
+
+            _logger.LogInformation("✅ [CHUNK-{ChunkNumber}] INCREMENTAL-PROGRESS: ProgressTracker.IncrementProgressAsync completed successfully for {MigrationId}:{EntityType}",
+                request.ChunkNumber, request.MigrationId, request.EntityType);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "⚠️ [CHUNK-{ChunkNumber}] Failed to record incremental progress for {MigrationId}:{EntityType} - migration continues normally. " +
+                             "This may result in less accurate real-time progress updates, but end-of-migration progress will still be recorded.",
+                request.ChunkNumber, request.MigrationId, request.EntityType);
+            
+            // 🎯 CRITICAL: Don't throw - incremental progress failures should NEVER break the migration
+            // The end-of-migration UpdateEntityProgressActivity will still provide fallback progress data
         }
     }
 }

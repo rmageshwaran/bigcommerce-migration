@@ -349,7 +349,7 @@ public class MigrationQueryFunctions
                     OverallProgressPercentage = migrationEntry.ProgressPercentage,
                     TotalEntities = migrationEntry.TotalEntities,
                     ProcessedEntities = migrationEntry.ProcessedEntities,
-                    SuccessfulEntities = migrationEntry.ProcessedEntities - migrationEntry.FailedEntities - migrationEntry.SkippedEntities - migrationEntry.CancelledEntities,
+                    SuccessfulEntities = migrationEntry.SuccessfulEntities, // 🎯 FIX: Use stored SuccessfulEntities instead of calculation
                     FailedEntities = migrationEntry.FailedEntities,
                     SkippedEntities = migrationEntry.SkippedEntities, // 🚨 FIX: Include SkippedEntities in migration summary
                     CancelledEntities = migrationEntry.CancelledEntities, // 🚨 CANCELLATION FIX: Include CancelledEntities in migration summary

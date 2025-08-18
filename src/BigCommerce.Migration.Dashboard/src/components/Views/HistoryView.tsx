@@ -59,6 +59,7 @@ interface MigrationHistoryItem {
   successfulEntities: number;
   failedEntities: number;
   skippedEntities: number;
+
   percentageCompleted: number;
   entities: string[];
 }
@@ -479,6 +480,7 @@ export const HistoryView: React.FC = () => {
                     <TableCell sx={{ fontWeight: 600, py: 2 }}>Success</TableCell>
                     <TableCell sx={{ fontWeight: 600, py: 2 }}>Fail</TableCell>
                     <TableCell sx={{ fontWeight: 600, py: 2 }}>Skipped</TableCell>
+
                     <TableCell sx={{ fontWeight: 600, py: 2 }}>Total</TableCell>
                     <TableCell sx={{ fontWeight: 600, py: 2 }}>Success Rate</TableCell>
                     <TableCell sx={{ fontWeight: 600, py: 2 }}>Progress</TableCell>
@@ -536,6 +538,7 @@ export const HistoryView: React.FC = () => {
                       <TableCell sx={{ fontSize: '0.875rem', color: 'warning.main' }}>
                         {migration.skippedEntities || 0}
                       </TableCell>
+
                       <TableCell sx={{ fontSize: '0.875rem' }}>
                         {migration.totalEntities}
                       </TableCell>

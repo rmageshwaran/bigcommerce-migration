@@ -74,7 +74,8 @@ interface EntitySummary {
   successCount: number;
   failureCount: number;
   skippedCount: number;
-  cancelledCount: number;
+
+  status: string; // 🔥 ADD: Use actual status from API/database instead of calculating
 }
 
 // Status configuration matching history page
@@ -168,11 +169,12 @@ export const MigrationDetailView: React.FC = () => {
       const transformedEntities: EntitySummary[] = rawEntities.map((entity: any) => ({
         entityType: entity.entity || 'Unknown',
         totalCount: entity.totalEntities || 0,
-        processedCount: (entity.successfulEntities || 0) + (entity.failedEntities || 0) + (entity.skippedEntities || 0) + (entity.cancelledEntities || 0),
+        processedCount: (entity.successfulEntities || 0) + (entity.failedEntities || 0) + (entity.skippedEntities || 0),
         successCount: entity.successfulEntities || 0,
         failureCount: entity.failedEntities || 0,
         skippedCount: entity.skippedEntities || 0,  // 🚨 FIX: Map skippedEntities to skippedCount
-        cancelledCount: entity.cancelledEntities || 0,  // 🚫 ADD: Map cancelledEntities to cancelledCount
+
+        status: entity.status || 'pending', // 🔥 USE: Actual status from API/database instead of calculating
       }));
       
       setEntitySummary(transformedEntities);
@@ -506,7 +508,7 @@ export const MigrationDetailView: React.FC = () => {
                     <TableCell sx={{ fontWeight: 600, textAlign: 'center' }}>Success</TableCell>
                     <TableCell sx={{ fontWeight: 600, textAlign: 'center' }}>Failed</TableCell>
                     <TableCell sx={{ fontWeight: 600, textAlign: 'center' }}>Skipped</TableCell>
-                    <TableCell sx={{ fontWeight: 600, textAlign: 'center' }}>Cancelled</TableCell>
+    
                     <TableCell sx={{ fontWeight: 600, textAlign: 'center' }}>Success Rate</TableCell>
                     <TableCell sx={{ fontWeight: 600, textAlign: 'center' }}>Status</TableCell>
                   </TableRow>
@@ -531,12 +533,18 @@ export const MigrationDetailView: React.FC = () => {
                         <TableCell sx={{ textAlign: 'center', color: 'success.main', fontWeight: 600 }}>{entity.successCount}</TableCell>
                         <TableCell sx={{ textAlign: 'center', color: 'error.main', fontWeight: 600 }}>{entity.failureCount}</TableCell>
                         <TableCell sx={{ textAlign: 'center', color: 'warning.main', fontWeight: 600 }}>{entity.skippedCount || 0}</TableCell>
-                        <TableCell sx={{ textAlign: 'center', color: 'info.main', fontWeight: 600 }}>{entity.cancelledCount || 0}</TableCell>
-                        <TableCell sx={{ textAlign: 'center' }}>{entity.totalCount > 0 ? `${Math.round(((entity.successCount + (entity.skippedCount || 0) + (entity.cancelledCount || 0)) / entity.totalCount) * 100)}%` : '0%'}</TableCell>
+    
+                        <TableCell sx={{ textAlign: 'center' }}>{entity.totalCount > 0 ? `${Math.round(((entity.successCount + (entity.skippedCount || 0)) / entity.totalCount) * 100)}%` : '0%'}</TableCell>
                         <TableCell sx={{ textAlign: 'center' }}>
                           <Chip 
-                            label={entity.failureCount > 0 ? 'Failed' : entity.successCount > 0 ? 'Completed' : 'Pending'} 
-                            color={entity.failureCount > 0 ? 'error' : entity.successCount > 0 ? 'success' : 'default'}
+                            label={entity.status.charAt(0).toUpperCase() + entity.status.slice(1)} 
+                            color={
+                              entity.status === 'completed' ? 'success' :
+                              entity.status === 'failed' ? 'error' :
+                              entity.status === 'cancelled' ? 'warning' :
+                              entity.status === 'running' || entity.status === 'inprogress' || entity.status === 'processing' ? 'info' :
+                              'default'
+                            }
                             size="small"
                             variant="outlined"
                           />

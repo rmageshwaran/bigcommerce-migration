@@ -23,14 +23,9 @@ public class IncrementEventsService : IIncrementEventsService, IDisposable
 {
     #region Private Fields
 
-    private readonly TableServiceClient _tableServiceClient;
+    private readonly IAzureTableInitializationService _tableInitializationService;
     private readonly ILogger<IncrementEventsService> _logger;
     private const string TableName = "chunkincrementevents";
-    
-    // Cached table client to avoid expensive CreateIfNotExistsAsync calls
-    private TableClient? _cachedTableClient;
-    private readonly SemaphoreSlim _tableInitializationLock = new(1, 1);
-    private bool _tableInitialized = false;
     
     // Unique sequence counter for RowKey generation (thread-safe)
     private static readonly object _sequenceLock = new();
@@ -51,21 +46,14 @@ public class IncrementEventsService : IIncrementEventsService, IDisposable
     /// <summary>
     /// Initializes a new instance of the IncrementEventsService
     /// </summary>
-    /// <param name="configuration">Application configuration for Azure storage connection</param>
+    /// <param name="tableInitializationService">Centralized table initialization service</param>
     /// <param name="logger">Logger instance for monitoring and debugging</param>
-    public IncrementEventsService(IConfiguration configuration, ILogger<IncrementEventsService> logger)
+    public IncrementEventsService(IAzureTableInitializationService tableInitializationService, ILogger<IncrementEventsService> logger)
     {
+        _tableInitializationService = tableInitializationService ?? throw new ArgumentNullException(nameof(tableInitializationService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _ = configuration ?? throw new ArgumentNullException(nameof(configuration));
         
-        // Get Azure Storage connection string
-        var connectionString = configuration.GetConnectionString("AzureWebJobsStorage") 
-            ?? configuration["AzureWebJobsStorage"]
-            ?? throw new ArgumentNullException("AzureWebJobsStorage connection string is required");
-        
-        _tableServiceClient = new TableServiceClient(connectionString);
-        
-        _logger.LogInformation("IncrementEventsService initialized with table: {TableName}", TableName);
+        _logger.LogInformation("✅ IncrementEventsService initialized with centralized table management for: {TableName}", TableName);
     }
 
     #endregion
@@ -370,28 +358,7 @@ public class IncrementEventsService : IIncrementEventsService, IDisposable
     /// <inheritdoc />
     public async Task<bool> IsHealthyAsync(CancellationToken cancellationToken = default)
     {
-        try
-        {
-            var tableClient = await GetTableClientAsync();
-            
-            // Try to query the table to verify connectivity
-            var query = tableClient.QueryAsync<ChunkIncrementEvent>(
-                filter: "PartitionKey eq 'health-check'",
-                maxPerPage: 1,
-                cancellationToken: cancellationToken);
-
-            await foreach (var _ in query)
-            {
-                break; // Just need to verify we can query
-            }
-
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Health check failed for IncrementEventsService");
-            return false;
-        }
+        return await _tableInitializationService.IsTableHealthyAsync(TableName, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -549,48 +516,11 @@ public class IncrementEventsService : IIncrementEventsService, IDisposable
     #region Private Helper Methods
 
     /// <summary>
-    /// Gets the table client, creating the table if it doesn't exist (cached for performance)
+    /// Gets the table client using the centralized table initialization service
     /// </summary>
-    private async Task<TableClient> GetTableClientAsync()
+    private async Task<TableClient> GetTableClientAsync(CancellationToken cancellationToken = default)
     {
-        // Return cached client if table is already initialized
-        if (_tableInitialized && _cachedTableClient != null)
-        {
-            return _cachedTableClient;
-        }
-
-        // Use semaphore to ensure only one thread initializes the table
-        await _tableInitializationLock.WaitAsync();
-        try
-        {
-            // Double-check pattern: another thread might have initialized while we waited
-            if (_tableInitialized && _cachedTableClient != null)
-            {
-                return _cachedTableClient;
-            }
-
-            var tableClient = _tableServiceClient.GetTableClient(TableName);
-            
-            try
-            {
-                await tableClient.CreateIfNotExistsAsync();
-                _logger.LogDebug("Table {TableName} initialization completed", TableName);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to ensure table {TableName} exists - continuing anyway", TableName);
-            }
-            
-            // Cache the client and mark as initialized
-            _cachedTableClient = tableClient;
-            _tableInitialized = true;
-            
-            return tableClient;
-        }
-        finally
-        {
-            _tableInitializationLock.Release();
-        }
+        return await _tableInitializationService.GetTableClientAsync(TableName, cancellationToken);
     }
 
     /// <summary>
@@ -627,7 +557,7 @@ public class IncrementEventsService : IIncrementEventsService, IDisposable
                     await Task.Delay(RetryDelays[attempt - 1], cancellationToken);
                 }
                 
-                var tableClient = await GetTableClientAsync();
+                var tableClient = await GetTableClientAsync(cancellationToken);
                 await tableClient.AddEntityAsync(incrementEvent, cancellationToken);
                 
                 if (attempt > 0)
@@ -747,7 +677,8 @@ public class IncrementEventsService : IIncrementEventsService, IDisposable
     /// </summary>
     public void Dispose()
     {
-        _tableInitializationLock?.Dispose();
+        // No resources to dispose - table management is handled by the centralized service
+        GC.SuppressFinalize(this);
     }
 
     #endregion

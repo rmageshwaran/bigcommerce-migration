@@ -510,6 +510,17 @@ public class ProcessEntityChunkActivity
                     result.SkippedEntities = skippedEntities + Math.Max(0, transformationSkippedCount); // Creation skips + transformation skips
                     result.CancelledEntities = cancelledEntities + cancelledTransformations; // Entities cancelled during creation + transformation
                     
+                    // 🔍 DISCREPANCY LOGGING: Track the difference between sub-batch reports and chunk counting
+                    var subBatchReportedTotal = createdEntities.Count; // What sub-batches reported as "created"
+                    var chunkCountedTotal = result.SuccessfulEntities + result.CancelledEntities + result.SkippedEntities;
+                    if (subBatchReportedTotal != chunkCountedTotal)
+                    {
+                        _logger.LogWarning("⚠️ [COUNT-DISCREPANCY] CHUNK-{ChunkNumber} {EntityType}: Sub-batches reported {SubBatchTotal} created, but chunk counted {ChunkTotal} (Success={Success}, Cancelled={Cancelled}, Skipped={Skipped}). " +
+                            "This indicates products were created in destination store but marked as cancelled due to cancellation timing.",
+                            chunkNumber, batchRequest.EntityType, subBatchReportedTotal, chunkCountedTotal, 
+                            result.SuccessfulEntities, result.CancelledEntities, result.SkippedEntities);
+                    }
+                    
                     // 🔍 DEBUG: Final result values with skipped and cancelled entities tracked separately
                     _logger.LogInformation("🔍 [RESULT-DEBUG] CHUNK-{ChunkNumber} {EntityType}: FinalSuccessful={Successful}, FinalFailed={Failed}, FinalSkipped={Skipped}, FinalCancelled={Cancelled}, FinalTotal={Total}",
                         chunkNumber, batchRequest.EntityType, result.SuccessfulEntities, result.FailedEntities, result.SkippedEntities, result.CancelledEntities, result.TotalProcessed);
@@ -914,4 +925,6 @@ public class ProcessEntityChunkActivity
             // The end-of-migration UpdateEntityProgressActivity will still provide fallback progress data
         }
     }
+
+
 }

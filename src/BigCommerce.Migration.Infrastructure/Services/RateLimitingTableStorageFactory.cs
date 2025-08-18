@@ -1,5 +1,4 @@
 using Azure.Data.Tables;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using BigCommerce.Migration.Core.Interfaces;
@@ -13,33 +12,26 @@ namespace BigCommerce.Migration.Infrastructure.Services;
 /// </summary>
 public class RateLimitingTableStorageFactory : IRateLimitingTableStorageFactory
 {
-    private readonly TableServiceClient _tableServiceClient;
+    private readonly IAzureTableInitializationService _tableInitializationService;
     private readonly ILogger<RateLimitingTableStorageFactory> _logger;
     private readonly DynamicRateLimitingConfiguration _configuration;
 
     /// <summary>
     /// Initializes a new instance of the RateLimitingTableStorageFactory
     /// </summary>
-    /// <param name="configuration">Application configuration</param>
+    /// <param name="tableInitializationService">Centralized table initialization service</param>
     /// <param name="rateLimitingConfig">Rate limiting configuration</param>
     /// <param name="logger">Logger instance</param>
     public RateLimitingTableStorageFactory(
-        IConfiguration configuration,
+        IAzureTableInitializationService tableInitializationService,
         IOptions<DynamicRateLimitingConfiguration> rateLimitingConfig,
         ILogger<RateLimitingTableStorageFactory> logger)
     {
+        _tableInitializationService = tableInitializationService ?? throw new ArgumentNullException(nameof(tableInitializationService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _configuration = rateLimitingConfig?.Value ?? throw new ArgumentNullException(nameof(rateLimitingConfig));
-        _ = configuration ?? throw new ArgumentNullException(nameof(configuration));
-
-        // Follow existing pattern: Try ConnectionStrings section first, then fall back to Values section
-        var connectionString = configuration.GetConnectionString("AzureWebJobsStorage") 
-            ?? configuration["AzureWebJobsStorage"]
-            ?? throw new ArgumentNullException("AzureWebJobsStorage connection string is required");
-
-        _tableServiceClient = new TableServiceClient(connectionString);
         
-        _logger.LogInformation("Initialized RateLimitingTableStorageFactory with tables: {QuotaTable}, {InstanceTable}, {TokenTable}",
+        _logger.LogInformation("✅ RateLimitingTableStorageFactory initialized with centralized table management for: {QuotaTable}, {InstanceTable}, {TokenTable}",
             _configuration.Predictive.TableStorage.QuotaTableName,
             _configuration.Predictive.TableStorage.InstanceTableName,
             _configuration.Predictive.TableStorage.TokenTableName);
@@ -66,32 +58,16 @@ public class RateLimitingTableStorageFactory : IRateLimitingTableStorageFactory
     /// <inheritdoc />
     public async Task<bool> AllTablesExistAsync(CancellationToken cancellationToken = default)
     {
-        try
+        var tableNames = new[]
         {
-            // Use TableServiceClient to check if tables exist
-            var tableNames = new[]
-            {
-                _configuration.Predictive.TableStorage.QuotaTableName,
-                _configuration.Predictive.TableStorage.InstanceTableName,
-                _configuration.Predictive.TableStorage.TokenTableName
-            };
+            _configuration.Predictive.TableStorage.QuotaTableName,
+            _configuration.Predictive.TableStorage.InstanceTableName,
+            _configuration.Predictive.TableStorage.TokenTableName
+        };
 
-            await foreach (var table in _tableServiceClient.QueryAsync(cancellationToken: cancellationToken))
-            {
-                if (tableNames.Contains(table.Name))
-                {
-                    tableNames = tableNames.Where(name => name != table.Name).ToArray();
-                    if (tableNames.Length == 0)
-                        return true; // All tables exist
-                }
-            }
-
-            return false; // Some tables don't exist
-        }
-        catch
-        {
-            return false; // Any exception means we can't determine table existence
-        }
+        var healthStatus = await _tableInitializationService.GetAllTablesHealthAsync(cancellationToken);
+        
+        return tableNames.All(tableName => healthStatus.GetValueOrDefault(tableName, false));
     }
 
     /// <inheritdoc />
@@ -103,64 +79,32 @@ public class RateLimitingTableStorageFactory : IRateLimitingTableStorageFactory
             return;
         }
 
-        try
+        var tableNames = new[]
         {
-            _logger.LogInformation("Ensuring rate limiting tables exist...");
+            _configuration.Predictive.TableStorage.QuotaTableName,
+            _configuration.Predictive.TableStorage.InstanceTableName,
+            _configuration.Predictive.TableStorage.TokenTableName
+        };
 
-            // Create all tables in parallel for better performance
-            var quotaTask = CreateTableIfNotExistsAsync(_configuration.Predictive.TableStorage.QuotaTableName, cancellationToken);
-            var instanceTask = CreateTableIfNotExistsAsync(_configuration.Predictive.TableStorage.InstanceTableName, cancellationToken);
-            var tokenTask = CreateTableIfNotExistsAsync(_configuration.Predictive.TableStorage.TokenTableName, cancellationToken);
+        _logger.LogInformation("🏗️ Ensuring rate limiting tables exist: {TableNames}", string.Join(", ", tableNames));
 
-            await Task.WhenAll(quotaTask, instanceTask, tokenTask);
+        // Use centralized service to create all tables efficiently
+        await _tableInitializationService.GetTableClientsAsync(tableNames, cancellationToken);
 
-            _logger.LogInformation("Successfully ensured all rate limiting tables exist");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to ensure rate limiting tables exist");
-            throw;
-        }
+        _logger.LogInformation("✅ Successfully ensured all rate limiting tables exist");
     }
 
     /// <summary>
-    /// Gets a table client with auto-creation following existing MigrationStorageService pattern
+    /// Gets a table client using the centralized table initialization service
     /// </summary>
     private async Task<TableClient> GetTableClientAsync(string tableName, CancellationToken cancellationToken = default)
     {
-        var tableClient = _tableServiceClient.GetTableClient(tableName);
-        
-        if (_configuration.Predictive.TableStorage.AutoCreateTables)
+        if (!_configuration.Predictive.TableStorage.AutoCreateTables)
         {
-            await tableClient.CreateIfNotExistsAsync(cancellationToken);
+            // If auto-create is disabled, we still need to get a client but won't create the table
+            _logger.LogWarning("⚠️ Auto-create tables is disabled for {TableName} - table must exist or operations will fail", tableName);
         }
         
-        return tableClient;
-    }
-
-    /// <summary>
-    /// Creates a table if it doesn't exist with proper error handling
-    /// </summary>
-    private async Task CreateTableIfNotExistsAsync(string tableName, CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var tableClient = _tableServiceClient.GetTableClient(tableName);
-            var response = await tableClient.CreateIfNotExistsAsync(cancellationToken);
-            
-            if (response?.Value != null)
-            {
-                _logger.LogInformation("Created rate limiting table: {TableName}", tableName);
-            }
-            else
-            {
-                _logger.LogDebug("Rate limiting table already exists: {TableName}", tableName);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to create rate limiting table: {TableName}", tableName);
-            throw;
-        }
+        return await _tableInitializationService.GetTableClientAsync(tableName, cancellationToken);
     }
 }

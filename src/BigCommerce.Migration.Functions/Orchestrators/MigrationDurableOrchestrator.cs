@@ -353,6 +353,8 @@ public static class MigrationDurableOrchestrator
                 result.TotalEntitiesProcessed = finalProgress.ProcessedEntities;
                 result.TotalEntitiesSuccessful = finalProgress.SuccessfulEntities;
                 result.TotalEntitiesFailed = finalProgress.FailedEntities;
+                result.TotalEntitiesSkipped = finalProgress.SkippedEntities;
+                result.TotalEntitiesCancelled = finalProgress.CancelledEntities;
                 
                 logger.LogInformation("✅ [TASK-3.3] Final results from database: Processed={Processed}, Successful={Successful}, Failed={Failed}, Skipped={Skipped}, Cancelled={Cancelled}", 
                     result.TotalEntitiesProcessed, result.TotalEntitiesSuccessful, result.TotalEntitiesFailed, finalProgress.SkippedEntities, finalProgress.CancelledEntities);
@@ -365,10 +367,14 @@ public static class MigrationDurableOrchestrator
                 var totalProcessed = result.EntityResults.Values.Sum(r => r.ProcessedEntities);
                 var totalSuccessful = result.EntityResults.Values.Sum(r => r.SuccessfulEntities);
                 var totalFailed = result.EntityResults.Values.Sum(r => r.FailedEntities);
+                var totalSkipped = result.EntityResults.Values.Sum(r => r.SkippedEntities);
+                var totalCancelled = result.EntityResults.Values.Sum(r => r.CancelledEntities);
 
                 result.TotalEntitiesProcessed = totalProcessed;
                 result.TotalEntitiesSuccessful = totalSuccessful;
                 result.TotalEntitiesFailed = totalFailed;
+                result.TotalEntitiesSkipped = totalSkipped;
+                result.TotalEntitiesCancelled = totalCancelled;
             }
             result.EndTime = context.CurrentUtcDateTime;
             result.Duration = result.EndTime.Value - result.StartTime;
@@ -404,10 +410,52 @@ public static class MigrationDurableOrchestrator
                         migrationId, cancelledEntityTypes, result.TotalEntitiesProcessed, result.TotalEntitiesSuccessful);
                 }
                 
+                // 🎯 FIX: Get real final counts from chunkincrementevents before completing cancelled migration
+                logger.LogInformation("🚫 Getting final real progress for cancelled migration {MigrationId}", migrationId);
+                var cancelledMigrationProgress = await context.CallActivityAsync<MigrationProgress>(
+                    "GetLatestAggregatedProgressActivity", 
+                    migrationId);
+                
+                if (cancelledMigrationProgress != null)
+                {
+                    // Update result with real counts from chunkincrementevents aggregation
+                    result.TotalEntitiesProcessed = cancelledMigrationProgress.ProcessedEntities;
+                    result.TotalEntitiesSuccessful = cancelledMigrationProgress.SuccessfulEntities;
+                    result.TotalEntitiesFailed = cancelledMigrationProgress.FailedEntities;
+                    result.TotalEntitiesSkipped = cancelledMigrationProgress.SkippedEntities;
+                    result.TotalEntitiesCancelled = cancelledMigrationProgress.CancelledEntities;
+                    
+                    logger.LogInformation("🎯 Updated cancelled migration {MigrationId} with real counts: " +
+                        "Processed={ProcessedCount}, Successful={SuccessfulCount}, Failed={FailedCount}, Skipped={SkippedCount}, Cancelled={CancelledCount}",
+                        migrationId, cancelledMigrationProgress.ProcessedEntities, cancelledMigrationProgress.SuccessfulEntities, 
+                        cancelledMigrationProgress.FailedEntities, cancelledMigrationProgress.SkippedEntities, cancelledMigrationProgress.CancelledEntities);
+                }
+                
                 // Complete migration as cancelled - update storage service for HTTP API
                 await CompleteMigrationAsync(context, migrationId, result, MigrationStatus.Cancelled, result.ErrorMessage);
                 
                 return result;
+            }
+
+            // 🎯 FIX: Get real final counts from chunkincrementevents for ALL migrations before determining status
+            logger.LogInformation("🏁 Getting final real progress for completed migration {MigrationId}", migrationId);
+            var completedMigrationProgress = await context.CallActivityAsync<MigrationProgress>(
+                "GetLatestAggregatedProgressActivity", 
+                migrationId);
+            
+            if (completedMigrationProgress != null)
+            {
+                // Update result with real counts from chunkincrementevents aggregation
+                result.TotalEntitiesProcessed = completedMigrationProgress.ProcessedEntities;
+                result.TotalEntitiesSuccessful = completedMigrationProgress.SuccessfulEntities;
+                result.TotalEntitiesFailed = completedMigrationProgress.FailedEntities;
+                result.TotalEntitiesSkipped = completedMigrationProgress.SkippedEntities;
+                result.TotalEntitiesCancelled = completedMigrationProgress.CancelledEntities;
+                
+                logger.LogInformation("🎯 Updated completed migration {MigrationId} with real counts: " +
+                    "Processed={ProcessedCount}, Successful={SuccessfulCount}, Failed={FailedCount}, Skipped={SkippedCount}, Cancelled={CancelledCount}",
+                    migrationId, completedMigrationProgress.ProcessedEntities, completedMigrationProgress.SuccessfulEntities, 
+                    completedMigrationProgress.FailedEntities, completedMigrationProgress.SkippedEntities, completedMigrationProgress.CancelledEntities);
             }
 
             // Determine final status for non-cancelled migrations
@@ -592,5 +640,7 @@ public class MigrationOrchestrationResult
     public int TotalEntitiesProcessed { get; set; }
     public int TotalEntitiesSuccessful { get; set; }
     public int TotalEntitiesFailed { get; set; }
+    public int TotalEntitiesSkipped { get; set; }
+    public int TotalEntitiesCancelled { get; set; }
     public Dictionary<string, EntityMigrationResult> EntityResults { get; set; } = new();
 } 

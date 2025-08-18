@@ -63,8 +63,12 @@ public class AzuriteTestFixture : IAsyncLifetime
             })
             .Build();
 
+        // Create AzureTableInitializationService for the new constructor
+        var tableInitLogger = CreateLogger<AzureTableInitializationService>();
+        var tableInitializationService = new AzureTableInitializationService(configuration, tableInitLogger);
+
         var logger = CreateLogger<RateLimitingTableStorageFactory>();
-        return new RateLimitingTableStorageFactory(configuration, Options.Create(config), logger);
+        return new RateLimitingTableStorageFactory(tableInitializationService, Options.Create(config), logger);
     }
 
     /// <summary>

@@ -1884,6 +1884,7 @@ public class MigrationHttpFunctions
                         SuccessCount = entry.SuccessCount,
                         FailureCount = entry.FailureCount,
                         SkippedCount = entry.SkippedCount, // 🚨 FIX: Include SkippedCount from storage
+                        CancelledCount = entry.CancelledCount, // 🚨 FIX: Include CancelledCount from storage
                         ProgressPercentage = entry.ProgressPercentage,
                         Status = entry.Status,
                         StartTime = entry.StartTime,
@@ -1901,9 +1902,10 @@ public class MigrationHttpFunctions
                     OverallProgressPercentage = migrationEntry.ProgressPercentage,
                     TotalEntities = migrationEntry.TotalEntities,
                     ProcessedEntities = migrationEntry.ProcessedEntities,
-                    SuccessfulEntities = migrationEntry.ProcessedEntities - migrationEntry.FailedEntities - migrationEntry.SkippedEntities,
+                    SuccessfulEntities = migrationEntry.SuccessfulEntities, // 🎯 FIX: Use stored SuccessfulEntities instead of calculation
                     FailedEntities = migrationEntry.FailedEntities,
                     SkippedEntities = migrationEntry.SkippedEntities, // 🚨 FIX: Include SkippedEntities in migration summary
+                    CancelledEntities = migrationEntry.CancelledEntities, // 🚨 FIX: Include CancelledEntities in migration summary
                     CurrentPhase = migrationEntry.CurrentPhase ?? "completed",
                     EntityProgress = entityProgress
                 };
@@ -1921,6 +1923,7 @@ public class MigrationHttpFunctions
                 SuccessfulEntities = 0,
                 FailedEntities = 0,
                 SkippedEntities = 0, // 🚨 FIX: Include SkippedEntities in fallback
+                CancelledEntities = 0, // 🚨 FIX: Include CancelledEntities in fallback
                 CurrentPhase = "unknown",
                 EntityProgress = new Dictionary<string, EntityProgress>()
             };
@@ -1940,6 +1943,7 @@ public class MigrationHttpFunctions
                 SuccessfulEntities = 0,
                 FailedEntities = 0,
                 SkippedEntities = 0, // 🚨 FIX: Include SkippedEntities in fallback
+                CancelledEntities = 0, // 🚨 FIX: Include CancelledEntities in fallback
                 CurrentPhase = "unknown",
                 EntityProgress = new Dictionary<string, EntityProgress>()
             };

@@ -128,9 +128,10 @@ public class ProgressTracker : IProgressTracker
                             progress.OverallProgressPercentage = migrationEntry.ProgressPercentage;
                             progress.TotalEntities = migrationEntry.TotalEntities;
                             progress.ProcessedEntities = migrationEntry.ProcessedEntities;
-                            progress.SuccessfulEntities = migrationEntry.ProcessedEntities - migrationEntry.FailedEntities - migrationEntry.SkippedEntities;  // 🚨 FIX: Subtract SkippedEntities
+                            progress.SuccessfulEntities = migrationEntry.SuccessfulEntities; // 🚨 CRITICAL FIX: Load SuccessfulEntities directly from database
                             progress.FailedEntities = migrationEntry.FailedEntities;
-                            progress.SkippedEntities = migrationEntry.SkippedEntities;  // 🚨 FIX: Include SkippedEntities
+                            progress.SkippedEntities = migrationEntry.SkippedEntities;  // 🚨 FIX: Include SkippedEntities  
+                            progress.CancelledEntities = migrationEntry.CancelledEntities; // 🚨 CRITICAL FIX: Include CancelledEntities from database
                             progress.CurrentPhase = migrationEntry.CurrentPhase ?? "completed";
                             
                             // Reconstruct entity progress
@@ -145,6 +146,7 @@ public class ProgressTracker : IProgressTracker
                                     SuccessCount = entry.SuccessCount,
                                     FailureCount = entry.FailureCount,
                                     SkippedCount = entry.SkippedCount,  // 🚨 FIX: Include SkippedCount
+                                    CancelledCount = entry.CancelledCount, // 🚨 CRITICAL FIX: Include CancelledCount from database  
                                     ProgressPercentage = entry.ProgressPercentage,
                                     Status = entry.Status,
                                     StartTime = entry.StartTime,
@@ -220,6 +222,7 @@ public class ProgressTracker : IProgressTracker
                         SuccessCount = 0,
                         FailureCount = 0,
                         SkippedCount = 0,  // 🚨 FIX: Initialize SkippedCount
+                        CancelledCount = 0, // 🚨 FIX: Initialize CancelledCount
                         ProgressPercentage = 0.0,
                         Status = "processing",
                         StartTime = DateTime.UtcNow
@@ -336,6 +339,8 @@ public class ProgressTracker : IProgressTracker
             ProcessedEntities = 0,
             SuccessfulEntities = 0,
             FailedEntities = 0,
+            SkippedEntities = 0, // 🚨 FIX: Initialize SkippedEntities
+            CancelledEntities = 0, // 🚨 FIX: Initialize CancelledEntities
             OverallProgressPercentage = 0.0,
             EntityProgress = new Dictionary<string, EntityProgress>(),
             CurrentPhase = "initialization",
@@ -370,6 +375,7 @@ public class ProgressTracker : IProgressTracker
             entityProgress.SuccessCount = update.SuccessCount;
             entityProgress.FailureCount = update.FailureCount;
             entityProgress.SkippedCount = update.SkippedCount;
+            entityProgress.CancelledCount = update.CancelledCount; // 🚨 CRITICAL FIX: Update cancelled count in database
             
             // 🚨 STATUS FIX: Calculate entity progress percentage using total processed (including skipped)
             // This ensures proper completion when ProcessedCount = SuccessCount + FailureCount + SkippedCount
@@ -411,6 +417,7 @@ public class ProgressTracker : IProgressTracker
         progress.SuccessfulEntities = progress.EntityProgress.Values.Sum(e => e.SuccessCount);
         progress.FailedEntities = progress.EntityProgress.Values.Sum(e => e.FailureCount);
         progress.SkippedEntities = progress.EntityProgress.Values.Sum(e => e.SkippedCount);
+        progress.CancelledEntities = progress.EntityProgress.Values.Sum(e => e.CancelledCount); // 🚨 CRITICAL FIX: Include CancelledEntities in overall calculation
         
         if (progress.TotalEntities > 0)
         {
@@ -481,6 +488,7 @@ public class ProgressTracker : IProgressTracker
             SuccessfulEntities = original.SuccessfulEntities,
             FailedEntities = original.FailedEntities,
             SkippedEntities = original.SkippedEntities,  // 🚨 FIX: Include SkippedEntities
+            CancelledEntities = original.CancelledEntities, // 🚨 CRITICAL FIX: Include CancelledEntities in copy
             OverallProgressPercentage = original.OverallProgressPercentage,
             EntityProgress = original.EntityProgress.ToDictionary(
                 kvp => kvp.Key,
@@ -492,6 +500,7 @@ public class ProgressTracker : IProgressTracker
                     SuccessCount = kvp.Value.SuccessCount,
                     FailureCount = kvp.Value.FailureCount,
                     SkippedCount = kvp.Value.SkippedCount,  // 🚨 FIX: Include SkippedCount
+                    CancelledCount = kvp.Value.CancelledCount, // 🚨 CRITICAL FIX: Include CancelledCount in entity copy
                     ProgressPercentage = kvp.Value.ProgressPercentage,
                     Status = kvp.Value.Status,
                     StartTime = kvp.Value.StartTime,
@@ -515,6 +524,13 @@ public class ProgressTracker : IProgressTracker
     {
         try
         {
+            // Check if storage service is available
+            if (_storageService == null)
+            {
+                _logger.LogDebug("Storage service not available - skipping progress persistence for migration {MigrationId}", migrationId);
+                return;
+            }
+            
             // Get the current migration entry from storage
             var migrationEntry = await _storageService.GetMigrationAsync(migrationId);
             if (migrationEntry != null)
@@ -524,8 +540,10 @@ public class ProgressTracker : IProgressTracker
                 migrationEntry.CurrentPhase = progress.CurrentPhase;
                 migrationEntry.TotalEntities = progress.TotalEntities;
                 migrationEntry.ProcessedEntities = progress.ProcessedEntities;
+                migrationEntry.SuccessfulEntities = progress.SuccessfulEntities; // 🚨 CRITICAL FIX: Include SuccessfulEntities in migration summary
                 migrationEntry.FailedEntities = progress.FailedEntities;
                 migrationEntry.SkippedEntities = progress.SkippedEntities; // 🚨 FIX: Include SkippedEntities in migration summary
+                migrationEntry.CancelledEntities = progress.CancelledEntities; // 🚨 CRITICAL FIX: Include CancelledEntities in migration summary
                 migrationEntry.UpdatedAt = DateTime.UtcNow;
                 
                 // Update the migration in storage
@@ -547,6 +565,7 @@ public class ProgressTracker : IProgressTracker
                         SuccessCount = entityProgress.Value.SuccessCount,
                         FailureCount = entityProgress.Value.FailureCount,
                         SkippedCount = entityProgress.Value.SkippedCount, // 🚨 FIX: Include SkippedCount in persistence
+                        CancelledCount = entityProgress.Value.CancelledCount, // 🚨 CRITICAL FIX: Include CancelledCount in database persistence
                         ProgressPercentage = entityProgress.Value.ProgressPercentage,
                         Status = entityProgress.Value.Status,
                         StartTime = entityProgress.Value.StartTime,
@@ -640,10 +659,11 @@ public class ProgressTracker : IProgressTracker
                 EntityType = entityType,
                 TotalCount = entityProgress?.TotalCount ?? 0,
                 ProcessedCount = entityProgress?.ProcessedCount ?? 0,
-                // 🚨 FIX: Pass actual success/failure/skipped counts from EntityProgress instead of letting factory calculate incorrectly
+                // 🚨 FIX: Pass actual success/failure/skipped/cancelled counts from EntityProgress instead of letting factory calculate incorrectly
                 SuccessCount = entityProgress?.SuccessCount ?? 0,
                 FailureCount = entityProgress?.FailureCount ?? 0,
                 SkippedCount = entityProgress?.SkippedCount ?? 0,
+                CancelledCount = entityProgress?.CancelledCount ?? 0, // 🚫 ADD: Include cancelled count in SignalR events
                 Status = entityProgress?.Status ?? "starting",
                 ProcessingTime = entityProgress?.ProcessingTime,
                 // Phase 4.2: Include soft cancellation state in entity progress event
@@ -784,10 +804,27 @@ public class ProgressTracker : IProgressTracker
                 return cachedProgress;
             }
 
-            try
+            // 🎯 OPTION 2: SELECTIVE REAL-TIME SYNC
+            // Use chunkincrementevents aggregation ONLY for active migrations (last 10 minutes)
+            // Use primary tables (migrations/entityprogress) for completed/cancelled/old migrations
+            
+            bool isActiveMigration = IsActiveMigration(cachedProgress);
+            
+            _logger.LogInformation("🔄 SELECTIVE-SYNC: Migration {MigrationId} Status='{Status}', LastUpdated={LastUpdated}, IsActive={IsActive}", 
+                migrationId, cachedProgress.Status, cachedProgress.LastUpdated, isActiveMigration);
+            
+            if (isActiveMigration)
             {
-                // Get aggregated increment events for real-time data
-                var aggregatedProgress = await _incrementEventsService.GetAggregatedProgressAsync(migrationId, cancellationToken);
+                _logger.LogInformation("🔄 ACTIVE-MIGRATION: Using real-time chunkincrementevents aggregation for active migration {MigrationId} (Status: {Status}, LastUpdated: {LastUpdated})", 
+                    migrationId, cachedProgress.Status, cachedProgress.LastUpdated);
+                
+                // Use real-time aggregation for active migrations
+                try
+                {
+                    // ⚡ ACTIVE-ONLY: Get aggregated increment events for real-time data (enabled for active migrations)
+                    _logger.LogInformation("🔄 INCREMENTAL-QUERY: Attempting to get aggregated progress from chunkincrementevents for {MigrationId}", migrationId);
+                    var aggregatedProgress = await _incrementEventsService.GetAggregatedProgressAsync(migrationId, cancellationToken);
+                    _logger.LogInformation("✅ INCREMENTAL-QUERY: Successfully retrieved aggregated progress from chunkincrementevents for {MigrationId}", migrationId);
                 
                 if (aggregatedProgress.Any())
                 {
@@ -837,13 +874,23 @@ public class ProgressTracker : IProgressTracker
                 }
                 else
                 {
-                    _logger.LogDebug("No incremental progress data found for migration {MigrationId} - returning cached progress", migrationId);
+                    _logger.LogDebug("No incremental progress data found for active migration {MigrationId} - returning cached progress", migrationId);
                     return cachedProgress;
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to get aggregated incremental progress for migration {MigrationId} - falling back to cached progress", migrationId);
+                _logger.LogError(ex, "❌ INCREMENTAL-QUERY-ERROR: Failed to get aggregated increment events for active migration {MigrationId}. " +
+                    "Error Type: {ErrorType}, Message: {ErrorMessage} - returning cached progress", 
+                    migrationId, ex.GetType().Name, ex.Message);
+                return cachedProgress;
+            }
+            }
+            else
+            {
+                // 🏎️ PERFORMANCE: Use cached/persisted progress for completed/cancelled/old migrations
+                _logger.LogInformation("🏁 COMPLETED-MIGRATION: Using cached/persisted progress for completed migration {MigrationId} (Status: {Status}, LastUpdated: {LastUpdated})", 
+                    migrationId, cachedProgress.Status, cachedProgress.LastUpdated);
                 return cachedProgress;
             }
         }
@@ -854,5 +901,29 @@ public class ProgressTracker : IProgressTracker
         }
     }
 
-
+    /// <summary>
+    /// Determines if a migration is considered "active" and should use real-time chunkincrementevents aggregation
+    /// </summary>
+    /// <param name="progress">Migration progress to evaluate</param>
+    /// <returns>True if migration is active and should use real-time aggregation</returns>
+    private static bool IsActiveMigration(MigrationProgress progress)
+    {
+        // Consider migration active if:
+        // 1. Status indicates active processing (running, processing, in-progress)
+        // 2. Status indicates recent cancellation (cancelled within last 30 minutes)
+        // 3. OR last updated within the last 10 minutes (recent activity)
+        
+        var activeStatuses = new[] { "running", "processing", "in-progress", "started" };
+        bool hasActiveStatus = activeStatuses.Contains(progress.Status?.ToLowerInvariant());
+        
+        // 🚨 CRITICAL FIX: Recently cancelled migrations should use real-time aggregation 
+        // to get accurate final counts from chunkincrementevents
+        var cancelledStatuses = new[] { "cancelled", "canceled" };
+        bool isRecentlyCancelled = cancelledStatuses.Contains(progress.Status?.ToLowerInvariant()) &&
+                                 progress.LastUpdated > DateTime.UtcNow.AddMinutes(-30);
+        
+        bool hasRecentActivity = progress.LastUpdated > DateTime.UtcNow.AddMinutes(-10);
+        
+        return hasActiveStatus || isRecentlyCancelled || hasRecentActivity;
+    }
 } 

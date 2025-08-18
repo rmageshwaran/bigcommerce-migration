@@ -153,6 +153,9 @@ public class DynamicRateLimitService : IEnhancedDynamicRateLimiter
             // Note: Performance metrics (elapsed time, success) are recorded separately via RecordApiCallAsync
             await _healthMonitor.RecordApiCallAsync(storeId, rateLimitInfo, 0, true, cancellationToken);
 
+            // 🎯 FIX: Call quota tracking service to trigger table creation and quota updates
+            _quotaTrackingService?.ProcessRateLimitInfo(rateLimitInfo, "DynamicRateLimitService");
+
             _logger.LogTrace("Updated BigCommerce rate limit info for store {StoreId}: {RequestsLeft}/{RequestsQuota}",
                 storeId, rateLimitInfo?.RequestsLeft, rateLimitInfo?.RequestsQuota);
         }
@@ -231,6 +234,20 @@ public class DynamicRateLimitService : IEnhancedDynamicRateLimiter
     {
         try
         {
+            // 🎯 FIX: Call predictive rate limiting service if available and enabled
+            if (_predictiveService != null && _configuration?.Features.EnablePredictiveDistribution == true)
+            {
+                var predictiveResult = await _predictiveService.CanProcessRequestAsync(storeId, cancellationToken);
+                _logger.LogDebug("🔮 [PREDICTIVE-RATE-LIMIT] Store {StoreId}: CanProcess = {CanProcess}", storeId, predictiveResult);
+                
+                // If predictive service says no, respect that decision
+                if (!predictiveResult)
+                {
+                    return false;
+                }
+                // If predictive service says yes, continue with additional health checks
+            }
+
             // Get current API health with BigCommerce data
             var apiHealth = await _healthMonitor.GetApiHealthAsync(storeId, cancellationToken);
             

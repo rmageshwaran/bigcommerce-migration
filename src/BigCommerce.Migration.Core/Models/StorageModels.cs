@@ -486,6 +486,11 @@ public class MigrationEntry
     public int SkippedEntities { get; set; }
 
     /// <summary>
+    /// Number of entities that were successfully migrated
+    /// </summary>
+    public int SuccessfulEntities { get; set; }
+
+    /// <summary>
     /// Number of entities that were cancelled (due to migration cancellation)
     /// </summary>
     public int CancelledEntities { get; set; }

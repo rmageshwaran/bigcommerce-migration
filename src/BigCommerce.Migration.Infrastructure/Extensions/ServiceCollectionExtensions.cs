@@ -37,6 +37,9 @@ public static class ServiceCollectionExtensions
         }
 
         // Register the increment events service as a singleton
+        // Centralized table management service
+        services.AddSingleton<IAzureTableInitializationService, AzureTableInitializationService>();
+        
         // Singleton is appropriate because:
         // 1. Service is stateless (no per-request state)
         // 2. TableServiceClient is thread-safe and designed for reuse

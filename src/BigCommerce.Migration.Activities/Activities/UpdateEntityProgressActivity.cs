@@ -37,12 +37,20 @@ public class UpdateEntityProgressActivity
             var migrationId = progressUpdate.MigrationId;
             var entityType = progressUpdate.EntityType;
 
-            // Phase 4.1: Check soft cancellation token from request (no storage calls)
-            if (progressUpdate.IsCancelled)
+            // 🚨 CRITICAL FIX: Don't skip cancelled updates - we need to process them to set correct status
+            // Only skip if this is a regular progress update for a cancelled migration (not the final status update)
+            if (progressUpdate.IsCancelled && !progressUpdate.Phase.Equals("Cancelled", StringComparison.OrdinalIgnoreCase))
             {
                 _logger.LogInformation("🛑 [SOFT-CANCEL] Skipping progress update for cancelled migration {MigrationId}, EntityType: {EntityType}. Reason: {Reason}", 
                     migrationId, entityType, progressUpdate.CancellationReason ?? "Unknown");
                 return;
+            }
+            
+            // 🚫 CANCELLATION PROCESSING: Allow cancelled phase updates to proceed
+            if (progressUpdate.IsCancelled && progressUpdate.Phase.Equals("Cancelled", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogInformation("🚫 [CANCELLATION-UPDATE] Processing final cancellation status update for {EntityType} in migration {MigrationId}", 
+                    entityType, migrationId);
             }
             
             _logger.LogInformation("🔄 [UPDATE-PROGRESS] Starting progress update for {EntityType} in migration {MigrationId}: Phase={Phase}, Processed={ProcessedEntities}/{TotalEntities}, Success={SuccessfulEntities}, Failed={FailedEntities}, Skipped={SkippedEntities}", 
@@ -76,10 +84,96 @@ public class UpdateEntityProgressActivity
             
             _logger.LogInformation("✅ [UPDATE-PROGRESS] Successfully updated progress for migration {MigrationId}", migrationId);
             
-            // If this is a completion phase, also mark the entity as completed
+            // If this is a completion phase, also mark the entity as completed with real final counts
             if (progressUpdate.Phase.Equals("Completed", StringComparison.OrdinalIgnoreCase))
             {
                 _logger.LogInformation("🏁 [UPDATE-PROGRESS] Marking {EntityType} as completed for migration {MigrationId}", entityType, migrationId);
+                
+                // 🎯 ENHANCEMENT: Get real final counts from chunkincrementevents for entity completion
+                _logger.LogInformation("📊 [ENTITY-COMPLETION] Getting real final counts from chunkincrementevents for {MigrationId}:{EntityType}", 
+                    migrationId, entityType);
+                
+                var realProgress = await _progressTracker.GetLatestAggregatedProgressAsync(migrationId, cancellationToken);
+                
+                // Update with real entity-specific counts if available
+                if (realProgress?.EntityProgress.ContainsKey(entityType) == true)
+                {
+                    var realEntityProgress = realProgress.EntityProgress[entityType];
+                    _logger.LogInformation("✅ [ENTITY-COMPLETION] Using real aggregated counts for {EntityType} - " +
+                        "Success: {Success}, Failed: {Failed}, Skipped: {Skipped}, Cancelled: {Cancelled}",
+                        entityType, realEntityProgress.SuccessCount, realEntityProgress.FailureCount, 
+                        realEntityProgress.SkippedCount, realEntityProgress.CancelledCount);
+                    
+                    // Create enhanced update with real counts
+                    var enhancedUpdate = new ProgressUpdate
+                    {
+                        MigrationId = migrationId,
+                        EntityType = entityType,
+                        Phase = "Completed",
+                        ProcessedCount = realEntityProgress.ProcessedCount,
+                        SuccessCount = realEntityProgress.SuccessCount,
+                        FailureCount = realEntityProgress.FailureCount,
+                        SkippedCount = realEntityProgress.SkippedCount,
+                        CancelledCount = realEntityProgress.CancelledCount,
+                        CurrentBatch = progressUpdate.CurrentBatch,
+                        TotalBatches = progressUpdate.TotalBatches,
+                        StatusMessage = $"Completed {entityType}: {realEntityProgress.ProcessedCount} entities processed",
+                        Timestamp = progressUpdate.Timestamp,
+                        IsCancelled = progressUpdate.IsCancelled,
+                        CancellationReason = progressUpdate.CancellationReason,
+                        CancelledAt = progressUpdate.CancelledAt
+                    };
+                    
+                    // Update with enhanced real counts
+                    await _progressTracker.UpdateProgressAsync(migrationId, enhancedUpdate, cancellationToken);
+                }
+                
+                await _progressTracker.CompleteEntityProcessingAsync(migrationId, entityType, cancellationToken);
+            }
+            // 🚫 CANCELLATION FIX: If this is a cancellation phase, also mark the entity as completed (with cancelled status)
+            else if (progressUpdate.Phase.Equals("Cancelled", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogInformation("🚫 [UPDATE-PROGRESS] Marking {EntityType} as cancelled for migration {MigrationId}", entityType, migrationId);
+                
+                // 🎯 ENHANCEMENT: Get real final counts from chunkincrementevents for entity cancellation
+                _logger.LogInformation("📊 [ENTITY-CANCELLATION] Getting real final counts from chunkincrementevents for {MigrationId}:{EntityType}", 
+                    migrationId, entityType);
+                
+                var realProgress = await _progressTracker.GetLatestAggregatedProgressAsync(migrationId, cancellationToken);
+                
+                // Update with real entity-specific counts if available
+                if (realProgress?.EntityProgress.ContainsKey(entityType) == true)
+                {
+                    var realEntityProgress = realProgress.EntityProgress[entityType];
+                    _logger.LogInformation("✅ [ENTITY-CANCELLATION] Using real aggregated counts for cancelled {EntityType} - " +
+                        "Success: {Success}, Failed: {Failed}, Skipped: {Skipped}, Cancelled: {Cancelled}",
+                        entityType, realEntityProgress.SuccessCount, realEntityProgress.FailureCount, 
+                        realEntityProgress.SkippedCount, realEntityProgress.CancelledCount);
+                    
+                    // Create enhanced update with real counts
+                    var enhancedUpdate = new ProgressUpdate
+                    {
+                        MigrationId = migrationId,
+                        EntityType = entityType,
+                        Phase = "Cancelled",
+                        ProcessedCount = realEntityProgress.ProcessedCount,
+                        SuccessCount = realEntityProgress.SuccessCount,
+                        FailureCount = realEntityProgress.FailureCount,
+                        SkippedCount = realEntityProgress.SkippedCount,
+                        CancelledCount = realEntityProgress.CancelledCount,
+                        CurrentBatch = progressUpdate.CurrentBatch,
+                        TotalBatches = progressUpdate.TotalBatches,
+                        StatusMessage = $"Cancelled {entityType}: {realEntityProgress.ProcessedCount} entities processed before cancellation",
+                        Timestamp = progressUpdate.Timestamp,
+                        IsCancelled = true,
+                        CancellationReason = progressUpdate.CancellationReason,
+                        CancelledAt = progressUpdate.CancelledAt
+                    };
+                    
+                    // Update with enhanced real counts
+                    await _progressTracker.UpdateProgressAsync(migrationId, enhancedUpdate, cancellationToken);
+                }
+                
                 await _progressTracker.CompleteEntityProcessingAsync(migrationId, entityType, cancellationToken);
             }
             

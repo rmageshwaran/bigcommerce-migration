@@ -1,7 +1,6 @@
 using Azure;
 using Azure.Data.Tables;
 using Azure.Data.Tables.Models;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
 using BigCommerce.Migration.Core.Interfaces;
@@ -14,7 +13,7 @@ namespace BigCommerce.Migration.Infrastructure.Services;
 /// </summary>
 public class MigrationStorageService : IMigrationStorageService
 {
-    private readonly TableServiceClient _tableServiceClient;
+    private readonly IAzureTableInitializationService _tableInitializationService;
     private readonly ILogger<MigrationStorageService> _logger;
     
     private const string MigrationsTableName = "migrations";
@@ -26,19 +25,15 @@ public class MigrationStorageService : IMigrationStorageService
     /// <summary>
     /// Initializes a new instance of the MigrationStorageService class
     /// </summary>
-    /// <param name="configuration">Application configuration</param>
+    /// <param name="tableInitializationService">Centralized table initialization service</param>
     /// <param name="logger">Logger instance</param>
-    public MigrationStorageService(IConfiguration configuration, ILogger<MigrationStorageService> logger)
+    public MigrationStorageService(IAzureTableInitializationService tableInitializationService, ILogger<MigrationStorageService> logger)
     {
+        _tableInitializationService = tableInitializationService ?? throw new ArgumentNullException(nameof(tableInitializationService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _ = configuration ?? throw new ArgumentNullException(nameof(configuration));
         
-        // Try ConnectionStrings section first, then fall back to Values section (Azure Functions style)
-        var connectionString = configuration.GetConnectionString("AzureWebJobsStorage") 
-            ?? configuration["AzureWebJobsStorage"]
-            ?? throw new ArgumentNullException("AzureWebJobsStorage connection string is required");
-        
-        _tableServiceClient = new TableServiceClient(connectionString);
+        _logger.LogInformation("✅ MigrationStorageService initialized with centralized table management for: {Tables}", 
+            string.Join(", ", new[] { MigrationsTableName, EntityMappingsTableName, ApiCallTrackingTableName, CancellationTokensTableName, EntityProgressTableName }));
     }
 
     #region Migration Configuration Operations
@@ -1058,6 +1053,8 @@ public class MigrationStorageService : IMigrationStorageService
                 ProcessedCount = entity.GetInt32("ProcessedCount") ?? 0,
                 SuccessCount = entity.GetInt32("SuccessCount") ?? 0,
                 FailureCount = entity.GetInt32("FailureCount") ?? 0,
+                SkippedCount = entity.GetInt32("SkippedCount") ?? 0,
+                CancelledCount = entity.GetInt32("CancelledCount") ?? 0,
                 ProgressPercentage = entity.GetDouble("ProgressPercentage") ?? 0.0,
                 Status = entity.GetString("Status") ?? string.Empty,
                 StartTime = entity.GetDateTime("StartTime") ?? DateTime.UtcNow,
@@ -1132,11 +1129,9 @@ public class MigrationStorageService : IMigrationStorageService
 
     #region Helper Methods
 
-    private async Task<TableClient> GetTableClientAsync(string tableName)
+    private async Task<TableClient> GetTableClientAsync(string tableName, CancellationToken cancellationToken = default)
     {
-        var tableClient = _tableServiceClient.GetTableClient(tableName);
-        await tableClient.CreateIfNotExistsAsync();
-        return tableClient;
+        return await _tableInitializationService.GetTableClientAsync(tableName, cancellationToken);
     }
 
     private static TableEntity ConvertToTableEntity(MigrationEntry migration)
@@ -1156,8 +1151,10 @@ public class MigrationStorageService : IMigrationStorageService
             ["ErrorMessage"] = migration.ErrorMessage,
             ["TotalEntities"] = migration.TotalEntities,
             ["ProcessedEntities"] = migration.ProcessedEntities,
+            ["SuccessfulEntities"] = migration.SuccessfulEntities,
             ["FailedEntities"] = migration.FailedEntities,
-            ["SkippedEntities"] = migration.SkippedEntities  // 🚨 FIX: Include SkippedEntities in table storage
+            ["SkippedEntities"] = migration.SkippedEntities,
+            ["CancelledEntities"] = migration.CancelledEntities
         };
     }
 
@@ -1184,8 +1181,10 @@ public class MigrationStorageService : IMigrationStorageService
             ErrorMessage = entity.GetString("ErrorMessage"),
             TotalEntities = entity.GetInt32("TotalEntities") ?? 0,
             ProcessedEntities = entity.GetInt32("ProcessedEntities") ?? 0,
+            SuccessfulEntities = entity.GetInt32("SuccessfulEntities") ?? 0,
             FailedEntities = entity.GetInt32("FailedEntities") ?? 0,
-            SkippedEntities = entity.GetInt32("SkippedEntities") ?? 0  // 🚨 FIX: Include SkippedEntities from table storage
+            SkippedEntities = entity.GetInt32("SkippedEntities") ?? 0,
+            CancelledEntities = entity.GetInt32("CancelledEntities") ?? 0
         };
     }
 

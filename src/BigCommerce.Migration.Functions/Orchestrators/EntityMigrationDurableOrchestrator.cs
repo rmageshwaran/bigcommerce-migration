@@ -535,6 +535,36 @@ public static class EntityMigrationDurableOrchestrator
                         entityType, migrationId);
                 }
                 
+                // 🚨 CRITICAL FIX: Update entity progress to "Cancelled" status before returning
+                // This ensures the entityprogress table shows the correct status when entity is cancelled
+                logger.LogInformation("🔄 [CANCELLATION-FIX] Updating entity progress to 'Cancelled' status for {EntityType} in migration {MigrationId}", 
+                    entityType, migrationId);
+                
+                await context.CallActivityAsync(
+                    "UpdateEntityProgressActivity",
+                    new UpdateEntityProgressRequest
+                    {
+                        MigrationId = migrationId,
+                        EntityType = entityType,
+                        Phase = "Cancelled",
+                        TotalEntities = discoverResult?.TotalCount ?? 0,
+                        ProcessedEntities = result.ProcessedEntities,
+                        SuccessfulEntities = result.SuccessfulEntities,
+                        FailedEntities = result.FailedEntities,
+                        SkippedEntities = result.SkippedEntities,
+                        CancelledEntities = result.CancelledEntities,
+                        CurrentBatch = totalBatches,
+                        TotalBatches = totalBatches,
+                        Timestamp = result.EndTime ?? context.CurrentUtcDateTime,
+                        // 🚫 PASS CANCELLATION STATE: This will ensure ProgressTracker knows the migration was cancelled
+                        IsCancelled = true,
+                        CancellationReason = wasCancelledByState ? cancellationState.CancellationReason : "Entity processing was cancelled",
+                        CancelledAt = wasCancelledByState ? cancellationState.CancelledAt : context.CurrentUtcDateTime
+                    });
+                
+                logger.LogInformation("✅ [CANCELLATION-FIX] Entity progress updated to 'Cancelled' status for {EntityType} in migration {MigrationId}", 
+                    entityType, migrationId);
+                
                 return result;
             }
 

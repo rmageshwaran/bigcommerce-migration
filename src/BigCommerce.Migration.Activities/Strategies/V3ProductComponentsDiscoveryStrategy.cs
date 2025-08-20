@@ -83,132 +83,57 @@ public class V3ProductComponentsDiscoveryStrategy : IEntityDiscoveryStrategy
             cancellationToken.ThrowIfCancellationRequested();
             await CheckCancellationAsync(request.MigrationId);
 
-            // Fetch ALL pages to get accurate component counts by type
-            var componentCounts = new Dictionary<string, int>
-            {
-                { "options", 0 },
-                { "modifiers", 0 },
-                { "images", 0 },
-                { "reviews", 0 }
-            };
+            // 🚀 PROGRESSIVE DISCOVERY: Only discover pagination metadata, not component counts
+            // Component totals are unknown until processing since BigCommerce doesn't provide catalog-level counts
+            _logger.LogInformation("🔍 [PRODUCT-COMPONENTS-DISCOVERY] Using progressive discovery - component totals will be determined during processing");
             
-            var allProducts = new List<Dictionary<string, object>>();
-            var currentPage = 1;
-            var totalPages = 1;
-            var totalProducts = 0;
-
-            do
-            {
-                // Update pagination request for current page
-                paginationRequest.Page = currentPage;
-                
-                _logger.LogInformation("🔍 [PRODUCT-COMPONENTS-DISCOVERY] Fetching page {CurrentPage} of products with include parameters", currentPage);
-                
-                // Check cancellation before each API call
-                cancellationToken.ThrowIfCancellationRequested();
-                await CheckCancellationAsync(request.MigrationId);
-
-                // Call products endpoint (not product-components which doesn't exist)
-                var response = await _apiClient.GetPaginatedEntitiesAsync(
-                    request.SourceStore,
-                    "products", // Query products, not product-components
-                    paginationRequest,
-                    cancellationToken);
-                    
-                _logger.LogInformation("🔍 [PRODUCT-COMPONENTS-DISCOVERY] Page {CurrentPage} response - TotalItems: {TotalItems}, TotalPages: {TotalPages}, Data.Count: {DataCount}", 
-                    currentPage, response.TotalItems, response.TotalPages, response.Data?.Count);
-
-                // Update totals from first response
-                if (currentPage == 1)
-                {
-                    totalPages = response.TotalPages ?? 1;
-                    totalProducts = response.TotalItems ?? 0;
-                }
-
-                var products = response.Data ?? new List<Dictionary<string, object>>();
-                allProducts.AddRange(products);
-                
-                // Count components by type in this page's products
-                foreach (var product in products)
-                {
-                    var productId = product.TryGetValue("id", out var id) ? id.ToString() : "unknown";
-                    var productComponentCounts = new Dictionary<string, int>();
-                    
-                    _logger.LogDebug("🔍 [PRODUCT-COMPONENTS-DISCOVERY] Analyzing product {ProductId}: {ProductKeys}", 
-                        productId, string.Join(", ", product.Keys));
-                    
-                    // Count options (handle both JSON string and array formats)
-                    var optionsCount = ParseComponentCount(product, "options");
-                    componentCounts["options"] += optionsCount;
-                    productComponentCounts["options"] = optionsCount;
-                    
-                    // Count modifiers (handle both JSON string and array formats) 
-                    var modifiersCount = ParseComponentCount(product, "modifiers");
-                    componentCounts["modifiers"] += modifiersCount;
-                    productComponentCounts["modifiers"] = modifiersCount;
-                    
-                    // Count images (handle both JSON string and array formats)
-                    var imagesCount = ParseComponentCount(product, "images");
-                    componentCounts["images"] += imagesCount;
-                    productComponentCounts["images"] = imagesCount;
-                    
-                    // Count reviews (handle both JSON string and array formats)
-                    var reviewsCount = ParseComponentCount(product, "reviews");
-                    componentCounts["reviews"] += reviewsCount;
-                    productComponentCounts["reviews"] = reviewsCount;
-                    
-                    var totalForProduct = productComponentCounts.Values.Sum();
-                    _logger.LogDebug("🔍 [PRODUCT-COMPONENTS-DISCOVERY] Product {ProductId} has {TotalComponents} components: {ComponentBreakdown}", 
-                        productId, totalForProduct, string.Join(", ", productComponentCounts.Select(kv => $"{kv.Key}:{kv.Value}")));
-                }
-                
-                // Move to next page
-                currentPage++;
-                
-            } while (currentPage <= totalPages);
-
-            var totalComponentsCount = componentCounts.Values.Sum();
-            _logger.LogInformation("✅ [PRODUCT-COMPONENTS-DISCOVERY] Completed discovery - Found {TotalComponents} individual components across {TotalProducts} products: {ComponentBreakdown}", 
-                totalComponentsCount, totalProducts, string.Join(", ", componentCounts.Select(kv => $"{kv.Key}:{kv.Value}")));
-
-            // Determine the count to return based on the requested entity type
-            var countToReturn = request.EntityType.ToLowerInvariant() switch
-            {
-                "product-components" => totalComponentsCount, // Return total of all components
-                "options" => componentCounts["options"],
-                "modifiers" => componentCounts["modifiers"],
-                "images" => componentCounts["images"],
-                "reviews" => componentCounts["reviews"],
-                _ => totalComponentsCount // Default to total
-            };
+            // Fetch only first page to get pagination metadata
+            paginationRequest.Page = 1;
             
-            _logger.LogInformation("🎯 [COMPONENT-COUNT] For entity type '{EntityType}', returning count: {Count}", 
+            _logger.LogInformation("🔍 [PRODUCT-COMPONENTS-DISCOVERY] Fetching first page to determine pagination metadata");
+            
+            // Check cancellation before API call
+            cancellationToken.ThrowIfCancellationRequested();
+            await CheckCancellationAsync(request.MigrationId);
+
+            // Call products endpoint to get pagination metadata only
+            var response = await _apiClient.GetPaginatedEntitiesAsync(
+                request.SourceStore,
+                "products", // Query products, not product-components
+                paginationRequest,
+                cancellationToken);
+                
+            _logger.LogInformation("🔍 [PRODUCT-COMPONENTS-DISCOVERY] Pagination metadata - TotalItems: {TotalItems}, TotalPages: {TotalPages}, PageSize: {PageSize}", 
+                response.TotalItems, response.TotalPages, response.PerPage);
+
+            var totalPages = response.TotalPages ?? 1;
+            var totalProducts = response.TotalItems ?? 0;
+            
+            // 🎯 PROGRESSIVE APPROACH: Return 0 for component counts - will be discovered during processing
+            var countToReturn = 0; // Unknown until processing
+            
+            _logger.LogInformation("🎯 [COMPONENT-COUNT] For entity type '{EntityType}', returning count: {Count} (progressive discovery)", 
                 request.EntityType, countToReturn);
 
-            // Return discovery result with appropriate component count
+            // Return discovery result with progressive approach
             return new EntityDiscoveryResult
             {
                 EntityType = request.EntityType, // Keep the requested entity type
-                TotalCount = countToReturn, // Count specific to the requested entity type
+                TotalCount = countToReturn, // 0 - will be discovered progressively during processing
                 EntityIds = new List<string>(), // Empty - we use page-based processing
                 Errors = new List<string>(),
                 ApiVersion = BigCommerceApiVersion.V3,
-                // Discovery phase only counts - data is fetched later during processing
+                // Discovery phase only provides pagination metadata - data is fetched later during processing
                 EntityData = new List<Dictionary<string, object>>(),
                 // Store pagination metadata for processing coordination
                 PaginationMetadata = new Dictionary<string, object>
                 {
                     { "TotalPages", totalPages },
-                    { "PageSize", discoveryLimit },
+                    { "PageSize", paginationRequest.Limit > 0 ? paginationRequest.Limit : 20 },
                     { "TotalProducts", totalProducts },
-                    { "TotalComponents", totalComponentsCount },
-                    { "OptionsCount", componentCounts["options"] },
-                    { "ModifiersCount", componentCounts["modifiers"] },
-                    { "ImagesCount", componentCounts["images"] },
-                    { "ReviewsCount", componentCounts["reviews"] },
-                    { "ComponentCounts", componentCounts },
+                    { "ProgressiveDiscovery", true }, // 🎯 Flag for progressive discovery
                     { "ApiVersion", "V3" },
-                    { "Strategy", "ProductComponentsDiscovery" },
+                    { "Strategy", "ProductComponentsProgressiveDiscovery" },
                     { "IncludeParameter", paginationRequest.Include ?? "options,modifiers,images,reviews" }
                 }
             };

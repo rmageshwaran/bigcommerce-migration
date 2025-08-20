@@ -163,9 +163,7 @@ public static class MigrationDurableOrchestrator
 
             // Simplified cancellation handling - we'll check via activities
 
-            try
-            {
-                // Step 5: Resolve entity dependencies using EntityDependencyResolver
+            // Step 5: Resolve entity dependencies using EntityDependencyResolver
             var entityOrder = await context.CallActivityAsync<List<string>>(
                 "ResolveEntityDependencies", 
                 input.MigrationRequest?.Entities ?? new List<string>());
@@ -184,6 +182,22 @@ public static class MigrationDurableOrchestrator
                 CancelledAt = (DateTime?)null 
             };
             logger.LogInformation("Step 5.2: Deterministic cancellation state initialized for MigrationId: {MigrationId}", migrationId);
+
+            // Step 5.3: Broadcast Migration Started Event (Phase 4)
+            logger.LogInformation("Step 5.3: Broadcasting migration started event for MigrationId: {MigrationId}", migrationId);
+            await context.CallActivityAsync("BroadcastMigrationStartedActivity", new BroadcastMigrationStartedRequest
+            {
+                MigrationId = migrationId,
+                SourceStore = input.MigrationRequest?.SourceStore?.StoreId ?? "Unknown",
+                DestinationStore = input.MigrationRequest?.DestinationStore?.StoreId ?? "Unknown",
+                StartDateTime = result.StartTime,
+                Entities = entityOrder.Select(entityType => new EntityInfo
+                {
+                    EntityType = entityType,
+                    TotalCount = 0, // Will be determined during discovery
+                    EstimatedDuration = null
+                }).ToList()
+            });
 
             foreach (var entityType in entityOrder)
             {
@@ -414,7 +428,7 @@ public static class MigrationDurableOrchestrator
                 logger.LogInformation("🚫 Getting final real progress for cancelled migration {MigrationId}", migrationId);
                 var cancelledMigrationProgress = await context.CallActivityAsync<MigrationProgress>(
                     "GetLatestAggregatedProgressActivity", 
-                    migrationId);
+                    new GetProgressRequest { MigrationId = migrationId, EntityType = null });
                 
                 if (cancelledMigrationProgress != null)
                 {
@@ -431,6 +445,18 @@ public static class MigrationDurableOrchestrator
                         cancelledMigrationProgress.FailedEntities, cancelledMigrationProgress.SkippedEntities, cancelledMigrationProgress.CancelledEntities);
                 }
                 
+                // Phase 4: Broadcast migration cancellation event
+                await context.CallActivityAsync("BroadcastMigrationCompletedActivity", new BroadcastMigrationCompletedRequest
+                {
+                    MigrationId = migrationId,
+                    Status = "Cancelled",
+                    Message = result.ErrorMessage ?? "Migration was cancelled",
+                    TotalProcessedEntities = result.TotalEntitiesProcessed,
+                    TotalFailedEntities = result.TotalEntitiesFailed,
+                    DurationMs = (long)result.Duration.TotalMilliseconds,
+                    EndDateTime = result.EndTime ?? context.CurrentUtcDateTime
+                });
+                
                 // Complete migration as cancelled - update storage service for HTTP API
                 await CompleteMigrationAsync(context, migrationId, result, MigrationStatus.Cancelled, result.ErrorMessage);
                 
@@ -441,7 +467,7 @@ public static class MigrationDurableOrchestrator
             logger.LogInformation("🏁 Getting final real progress for completed migration {MigrationId}", migrationId);
             var completedMigrationProgress = await context.CallActivityAsync<MigrationProgress>(
                 "GetLatestAggregatedProgressActivity", 
-                migrationId);
+                new GetProgressRequest { MigrationId = migrationId, EntityType = null });
             
             if (completedMigrationProgress != null)
             {
@@ -467,7 +493,17 @@ public static class MigrationDurableOrchestrator
                 // Complete migration - update storage service for HTTP API
                 await CompleteMigrationAsync(context, migrationId, result, MigrationStatus.Failed, result.ErrorMessage);
                 
-                // Migration failed event will be handled by queue-based system
+                // Phase 4: Broadcast migration completion event
+                await context.CallActivityAsync("BroadcastMigrationCompletedActivity", new BroadcastMigrationCompletedRequest
+                {
+                    MigrationId = migrationId,
+                    Status = "Failed",
+                    Message = result.ErrorMessage,
+                    TotalProcessedEntities = result.TotalEntitiesProcessed,
+                    TotalFailedEntities = result.TotalEntitiesFailed,
+                    DurationMs = (long)result.Duration.TotalMilliseconds,
+                    EndDateTime = result.EndTime ?? context.CurrentUtcDateTime
+                });
             }
             else if (result.TotalEntitiesFailed == 0)
             {
@@ -479,7 +515,17 @@ public static class MigrationDurableOrchestrator
                 // Complete migration - update storage service for HTTP API
                 await CompleteMigrationAsync(context, migrationId, result, MigrationStatus.Completed);
                 
-                // Migration completed event will be handled by queue-based system
+                // Phase 4: Broadcast migration completion event
+                await context.CallActivityAsync("BroadcastMigrationCompletedActivity", new BroadcastMigrationCompletedRequest
+                {
+                    MigrationId = migrationId,
+                    Status = "Completed",
+                    Message = "Migration completed successfully",
+                    TotalProcessedEntities = result.TotalEntitiesProcessed,
+                    TotalFailedEntities = result.TotalEntitiesFailed,
+                    DurationMs = (long)result.Duration.TotalMilliseconds,
+                    EndDateTime = result.EndTime ?? context.CurrentUtcDateTime
+                });
             }
             else if (result.TotalEntitiesSuccessful > 0)
             {
@@ -492,7 +538,17 @@ public static class MigrationDurableOrchestrator
                 // Complete migration - update storage service for HTTP API
                 await CompleteMigrationAsync(context, migrationId, result, MigrationStatus.Completed, result.ErrorMessage);
                 
-                // Migration completed with errors event will be handled by queue-based system
+                // Phase 4: Broadcast migration completion event
+                await context.CallActivityAsync("BroadcastMigrationCompletedActivity", new BroadcastMigrationCompletedRequest
+                {
+                    MigrationId = migrationId,
+                    Status = "CompletedWithErrors",
+                    Message = result.ErrorMessage,
+                    TotalProcessedEntities = result.TotalEntitiesProcessed,
+                    TotalFailedEntities = result.TotalEntitiesFailed,
+                    DurationMs = (long)result.Duration.TotalMilliseconds,
+                    EndDateTime = result.EndTime ?? context.CurrentUtcDateTime
+                });
             }
             else if (result.TotalEntitiesSuccessful == 0 && result.TotalEntitiesFailed > 0)
             {
@@ -504,7 +560,17 @@ public static class MigrationDurableOrchestrator
                 // Complete migration - update storage service for HTTP API
                 await CompleteMigrationAsync(context, migrationId, result, MigrationStatus.Failed, result.ErrorMessage);
                 
-                // Migration failed event will be handled by queue-based system
+                // Phase 4: Broadcast migration completion event
+                await context.CallActivityAsync("BroadcastMigrationCompletedActivity", new BroadcastMigrationCompletedRequest
+                {
+                    MigrationId = migrationId,
+                    Status = "Failed",
+                    Message = result.ErrorMessage,
+                    TotalProcessedEntities = result.TotalEntitiesProcessed,
+                    TotalFailedEntities = result.TotalEntitiesFailed,
+                    DurationMs = (long)result.Duration.TotalMilliseconds,
+                    EndDateTime = result.EndTime ?? context.CurrentUtcDateTime
+                });
             }
             else
             {
@@ -516,37 +582,7 @@ public static class MigrationDurableOrchestrator
                     migrationId, result.TotalEntitiesProcessed, result.TotalEntitiesSuccessful, result.TotalEntitiesFailed);
             }
 
-                return result;
-            }
-            finally
-            {
-                // Phase 3.1: Always release the orchestrator lock when migration completes, fails, or is cancelled
-                try
-                {
-                    logger.LogInformation("Releasing orchestrator lock for migration: {MigrationId}, instance: {InstanceId}", 
-                        migrationId, instanceId);
-                    
-                    var lockReleased = await context.CallActivityAsync<bool>(
-                        "ReleaseOrchestratorLockActivity",
-                        new OrchestratorLockReleaseRequest
-                        {
-                            MigrationId = migrationId,
-                            InstanceId = instanceId
-                        });
-                    if (lockReleased)
-                    {
-                        logger.LogInformation("Successfully released orchestrator lock for migration: {MigrationId}", migrationId);
-                    }
-                    else
-                    {
-                        logger.LogWarning("Failed to release orchestrator lock for migration: {MigrationId} - may require cleanup", migrationId);
-                    }
-                }
-                catch (Exception lockEx)
-                {
-                    logger.LogError(lockEx, "Error releasing orchestrator lock for migration: {MigrationId} - may require cleanup", migrationId);
-                }
-            }
+            return result;
         }
         catch (TaskCanceledException)
         {
@@ -555,7 +591,17 @@ public static class MigrationDurableOrchestrator
             result.ErrorMessage = "Migration orchestration was cancelled";
             result.EndTime = context.CurrentUtcDateTime;
             
-            // Migration cancelled event will be handled by queue-based system
+            // Phase 4: Broadcast migration cancellation event
+            await context.CallActivityAsync("BroadcastMigrationCompletedActivity", new BroadcastMigrationCompletedRequest
+            {
+                MigrationId = migrationId,
+                Status = "Cancelled",
+                Message = result.ErrorMessage,
+                TotalProcessedEntities = result.TotalEntitiesProcessed,
+                TotalFailedEntities = result.TotalEntitiesFailed,
+                DurationMs = (long)result.Duration.TotalMilliseconds,
+                EndDateTime = result.EndTime ?? context.CurrentUtcDateTime
+            });
             
             return result;
         }
@@ -566,6 +612,35 @@ public static class MigrationDurableOrchestrator
             result.ErrorMessage = $"Unexpected error: {ex.Message}";
             result.EndTime = context.CurrentUtcDateTime;
             return result;
+        }
+        finally
+        {
+            // Phase 3.1: Always release the orchestrator lock when migration completes, fails, or is cancelled
+            try
+            {
+                logger.LogInformation("Releasing orchestrator lock for migration: {MigrationId}, instance: {InstanceId}", 
+                    migrationId, instanceId);
+                
+                var lockReleased = await context.CallActivityAsync<bool>(
+                    "ReleaseOrchestratorLockActivity",
+                    new OrchestratorLockReleaseRequest
+                    {
+                        MigrationId = migrationId,
+                        InstanceId = instanceId
+                    });
+                if (lockReleased)
+                {
+                    logger.LogInformation("Successfully released orchestrator lock for migration: {MigrationId}", migrationId);
+                }
+                else
+                {
+                    logger.LogWarning("Failed to release orchestrator lock for migration: {MigrationId} - may require cleanup", migrationId);
+                }
+            }
+            catch (Exception lockEx)
+            {
+                logger.LogError(lockEx, "Error releasing orchestrator lock for migration: {MigrationId} - may require cleanup", migrationId);
+            }
         }
     }
 
@@ -643,4 +718,4 @@ public class MigrationOrchestrationResult
     public int TotalEntitiesSkipped { get; set; }
     public int TotalEntitiesCancelled { get; set; }
     public Dictionary<string, EntityMigrationResult> EntityResults { get; set; } = new();
-} 
+}

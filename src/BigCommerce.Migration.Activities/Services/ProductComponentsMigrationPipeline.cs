@@ -1087,23 +1087,11 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
             _logger.LogDebug("📊 [PRODUCT-COMPONENTS-PROGRESS] Publishing progress: Status={Status}, Message={Message}, Progress={Progress}%, Cancelled={IsCancelled}", 
                 status, message, progressPercentage, isCancelled);
 
-            // Create progress event with cancellation support
-            var progressEvent = _signalREventFactory.CreateStatusProgress(migrationId, new StatusProgressOptions
-            {
-                Status = status,
-                Message = message,
-                IsCancelled = isCancelled,
-                CancellationReason = cancellationReason,
-                CancelledAt = isCancelled ? DateTime.UtcNow : null,
-                Data = new Dictionary<string, object>
-                {
-                    { "Component", "ProductComponentsPipeline" },
-                    { "EntityType", "product-components" },
-                    { "ProgressPercentage", progressPercentage ?? 0.0 } // Include in Data instead
-                }
-            });
-
-            await _progressEventPublisher.PublishStatusAsync(progressEvent);
+            // Note: Internal pipeline progress events removed in simplified SignalR approach
+            // These detailed component-level events are not essential for migration progress tracking
+            // Main chunk-level progress is published by ProcessEntityChunkActivity instead
+            _logger.LogDebug("📊 [PRODUCT-COMPONENTS-PROGRESS] Pipeline progress: Status={Status}, Message={Message}, Progress={Progress}% - event simplified", 
+                status, message, progressPercentage);
             
             _logger.LogDebug("✅ [PRODUCT-COMPONENTS-PROGRESS] Successfully published progress event for {MigrationId}", migrationId);
         }

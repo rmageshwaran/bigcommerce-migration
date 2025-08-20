@@ -2,6 +2,7 @@ using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Logging;
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
+using BigCommerce.Migration.Core.Utilities;
 using BigCommerce.Migration.Core.Services;
 using BigCommerce.Migration.Activities.Models;
 using BigCommerce.Migration.Activities.Services;
@@ -28,9 +29,10 @@ public class ProcessEntityChunkActivity
     private readonly IEntityErrorHandlingService _errorHandlingService;
     private readonly IProgressEventPublisher _progressEventPublisher;
     private readonly ISignalREventFactory _signalREventFactory; // 🎯 CENTRALIZED SIGNALR: Factory for consistent event creation
+    private readonly ICentralizedProgressBroadcastService _centralizedBroadcastService; // 🎯 PHASE 2: Single point for all progress broadcasting
     private readonly IProductComponentsMigrationPipeline _productComponentsPipeline; // 🔗 PHASE 2: Special pipeline for product components
 
-    private readonly IUniversalMigrationProgressAggregator _universalAggregator; // ✅ P2-T1.5: Universal aggregator for Tier 2 progress
+    // Note: Universal aggregator removed - using simplified chunk-level progress tracking
     private readonly ICancellationStore _cancellationStore; // ✅ Phase 3.1.1: Native cancellation support
     private readonly ISubBatchProcessor _subBatchProcessor; // ✅ Phase 3.1.2: Sub-batch processing for 50-100 entities per sub-batch
     private readonly IProgressTracker _progressTracker; // 🆕 INCREMENTAL PROGRESS: Real-time progress tracking
@@ -44,8 +46,9 @@ public class ProcessEntityChunkActivity
         IEntityErrorHandlingService errorHandlingService,
         IProgressEventPublisher progressEventPublisher,
         ISignalREventFactory signalREventFactory,
+        ICentralizedProgressBroadcastService centralizedBroadcastService,
         IProductComponentsMigrationPipeline productComponentsPipeline,
-        IUniversalMigrationProgressAggregator universalAggregator,
+        // universalAggregator parameter removed
         ICancellationStore cancellationStore,
         ISubBatchProcessor subBatchProcessor,
         IProgressTracker progressTracker) // 🆕 INCREMENTAL PROGRESS: Real-time progress tracking
@@ -58,9 +61,10 @@ public class ProcessEntityChunkActivity
         _errorHandlingService = errorHandlingService ?? throw new ArgumentNullException(nameof(errorHandlingService));
         _progressEventPublisher = progressEventPublisher ?? throw new ArgumentNullException(nameof(progressEventPublisher));
         _signalREventFactory = signalREventFactory ?? throw new ArgumentNullException(nameof(signalREventFactory)); // 🎯 CENTRALIZED SIGNALR: Factory injection
+        _centralizedBroadcastService = centralizedBroadcastService ?? throw new ArgumentNullException(nameof(centralizedBroadcastService)); // 🎯 PHASE 2: Centralized broadcasting injection
         _productComponentsPipeline = productComponentsPipeline ?? throw new ArgumentNullException(nameof(productComponentsPipeline)); // 🔗 PHASE 2: Special pipeline injection
 
-        _universalAggregator = universalAggregator ?? throw new ArgumentNullException(nameof(universalAggregator)); // ✅ P2-T1.5: Universal aggregator injection
+        // Universal aggregator injection removed - using simplified progress tracking
         _cancellationStore = cancellationStore ?? throw new ArgumentNullException(nameof(cancellationStore)); // ✅ Phase 3.1.1: Native cancellation injection
         _subBatchProcessor = subBatchProcessor ?? throw new ArgumentNullException(nameof(subBatchProcessor)); // ✅ Phase 3.1.2: Sub-batch processing injection
         _progressTracker = progressTracker ?? throw new ArgumentNullException(nameof(progressTracker)); // 🆕 INCREMENTAL PROGRESS: Real-time progress tracking injection
@@ -171,48 +175,9 @@ public class ProcessEntityChunkActivity
                 request.ChunkNumber, result.SuccessfulEntities, result.FailedEntities, result.SkippedEntities, 
                 result.CancelledEntities, result.TotalProcessed);
 
-            // ✅ Update Universal Aggregator (Tier 2) with entity progress - MOVED BEFORE cancellation check
-            // 🛡️ CRITICAL: Protect progress recording from exceptions to prevent data loss
-            _logger.LogInformation("🔄 [CHUNK-{ChunkNumber}] STEP 1/3: Updating Universal Aggregator with progress data for {MigrationId}:{EntityType}", 
-                request.ChunkNumber, request.MigrationId, request.EntityType);
-            
-            try
-            {
-                var progressData = new PrimaryEntityProgress
-                {
-                    EntityType = batchRequest.EntityType,
-                    TotalCount = result.TotalProcessed, // Will be aggregated across chunks
-                    ProcessedCount = result.TotalProcessed,
-                    SuccessCount = result.SuccessfulEntities,
-                    FailureCount = result.FailedEntities,
-                    SkippedCount = result.SkippedEntities,  // 🚨 FIX: Include SkippedCount
-                    CancelledCount = result.CancelledEntities,  // 🚨 CANCELLATION FIX: Include CancelledCount
-                    Status = result.SuccessfulEntities == result.TotalProcessed ? "completed" : "processing",
-                    ThroughputPerSecond = result.TotalProcessed / Math.Max(result.ProcessingTime.TotalSeconds, 1),
-                    ProcessingTime = result.ProcessingTime
-                };
-
-                _logger.LogInformation("📤 [CHUNK-{ChunkNumber}] Sending to Universal Aggregator: " +
-                    "Success={Success}, Failed={Failed}, Skipped={Skipped}, Cancelled={Cancelled}, " +
-                    "Total={Total}, Status={Status}, Throughput={Throughput:F1}/sec",
-                    request.ChunkNumber, progressData.SuccessCount, progressData.FailureCount, 
-                    progressData.SkippedCount, progressData.CancelledCount, progressData.TotalCount, 
-                    progressData.Status, progressData.ThroughputPerSecond);
-
-                await _universalAggregator.UpdatePrimaryEntityProgressAsync(
-                    batchRequest.MigrationId,
-                    batchRequest.EntityType,
-                    progressData);
-                    
-                _logger.LogInformation("✅ [CHUNK-{ChunkNumber}] STEP 1/3 COMPLETED: Universal aggregator updated successfully for {MigrationId}:{EntityType}", 
-                    request.ChunkNumber, request.MigrationId, request.EntityType);
-            }
-            catch (Exception progressEx)
-            {
-                _logger.LogError(progressEx, "❌ [CHUNK-{ChunkNumber}] STEP 1/3 FAILED: Universal aggregator update failed for {MigrationId}:{EntityType} - {ErrorMessage}",
-                    request.ChunkNumber, request.MigrationId, request.EntityType, progressEx.Message);
-                // Don't fail the chunk - continue with other progress recording
-            }
+            // Note: Universal aggregator removed - using simplified chunk-level progress tracking
+            _logger.LogInformation("📊 [CHUNK-{ChunkNumber}] Chunk progress: Success={Success}, Failed={Failed}, Skipped={Skipped}, Cancelled={Cancelled}, Total={Total}", 
+                request.ChunkNumber, result.SuccessfulEntities, result.FailedEntities, result.SkippedEntities, result.CancelledEntities, result.TotalProcessed);
 
             _logger.LogInformation("✅ [CHUNK-{ChunkNumber}] Chunk processing completed: " +
                                  "{SuccessfulEntities}/{TotalProcessed} entities successful in {ProcessingTimeMs}ms " +
@@ -616,7 +581,7 @@ public class ProcessEntityChunkActivity
                             batchRequest.EntityType.ToLowerInvariant() != "product-variants")
                         {
                             // Extract level from source entity for mapping differentiation
-                            var processingLevel = sourceEntity.TryGetValue("_processing_level", out var level) ? (int)(level ?? 0) : 0;
+                            var processingLevel = sourceEntity.TryGetValue("_processing_level", out var level) ? JsonElementHelper.GetIntegerValue(level) : 0;
                             var processingMode = sourceEntity.TryGetValue("_processing_mode", out var mode) ? mode?.ToString() : "Unknown";
                             
                             // Store level metadata for filtering mappings by level
@@ -715,35 +680,62 @@ public class ProcessEntityChunkActivity
     }
 
     /// <summary>
-    /// Publishes progress update for this chunk completion using centralized SignalR factory
-    /// SOLID: Single Responsibility - focused on publishing chunk progress only
+    /// Publishes progress update for this chunk completion using CentralizedProgressBroadcastService
+    /// PHASE 2: Single point of broadcasting with rate limiting and clean event structure
+    /// Uses ProgressTracker for accurate cumulative counts across all chunks
     /// </summary>
     private async Task PublishChunkProgress(ProcessEntityChunkRequest request, BatchProcessingResult result)
     {
         try
         {
-            // ✅ CENTRALIZED SIGNALR: Use factory for consistent event creation with auto-populated base properties
-            var progressEvent = _signalREventFactory.CreateEntityProgress(request.MigrationId, new EntityProgressOptions
+            // 🎯 PHASE 2: Use CentralizedProgressBroadcastService for all progress broadcasting
+            // This provides rate limiting, consistent event structure, and single source of truth
+            
+            // Get accurate cumulative progress from the progress tracker
+            var migrationProgress = await _progressTracker.GetLatestAggregatedProgressAsync(request.MigrationId);
+            var entityProgress = migrationProgress.EntityProgress.GetValueOrDefault(request.EntityType);
+            
+            // 🔍 DEBUG: Log TotalCount assignment source
+            _logger.LogInformation("🔍 [CHUNK-{ChunkNumber}] TotalCount DEBUG: EntityProgress={EntityProgressExists}, " +
+                "TotalCount={TotalCount}, FallbackCalculation={FallbackCalc}, ChunkSize={ChunkSize}, TotalChunks={TotalChunks}",
+                request.ChunkNumber, entityProgress != null, entityProgress?.TotalCount ?? -1, 
+                request.TotalChunks * request.ChunkSize, request.ChunkSize, request.TotalChunks);
+            
+            // Calculate progress percentage based on entity-specific progress
+            var progressPercentage = entityProgress?.ProgressPercentage ?? 0.0;
+            
+            // 🎯 USE PROGRESSTRACKER COMPREHENSIVELY: Get all data from single source of truth
+            var chunkProgress = new EntityChunkProgress
             {
                 EntityType = request.EntityType,
-                TotalCount = request.ChunkSize,
-                ProcessedCount = result.TotalProcessed,
-                Status = result.SuccessfulEntities == result.TotalProcessed ? "completed" : "processing",
-                ProcessingTime = result.ProcessingTime
-                // ✅ Base properties (Timestamp, IsCancelled, HubMethod) auto-populated by factory
-                // ✅ SuccessCount/FailureCount calculated from ProcessedCount internally by factory
-                // ✅ Validation built-in
-                // ✅ Consistent naming enforced
-            });
+                ChunkNumber = request.ChunkNumber,
+                ChunkSize = result.TotalProcessed, // Actual entities processed in this chunk
+                ProcessedInChunk = result.SuccessfulEntities, // This chunk only
+                FailedInChunk = result.FailedEntities, // This chunk only
+                
+                // ✅ COMPREHENSIVE PROGRESSTRACKER DATA: Use all cumulative counts
+                CumulativeProcessed = entityProgress?.ProcessedCount ?? result.SuccessfulEntities, // Total processed (success + failed + skipped + cancelled)
+                CumulativeFailed = entityProgress?.FailureCount ?? result.FailedEntities, // Total failed
+                CumulativeSkipped = entityProgress?.SkippedCount ?? 0, // Total skipped
+                CumulativeCancelled = entityProgress?.CancelledCount ?? 0, // Total cancelled
+                TotalEntitiesForType = entityProgress?.TotalCount ?? (request.TotalChunks * request.ChunkSize), // Total from discovery
+                
+                ProgressPercentage = entityProgress?.ProgressPercentage ?? progressPercentage,
+                Status = entityProgress?.Status ?? (result.SuccessfulEntities == result.TotalProcessed ? "completed" : "processing"),
+                Message = $"Processed chunk {request.ChunkNumber}/{request.TotalChunks}: {result.SuccessfulEntities}/{result.TotalProcessed} entities (Total: {entityProgress?.ProcessedCount ?? 0}/{entityProgress?.TotalCount ?? 0})",
+                ProcessingTimeMs = (long)(entityProgress?.ProcessingTime.TotalMilliseconds ?? result.ProcessingTime.TotalMilliseconds)
+            };
 
-            await _progressEventPublisher.PublishEntityProgressAsync(progressEvent);
+            // Use centralized service with built-in rate limiting and error handling
+            await _centralizedBroadcastService.BroadcastEntityChunkProgressAsync(request.MigrationId, chunkProgress);
             
-            _logger.LogDebug("📊 [CHUNK-{ChunkNumber}] Published centralized SignalR progress update: {Successful}/{Total} entities",
-                request.ChunkNumber, result.SuccessfulEntities, result.TotalProcessed);
+            _logger.LogDebug("📊 [CHUNK-{ChunkNumber}] Published centralized progress update via CentralizedProgressBroadcastService: {Successful}/{Total} entities (Cumulative: {CumulativeSuccess}/{CumulativeTotal})",
+                request.ChunkNumber, result.SuccessfulEntities, result.TotalProcessed, 
+                entityProgress?.SuccessCount ?? result.SuccessfulEntities, entityProgress?.TotalCount ?? 0);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "⚠️ [CHUNK-{ChunkNumber}] Failed to publish progress update: {ErrorMessage}",
+            _logger.LogWarning(ex, "⚠️ [CHUNK-{ChunkNumber}] Failed to publish progress update via CentralizedProgressBroadcastService: {ErrorMessage}",
                 request.ChunkNumber, ex.Message);
             // Don't fail the chunk processing due to progress publishing issues
         }

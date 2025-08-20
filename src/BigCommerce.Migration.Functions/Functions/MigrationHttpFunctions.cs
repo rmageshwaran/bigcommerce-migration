@@ -568,22 +568,17 @@ public class MigrationHttpFunctions
             }
 
             // Step 5: Send SignalR notification about cancellation
-            var statusEvent = _signalREventFactory.CreateStatusProgress(migrationId, new StatusProgressOptions
+            var errorEvent = _signalREventFactory.CreateErrorProgress(migrationId, new ErrorProgressOptions
             {
-                Status = "Cancelled",
-                Message = "Migration cancelled by user request",
+                ErrorMessage = "Migration cancelled by user request",
+                Severity = "warning",
                 IsCancelled = true,
                 CancellationReason = cancellationReason,
                 CancelledAt = DateTime.UtcNow,
-                Data = new Dictionary<string, object>
-                {
-                    ["reason"] = cancellationReason,
-                    ["cancelledAt"] = DateTime.UtcNow.ToString("O"),
-                    ["approach"] = "native-durable-functions"
-                }
+                IsContinuable = false // User cancellation stops the migration
             });
 
-            await _progressEventPublisher.PublishStatusAsync(statusEvent);
+            await _progressEventPublisher.PublishErrorAsync(errorEvent);
             _logger.LogInformation("🚫 [NATIVE-CANCEL] SignalR cancellation notification sent. MigrationId: {MigrationId}", migrationId);
             
             var response = req.CreateResponse(HttpStatusCode.OK);

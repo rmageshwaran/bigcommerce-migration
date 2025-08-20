@@ -162,32 +162,7 @@ public interface IParallelProgressAggregator : IDisposable
 
     #endregion
 
-    #region SignalR Integration
-
-    /// <summary>
-    /// Forces an immediate SignalR progress update (bypasses rate limiting)
-    /// 
-    /// **Use Cases:**
-    /// - Critical milestones (50%, 100% completion)
-    /// - Error conditions requiring immediate notification
-    /// - Manual refresh requests from the UI
-    /// </summary>
-    /// <param name="cancellationToken">Cancellation token</param>
-    /// <returns>Task representing the async SignalR notification</returns>
-    Task ForceSignalRUpdateAsync(CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Configures SignalR update rate limiting
-    /// 
-    /// **Rate Limiting:**
-    /// - Prevents UI flooding with too many updates
-    /// - Maintains responsive user experience
-    /// - Balances real-time updates with performance
-    /// </summary>
-    /// <param name="minimumIntervalMs">Minimum milliseconds between updates</param>
-    void ConfigureSignalRRateLimit(int minimumIntervalMs);
-
-    #endregion
+    // Note: SignalR Integration section removed - handled by CentralizedProgressBroadcastService
 
     #region Event Notifications
 

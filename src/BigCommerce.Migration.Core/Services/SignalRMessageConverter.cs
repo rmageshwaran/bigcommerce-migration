@@ -1,314 +1,262 @@
 using System;
-using System.Collections.Generic;
-using System.Reflection;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
+using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
+using Microsoft.Extensions.Logging;
 
 namespace BigCommerce.Migration.Core.Services
 {
     /// <summary>
-    /// 🎯 CENTRALIZED SIGNALR MESSAGE CONVERTER
-    /// Handles consistent naming between backend (PascalCase) and frontend (camelCase).
-    /// Eliminates the need for complex transformation functions in the frontend.
+    /// Simplified SignalR Message Converter - Converts progress events to SignalR messages
     /// 
-    /// ✅ SOLVES:
-    /// - PascalCase vs camelCase property mismatches
-    /// - Complex frontend transformation functions
-    /// - Inconsistent property fallback logic
-    /// - Missing property mapping
+    /// ✅ SIMPLIFIED APPROACH:
+    /// - Only handles 4 event types
+    /// - Clean JSON serialization for SignalR
+    /// - Consistent message format
     /// </summary>
     public interface ISignalRMessageConverter
     {
         /// <summary>
-        /// Converts a ProgressEvent to a frontend-compatible JSON string with camelCase properties
+        /// Converts a progress event to a SignalR message JSON string
         /// </summary>
-        string ConvertToFrontendJson(ProgressEvent progressEvent);
-        
+        /// <param name="progressEvent">The progress event to convert</param>
+        /// <returns>JSON string ready for SignalR broadcasting</returns>
+        string ConvertToSignalRMessage(ProgressEvent progressEvent);
+
         /// <summary>
-        /// Converts a ProgressEvent to a frontend-compatible object with camelCase properties
+        /// Converts a progress event to a strongly-typed SignalR message object
         /// </summary>
-        object ConvertToFrontendObject(ProgressEvent progressEvent);
-        
-        /// <summary>
-        /// Creates a SignalR message action with consistent frontend formatting
-        /// </summary>
-        object CreateSignalRMessage(ProgressEvent progressEvent);
+        /// <param name="progressEvent">The progress event to convert</param>
+        /// <returns>SignalR message object</returns>
+        SignalRMessage ConvertToSignalRMessageObject(ProgressEvent progressEvent);
     }
 
     /// <summary>
-    /// SignalR Message Converter implementation
+    /// SignalR message wrapper for broadcasting
+    /// </summary>
+    public class SignalRMessage
+    {
+        /// <summary>
+        /// The SignalR hub method to invoke
+        /// </summary>
+        public string HubMethod { get; set; } = string.Empty;
+
+        /// <summary>
+        /// The event data to send
+        /// </summary>
+        public object EventData { get; set; } = new();
+
+        /// <summary>
+        /// Optional connection ID for targeted messaging
+        /// </summary>
+        public string? ConnectionId { get; set; }
+
+        /// <summary>
+        /// Optional group name for group messaging
+        /// </summary>
+        public string? GroupName { get; set; }
+    }
+
+    /// <summary>
+    /// Simplified SignalR Message Converter implementation
     /// </summary>
     public class SignalRMessageConverter : ISignalRMessageConverter
     {
-        private static readonly JsonSerializerOptions _frontendJsonOptions = new JsonSerializerOptions
-        {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-            WriteIndented = false,
-            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-            Converters = 
-            {
-                new JsonStringEnumConverter(JsonNamingPolicy.CamelCase)
-            }
-        };
+        private readonly ILogger<SignalRMessageConverter> _logger;
 
         /// <summary>
-        /// Converts a ProgressEvent to frontend-compatible JSON with camelCase properties
+        /// Initializes a new instance of the SignalRMessageConverter
         /// </summary>
-        public string ConvertToFrontendJson(ProgressEvent progressEvent)
+        /// <param name="logger">Logger for diagnostic information</param>
+        public SignalRMessageConverter(ILogger<SignalRMessageConverter> logger)
         {
-            if (progressEvent == null)
-                throw new ArgumentNullException(nameof(progressEvent));
-
-            try
-            {
-                return JsonSerializer.Serialize(progressEvent, _frontendJsonOptions);
-            }
-            catch (Exception ex)
-            {
-                throw new InvalidOperationException($"Failed to convert ProgressEvent to frontend JSON: {ex.Message}", ex);
-            }
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
         /// <summary>
-        /// Converts a ProgressEvent to frontend-compatible object with camelCase properties
+        /// Converts a progress event to a JSON string for SignalR broadcasting
         /// </summary>
-        public object ConvertToFrontendObject(ProgressEvent progressEvent)
+        public string ConvertToSignalRMessage(ProgressEvent progressEvent)
         {
-            if (progressEvent == null)
-                throw new ArgumentNullException(nameof(progressEvent));
-
             try
             {
-                // Serialize to JSON with camelCase, then deserialize to dynamic object
-                var json = ConvertToFrontendJson(progressEvent);
-                return JsonSerializer.Deserialize<Dictionary<string, object>>(json, _frontendJsonOptions) 
-                       ?? new Dictionary<string, object>();
-            }
-            catch (Exception ex)
-            {
-                throw new InvalidOperationException($"Failed to convert ProgressEvent to frontend object: {ex.Message}", ex);
-            }
-        }
-
-        /// <summary>
-        /// Creates a complete SignalR message with consistent frontend formatting
-        /// </summary>
-        public object CreateSignalRMessage(ProgressEvent progressEvent)
-        {
-            if (progressEvent == null)
-                throw new ArgumentNullException(nameof(progressEvent));
-
-            try
-            {
-                var frontendObject = ConvertToFrontendObject(progressEvent);
-                
-                return new
+                if (progressEvent == null)
                 {
-                    target = progressEvent.HubMethod,
-                    arguments = new[] { frontendObject },
-                    metadata = new
-                    {
-                        eventType = progressEvent.EventType,
-                        migrationId = progressEvent.MigrationId,
-                        timestamp = progressEvent.Timestamp,
-                        hubMethod = progressEvent.HubMethod
-                    }
-                };
-            }
-            catch (Exception ex)
-            {
-                throw new InvalidOperationException($"Failed to create SignalR message: {ex.Message}", ex);
-            }
-        }
-    }
-
-    /// <summary>
-    /// 🎯 SIGNALR CONSISTENCY CONTRACT
-    /// Defines the standardized structure that all SignalR events must follow.
-    /// This ensures consistency between backend and frontend regardless of the specific event type.
-    /// </summary>
-    public static class SignalRConsistencyContract
-    {
-        /// <summary>
-        /// All SignalR events MUST have these base properties
-        /// </summary>
-        public static readonly string[] RequiredBaseProperties = 
-        {
-            "migrationId",
-            "eventType", 
-            "timestamp",
-            "hubMethod"
-        };
-
-        /// <summary>
-        /// Optional base properties that should be consistently handled
-        /// </summary>
-        public static readonly string[] OptionalBaseProperties = 
-        {
-            "isCancelled",
-            "cancellationReason", 
-            "cancelledAt",
-            "connectionId",
-            "groupName"
-        };
-
-        /// <summary>
-        /// Standardized HubMethod names (consistent naming convention)
-        /// </summary>
-        public static readonly Dictionary<string, string> StandardizedHubMethods = new Dictionary<string, string>
-        {
-            ["progress"] = "MigrationProgressUpdated",
-            ["batch"] = "BatchProgressUpdated", 
-            ["entity"] = "EntityProgressUpdated",
-            ["error"] = "ErrorOccurred",
-            ["status"] = "MigrationStatusChanged",
-            ["subbatch-started"] = "SubBatchStarted",
-            ["subbatch-completed"] = "SubBatchCompleted", 
-            ["subbatch-progress"] = "SubBatchMigrationProgress"
-        };
-
-        /// <summary>
-        /// Validates that a ProgressEvent follows the consistency contract
-        /// </summary>
-        public static ValidationResult ValidateEvent(ProgressEvent progressEvent)
-        {
-            var result = new ValidationResult();
-
-            if (progressEvent == null)
-            {
-                result.AddError("ProgressEvent cannot be null");
-                return result;
-            }
-
-            // Validate required base properties
-            if (string.IsNullOrWhiteSpace(progressEvent.MigrationId))
-                result.AddError("MigrationId is required");
-
-            if (string.IsNullOrWhiteSpace(progressEvent.EventType))
-                result.AddError("EventType is required");
-
-            if (string.IsNullOrWhiteSpace(progressEvent.HubMethod))
-                result.AddError("HubMethod is required");
-
-            if (progressEvent.Timestamp == default)
-                result.AddError("Timestamp is required");
-
-            // Validate HubMethod consistency
-            if (StandardizedHubMethods.ContainsKey(progressEvent.EventType))
-            {
-                var expectedHubMethod = StandardizedHubMethods[progressEvent.EventType];
-                if (progressEvent.HubMethod != expectedHubMethod)
-                {
-                    result.AddWarning($"HubMethod '{progressEvent.HubMethod}' does not match expected '{expectedHubMethod}' for EventType '{progressEvent.EventType}'");
+                    _logger.LogWarning("⚠️ Cannot convert null progress event to SignalR message");
+                    return "{}";
                 }
+
+                var message = ConvertToSignalRMessageObject(progressEvent);
+                var json = System.Text.Json.JsonSerializer.Serialize(message, new System.Text.Json.JsonSerializerOptions
+                {
+                    PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+                    WriteIndented = false
+                });
+
+                _logger.LogDebug("✅ Converted {EventType} event to SignalR message for migration {MigrationId}", 
+                    progressEvent.EventType, progressEvent.MigrationId);
+
+                return json;
             }
-
-            return result;
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Failed to convert progress event to SignalR message: {EventType} for migration {MigrationId}", 
+                    progressEvent?.EventType, progressEvent?.MigrationId);
+                return "{}";
+            }
         }
-    }
-
-    /// <summary>
-    /// Validation result for SignalR event consistency
-    /// </summary>
-    public class ValidationResult
-    {
-        /// <summary>
-        /// Collection of validation errors
-        /// </summary>
-        public List<string> Errors { get; } = new List<string>();
-        
-        /// <summary>
-        /// Collection of validation warnings
-        /// </summary>
-        public List<string> Warnings { get; } = new List<string>();
-        
-        /// <summary>
-        /// Gets whether the validation result is valid (no errors)
-        /// </summary>
-        public bool IsValid => Errors.Count == 0;
-        
-        /// <summary>
-        /// Gets whether the validation result has warnings
-        /// </summary>
-        public bool HasWarnings => Warnings.Count > 0;
 
         /// <summary>
-        /// Adds an error to the validation result
+        /// Converts a progress event to a SignalR message object
         /// </summary>
-        /// <param name="error">Error message to add</param>
-        public void AddError(string error) => Errors.Add(error);
-        
-        /// <summary>
-        /// Adds a warning to the validation result
-        /// </summary>
-        /// <param name="warning">Warning message to add</param>
-        public void AddWarning(string warning) => Warnings.Add(warning);
-
-        /// <summary>
-        /// Returns a string representation of the validation result
-        /// </summary>
-        /// <returns>String containing errors and warnings</returns>
-        public override string ToString()
+        public SignalRMessage ConvertToSignalRMessageObject(ProgressEvent progressEvent)
         {
-            var messages = new List<string>();
-            
-            if (Errors.Count > 0)
-                messages.Add($"Errors: {string.Join(", ", Errors)}");
-                
-            if (Warnings.Count > 0)
-                messages.Add($"Warnings: {string.Join(", ", Warnings)}");
-                
-            return messages.Count > 0 ? string.Join("; ", messages) : "Valid";
+            if (progressEvent == null)
+                throw new ArgumentNullException(nameof(progressEvent));
+
+            return new SignalRMessage
+            {
+                HubMethod = progressEvent.HubMethod,
+                EventData = progressEvent,
+                ConnectionId = progressEvent.ConnectionId,
+                GroupName = progressEvent.GroupName
+            };
         }
     }
 
     /// <summary>
-    /// 🎯 ENHANCED PROGRESS EVENT PUBLISHER
-    /// Enhanced version of the existing publisher that uses the centralized factory and converter
+    /// Enhanced Progress Event Publisher that uses the simplified factory and converter
+    /// 
+    /// ✅ SIMPLIFIED APPROACH:
+    /// - Only 4 methods for 4 event types
+    /// - Uses the centralized factory for event creation
+    /// - Consistent publishing pattern
     /// </summary>
     public interface IEnhancedProgressEventPublisher
     {
         /// <summary>
-        /// Publishes a migration progress event using the centralized factory
+        /// Publishes a migration started event using the centralized factory
         /// </summary>
-        Task PublishMigrationProgressAsync(string migrationId, MigrationProgressOptions options, CancellationToken cancellationToken = default);
+        Task PublishMigrationStartedAsync(string migrationId, MigrationStartedOptions options, CancellationToken cancellationToken = default);
         
         /// <summary>
-        /// Publishes a batch progress event using the centralized factory
+        /// Publishes an entity chunk progress event using the centralized factory
+        /// This is the main progress event published during migration
         /// </summary>
-        Task PublishBatchProgressAsync(string migrationId, BatchProgressOptions options, CancellationToken cancellationToken = default);
+        Task PublishEntityChunkProgressAsync(string migrationId, EntityChunkProgressOptions options, CancellationToken cancellationToken = default);
         
         /// <summary>
-        /// Publishes an entity progress event using the centralized factory
+        /// Publishes a migration completed event using the centralized factory
         /// </summary>
-        Task PublishEntityProgressAsync(string migrationId, EntityProgressOptions options, CancellationToken cancellationToken = default);
+        Task PublishMigrationCompletedAsync(string migrationId, MigrationCompletedOptions options, CancellationToken cancellationToken = default);
         
         /// <summary>
         /// Publishes an error progress event using the centralized factory
         /// </summary>
         Task PublishErrorProgressAsync(string migrationId, ErrorProgressOptions options, CancellationToken cancellationToken = default);
-        
-        /// <summary>
-        /// Publishes a status progress event using the centralized factory
-        /// </summary>
-        Task PublishStatusProgressAsync(string migrationId, StatusProgressOptions options, CancellationToken cancellationToken = default);
-        
-        /// <summary>
-        /// Publishes a sub-batch started event using the centralized factory
-        /// </summary>
-        Task PublishSubBatchStartedAsync(string migrationId, SubBatchStartedOptions options, CancellationToken cancellationToken = default);
-        
-        /// <summary>
-        /// Publishes a sub-batch completed event using the centralized factory
-        /// </summary>
-        Task PublishSubBatchCompletedAsync(string migrationId, SubBatchCompletedOptions options, CancellationToken cancellationToken = default);
-        
-        /// <summary>
-        /// Publishes a sub-batch progress event using the centralized factory
-        /// </summary>
-        Task PublishSubBatchProgressAsync(string migrationId, SubBatchProgressOptions options, CancellationToken cancellationToken = default);
     }
-} 
+
+    /// <summary>
+    /// Enhanced Progress Event Publisher implementation
+    /// </summary>
+    public class EnhancedProgressEventPublisher : IEnhancedProgressEventPublisher
+    {
+        private readonly ISignalREventFactory _eventFactory;
+        private readonly IProgressEventPublisher _publisher;
+        private readonly ILogger<EnhancedProgressEventPublisher> _logger;
+
+        /// <summary>
+        /// Initializes a new instance of the EnhancedProgressEventPublisher
+        /// </summary>
+        public EnhancedProgressEventPublisher(
+            ISignalREventFactory eventFactory,
+            IProgressEventPublisher publisher,
+            ILogger<EnhancedProgressEventPublisher> logger)
+        {
+            _eventFactory = eventFactory ?? throw new ArgumentNullException(nameof(eventFactory));
+            _publisher = publisher ?? throw new ArgumentNullException(nameof(publisher));
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        }
+
+        /// <summary>
+        /// Publishes a migration started event
+        /// </summary>
+        public async Task PublishMigrationStartedAsync(string migrationId, MigrationStartedOptions options, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                var startedEvent = _eventFactory.CreateMigrationStarted(migrationId, options);
+                await _publisher.PublishMigrationStartedAsync(startedEvent, cancellationToken).ConfigureAwait(false);
+                
+                _logger.LogInformation("📢 Published migration started event for {MigrationId}", migrationId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Failed to publish migration started event for {MigrationId}", migrationId);
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Publishes an entity chunk progress event
+        /// </summary>
+        public async Task PublishEntityChunkProgressAsync(string migrationId, EntityChunkProgressOptions options, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                var chunkEvent = _eventFactory.CreateEntityChunkProgress(migrationId, options);
+                await _publisher.PublishEntityChunkProgressAsync(chunkEvent, cancellationToken).ConfigureAwait(false);
+                
+                _logger.LogDebug("📢 Published chunk progress event for {MigrationId} - {EntityType} chunk {ChunkNumber}/{TotalChunks}", 
+                    migrationId, options.EntityType, options.ChunkNumber, options.TotalChunks);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Failed to publish chunk progress event for {MigrationId} - {EntityType} chunk {ChunkNumber}", 
+                    migrationId, options.EntityType, options.ChunkNumber);
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Publishes a migration completed event
+        /// </summary>
+        public async Task PublishMigrationCompletedAsync(string migrationId, MigrationCompletedOptions options, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                var completedEvent = _eventFactory.CreateMigrationCompleted(migrationId, options);
+                await _publisher.PublishMigrationCompletedAsync(completedEvent, cancellationToken).ConfigureAwait(false);
+                
+                _logger.LogInformation("📢 Published migration completed event for {MigrationId} with status {Status}", 
+                    migrationId, options.Status);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Failed to publish migration completed event for {MigrationId}", migrationId);
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Publishes an error progress event
+        /// </summary>
+        public async Task PublishErrorProgressAsync(string migrationId, ErrorProgressOptions options, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                var errorEvent = _eventFactory.CreateErrorProgress(migrationId, options);
+                await _publisher.PublishErrorAsync(errorEvent, cancellationToken).ConfigureAwait(false);
+                
+                _logger.LogWarning("📢 Published error event for {MigrationId}: {ErrorMessage}", 
+                    migrationId, options.ErrorMessage);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Failed to publish error event for {MigrationId}", migrationId);
+                throw;
+            }
+        }
+    }
+}

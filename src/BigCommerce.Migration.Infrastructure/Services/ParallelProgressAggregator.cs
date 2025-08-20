@@ -27,8 +27,7 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
     private readonly string _entityType;
     private readonly int _totalBatches;
     private readonly int? _actualTotalEntities; // 🚨 FIX: Store actual total entities from migration context
-    private readonly IProgressEventPublisher? _progressEventPublisher;
-    private readonly ISignalREventFactory _signalREventFactory; // 🎯 CENTRALIZED SIGNALR: Factory for consistent event creation
+    // Note: SignalR broadcasting removed - use CentralizedProgressBroadcastService instead
     private readonly ILogger _logger;
     private readonly IDateTimeProvider _dateTimeProvider;
 
@@ -37,9 +36,7 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
     private readonly ConcurrentDictionary<int, BatchStartRecord> _activeBatches;
     private readonly ConcurrentBag<string> _aggregatedErrors;
     private readonly object _progressStateLock = new();
-    private readonly object _signalRRateLimitLock = new();
-    private DateTime _lastSignalRUpdate = DateTime.MinValue;
-    private int _signalRUpdateIntervalMs = 100; // 🚨 CRITICAL FIX: Reduced to 100ms for real-time progress bar updates (10/second instead of 4/second)
+    // Note: SignalR rate limiting removed - handled by CentralizedProgressBroadcastService
     private bool _deterministicMode = false;
 
     // Aggregated counters (using Interlocked for thread safety)
@@ -76,8 +73,6 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
         string migrationId,
         string entityType,
         int totalBatches,
-        IProgressEventPublisher? progressEventPublisher,
-        ISignalREventFactory signalREventFactory, // 🎯 CENTRALIZED SIGNALR: Factory for consistent event creation
         ILogger logger,
         IDateTimeProvider dateTimeProvider,
         int? actualTotalEntities = null) // 🚨 FIX: Accept actual total entities from migration context
@@ -86,8 +81,6 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
         _entityType = entityType ?? throw new ArgumentNullException(nameof(entityType));
         _totalBatches = totalBatches;
         _actualTotalEntities = actualTotalEntities; // 🚨 FIX: Store actual total entities
-        _progressEventPublisher = progressEventPublisher;
-        _signalREventFactory = signalREventFactory ?? throw new ArgumentNullException(nameof(signalREventFactory)); // 🎯 CENTRALIZED SIGNALR: Store factory reference
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _dateTimeProvider = dateTimeProvider ?? throw new ArgumentNullException(nameof(dateTimeProvider));
 
@@ -100,7 +93,6 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
         _activeSubBatches = new ConcurrentDictionary<string, SubBatchStartRecord>();
 
         _startTime = _dateTimeProvider.UtcNow;
-        _lastSignalRUpdate = _startTime;
 
         _logger.LogDebug("Created parallel progress aggregator for migration {MigrationId} with {TotalBatches} batches",
             _migrationId, _totalBatches);
@@ -180,24 +172,25 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
             // Check for milestone events
             CheckAndTriggerMilestones(currentProgress);
 
-            // Send rate-limited SignalR update
-            await SendRateLimitedSignalRUpdateAsync(cancellationToken);
+            // Note: SignalR updates now handled by CentralizedProgressBroadcastService
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to report batch completion for batch {BatchNumber}", batchNumber);
         }
+        
+        await Task.CompletedTask; // Placeholder for future async operations
     }
 
     /// <summary>
     /// Reports batch start for tracking active parallel batches
     /// </summary>
-    public async Task ReportBatchStartAsync(
+    public Task ReportBatchStartAsync(
         int batchNumber,
         int batchSize,
         CancellationToken cancellationToken = default)
     {
-        if (_disposed) return;
+        if (_disposed) return Task.CompletedTask;
 
         try
         {
@@ -212,12 +205,14 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
 
             _logger.LogDebug("Batch {BatchNumber} started with {BatchSize} entities", batchNumber, batchSize);
             
-            await Task.CompletedTask; // Placeholder for any async operations
+            // Note: Async operations removed
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to report batch start for batch {BatchNumber}", batchNumber);
         }
+        
+        return Task.CompletedTask;
     }
 
     #endregion
@@ -280,25 +275,27 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
                            "(sub-batch progress: {Progress:F1}%)",
                 parentBatchNumber, subBatchNumber, entitiesProcessed, entitiesFailed, processingTime.TotalSeconds, subBatchProgress);
 
-            // Send granular SignalR update for sub-batch completion
+            // Note: SignalR update removed - handled by CentralizedProgressBroadcastService
             await SendSubBatchProgressUpdateAsync(parentBatchNumber, subBatchNumber, entitiesProcessed, entitiesFailed, subBatchProgress, cancellationToken);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to report sub-batch completion for sub-batch {ParentBatch}-{SubBatch}", parentBatchNumber, subBatchNumber);
         }
+        
+        await Task.CompletedTask; // Placeholder for future async operations
     }
 
     /// <summary>
     /// Reports sub-batch start for tracking active parallel sub-batches
     /// </summary>
-    public async Task ReportSubBatchStartAsync(
+    public Task ReportSubBatchStartAsync(
         int parentBatchNumber,
         int subBatchNumber,
         int subBatchSize,
         CancellationToken cancellationToken = default)
     {
-        if (_disposed) return;
+        if (_disposed) return Task.CompletedTask;
 
         try
         {
@@ -316,13 +313,15 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
             _logger.LogDebug("🎯 Sub-batch {ParentBatch}-{SubBatch} started with {SubBatchSize} entities", 
                 parentBatchNumber, subBatchNumber, subBatchSize);
             
-            await Task.CompletedTask; // Placeholder for any async operations
+            // Note: Async operations removed
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to report sub-batch start for sub-batch {ParentBatch}-{SubBatch}", 
                 parentBatchNumber, subBatchNumber);
         }
+        
+        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -341,7 +340,7 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
     /// Sends granular progress update for sub-batch completion
     /// Provides 10x more frequent updates than page-level progress
     /// </summary>
-    private async Task SendSubBatchProgressUpdateAsync(
+    private Task SendSubBatchProgressUpdateAsync(
         int parentBatchNumber,
         int subBatchNumber,
         int entitiesProcessed,
@@ -351,40 +350,21 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
     {
         try
         {
-            if (_progressEventPublisher == null) return;
-
+            // Note: SignalR broadcasting removed - handled by CentralizedProgressBroadcastService
+            // Progress tracking continues for internal aggregation purposes
+            
             var completedSubBatches = Interlocked.Read(ref _totalSubBatchesProcessed);
             var totalSubBatchEntitiesProcessed = Interlocked.Read(ref _totalSubBatchEntitiesProcessed);
             var totalSubBatchEntitiesFailed = Interlocked.Read(ref _totalSubBatchEntitiesFailed);
 
-            // 🚨 STATUS FIX: Determine if migration is completed
             var totalEntities = GetEstimatedTotalEntities();
             var totalProcessed = (int)(totalSubBatchEntitiesProcessed + totalSubBatchEntitiesFailed);
             var migrationStatus = totalProcessed >= totalEntities ? "completed" : "running";
 
-            // 🚨 GLOBAL COORDINATION FIX: Use MigrationProgress events instead of SubBatchProgress
-            // UI now only listens for MigrationProgress events from global coordination
-            var progressEvent = _signalREventFactory.CreateMigrationProgress(_migrationId, new MigrationProgressOptions
-            {
-                CurrentEntityType = _entityType,
-                OverallProgress = subBatchProgress, // Already in percentage (0-100)
-                Status = migrationStatus, // 🚨 STATUS FIX: Use dynamic status instead of hardcoded "running"
-                TotalEntities = totalEntities,
-                ProcessedEntities = totalProcessed, // 🚨 FIX: Send total processed (successful + failed) instead of just successful
-                FailedEntities = (int)totalSubBatchEntitiesFailed,
-                ElapsedTime = _dateTimeProvider.UtcNow - _startTime,
-                EstimatedTimeRemaining = CalculateEstimatedTimeRemaining()
-                // ✅ Base properties (Timestamp, IsCancelled, HubMethod) auto-populated by factory
-                // ✅ Validation built-in
-                // ✅ Consistent naming enforced
-            });
-
-            await _progressEventPublisher.PublishMigrationProgressAsync(progressEvent, cancellationToken);
-
-            _logger.LogInformation("📡 [SUB-BATCH-PROGRESS] Sent progress update: {Progress:F1}%, {Status}, {ProcessedEntities}/{TotalEntities} entities (Successful: {SuccessfulEntities}, Failed: {FailedEntities})", 
+            _logger.LogDebug("📊 [SUB-BATCH-PROGRESS] Progress: {Progress:F1}%, {Status}, {ProcessedEntities}/{TotalEntities} entities (Successful: {SuccessfulEntities}, Failed: {FailedEntities})", 
                 subBatchProgress, migrationStatus, totalProcessed, totalEntities, totalSubBatchEntitiesProcessed, totalSubBatchEntitiesFailed);
             
-            // 🎯 STATUS TRACKING: Log when migration completes
+            // Log when migration completes
             if (migrationStatus == "completed")
             {
                 _logger.LogInformation("🎉 [MIGRATION-COMPLETED] Migration {MigrationId} reached completion status! Final: {ProcessedEntities}/{TotalEntities} entities", 
@@ -396,6 +376,8 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
             _logger.LogWarning(ex, "⚠️ Failed to send sub-batch progress update for {ParentBatch}-{SubBatch}", 
                 parentBatchNumber, subBatchNumber);
         }
+        
+        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -476,7 +458,7 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
     /// <summary>
     /// Gets current aggregated progress across all parallel batches
     /// </summary>
-    public async Task<AggregatedProgressInfo> GetCurrentProgressAsync()
+    public Task<AggregatedProgressInfo> GetCurrentProgressAsync()
     {
         try
         {
@@ -509,19 +491,19 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
                 LastUpdateTime = currentTime
             };
 
-            return await Task.FromResult(result);
+            return Task.FromResult(result);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to get current progress for migration {MigrationId}", _migrationId);
-            return new AggregatedProgressInfo { TotalBatches = _totalBatches };
+            return Task.FromResult(new AggregatedProgressInfo { TotalBatches = _totalBatches });
         }
     }
 
     /// <summary>
     /// Gets overall progress percentage (0.0 to 1.0)
     /// </summary>
-    public async Task<ProgressPercentageInfo> GetProgressPercentageAsync()
+    public Task<ProgressPercentageInfo> GetProgressPercentageAsync()
     {
         try
         {
@@ -551,12 +533,12 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
                 ElapsedTime = elapsedTime
             };
 
-            return await Task.FromResult(result);
+            return Task.FromResult(result);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to get progress percentage for migration {MigrationId}", _migrationId);
-            return new ProgressPercentageInfo();
+            return Task.FromResult(new ProgressPercentageInfo());
         }
     }
 
@@ -568,7 +550,7 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
     /// Gets real-time parallel processing performance metrics
     /// **PHASE 2.4: Enhanced with performance change event triggering**
     /// </summary>
-    public async Task<ParallelProcessingMetrics> GetPerformanceMetricsAsync()
+    public Task<ParallelProcessingMetrics> GetPerformanceMetricsAsync()
     {
         try
         {
@@ -622,12 +604,12 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
                 TotalErrors = (long)Interlocked.Read(ref _totalEntitiesFailed)
             };
 
-            return await Task.FromResult(interfaceResult);
+            return Task.FromResult(interfaceResult);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to get performance metrics for migration {MigrationId}", _migrationId);
-            return new ParallelProcessingMetrics
+            return Task.FromResult(new ParallelProcessingMetrics
             {
                 CurrentConcurrency = 1,
                 MaxConcurrency = 4,
@@ -635,14 +617,14 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
                 ThroughputPerSecond = 1.0,
                 TotalEntitiesProcessed = 0,
                 TotalErrors = 0
-            };
+            });
         }
     }
 
     /// <summary>
     /// Records a concurrency level change for performance tracking
     /// </summary>
-    public async Task RecordConcurrencyChangeAsync(
+    public Task RecordConcurrencyChangeAsync(
         int newConcurrency,
         string reason,
         CancellationToken cancellationToken = default)
@@ -653,45 +635,23 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
                 newConcurrency, _migrationId, reason);
 
             // Would store concurrency change history for analysis
-            await Task.CompletedTask;
+            // Note: Async operations removed
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to record concurrency change for migration {MigrationId}", _migrationId);
         }
+        
+        return Task.CompletedTask;
     }
 
     #endregion
 
     #region SignalR Integration
 
-    /// <summary>
-    /// Forces an immediate SignalR progress update (bypasses rate limiting)
-    /// </summary>
-    public async Task ForceSignalRUpdateAsync(CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            await SendSignalRUpdateAsync(force: true, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to force SignalR update for migration {MigrationId}", _migrationId);
-        }
-    }
+    // Note: Force SignalR update removed - handled by CentralizedProgressBroadcastService
 
-    /// <summary>
-    /// Configures SignalR update rate limiting
-    /// </summary>
-    public void ConfigureSignalRRateLimit(int minimumIntervalMs)
-    {
-        lock (_signalRRateLimitLock)
-        {
-            _signalRUpdateIntervalMs = Math.Max(100, minimumIntervalMs); // Minimum 100ms
-            _logger.LogDebug("SignalR rate limit configured to {IntervalMs}ms for migration {MigrationId}",
-                _signalRUpdateIntervalMs, _migrationId);
-        }
-    }
+    // Note: SignalR configuration removed - handled by CentralizedProgressBroadcastService
 
     #endregion
 
@@ -738,6 +698,8 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
             var totalFailed = Interlocked.Read(ref _totalEntitiesFailed);
             var totalProcessingTimeMs = Interlocked.Read(ref _totalProcessingTimeMs);
 
+            var performanceSnapshot = await GetPerformanceMetricsAsync();
+
             var state = new DeterministicProgressState
             {
                 CompletedBatches = completedBatchNumbers,
@@ -745,7 +707,7 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
                 TotalEntitiesFailed = (int)totalFailed,
                 TotalProcessingTime = TimeSpan.FromMilliseconds(totalProcessingTimeMs),
                 AggregatedErrors = _aggregatedErrors.ToList(),
-                PerformanceSnapshot = await GetPerformanceMetricsAsync(),
+                PerformanceSnapshot = performanceSnapshot,
                 StateCapturedAt = _dateTimeProvider.UtcNow
             };
 
@@ -761,13 +723,13 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
     /// <summary>
     /// Restores progress state from Durable Functions persistence
     /// </summary>
-    public async Task RestoreDeterministicStateAsync(
+    public Task RestoreDeterministicStateAsync(
         DeterministicProgressState state,
         CancellationToken cancellationToken = default)
     {
         try
         {
-            if (state == null) return;
+            if (state == null) return Task.CompletedTask;
 
             // Restore completed batches
             foreach (var batchNumber in state.CompletedBatches)
@@ -798,12 +760,14 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
             _logger.LogInformation("Restored deterministic state for migration {MigrationId}: {CompletedBatches} batches completed",
                 _migrationId, state.CompletedBatches.Count);
 
-            await Task.CompletedTask;
+            // Note: Async operations removed
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to restore deterministic state for migration {MigrationId}", _migrationId);
         }
+        
+        return Task.CompletedTask;
     }
 
     #endregion
@@ -819,18 +783,7 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
 
         try
         {
-            // Send final SignalR update
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    await ForceSignalRUpdateAsync(CancellationToken.None);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to send final SignalR update during disposal");
-                }
-            });
+            // Note: Final SignalR update removed - handled by CentralizedProgressBroadcastService
 
             // Fire completion milestone if 100% complete
             var currentProgress = GetCurrentProgressPercentage();
@@ -864,95 +817,9 @@ public class ParallelProgressAggregator : IParallelProgressAggregator
         return totalExpected > 0 ? (double)totalProcessed / totalExpected : 0.0;
     }
 
-    /// <summary>
-    /// Sends rate-limited SignalR updates
-    /// </summary>
-    private async Task SendRateLimitedSignalRUpdateAsync(CancellationToken cancellationToken)
-    {
-        if (_progressEventPublisher == null) return;
+    // Note: Rate-limited SignalR updates removed - handled by CentralizedProgressBroadcastService
 
-        lock (_signalRRateLimitLock)
-        {
-            var timeSinceLastUpdate = _dateTimeProvider.UtcNow - _lastSignalRUpdate;
-            if (timeSinceLastUpdate.TotalMilliseconds < _signalRUpdateIntervalMs)
-            {
-                return; // Rate limited
-            }
-        }
-
-        await SendSignalRUpdateAsync(force: false, cancellationToken);
-    }
-
-    /// <summary>
-    /// Sends SignalR update
-    /// 🚨 FIX: Prevent sending reset-to-0 events during disposal
-    /// </summary>
-    private async Task SendSignalRUpdateAsync(bool force, CancellationToken cancellationToken)
-    {
-        if (_progressEventPublisher == null) return;
-
-        try
-        {
-            if (!force)
-            {
-                lock (_signalRRateLimitLock)
-                {
-                    var timeSinceLastUpdate = _dateTimeProvider.UtcNow - _lastSignalRUpdate;
-                    if (timeSinceLastUpdate.TotalMilliseconds < _signalRUpdateIntervalMs)
-                    {
-                        return; // Rate limited
-                    }
-                    _lastSignalRUpdate = _dateTimeProvider.UtcNow;
-                }
-            }
-
-            var processedEntities = (int)Interlocked.Read(ref _totalEntitiesProcessed);
-            var failedEntities = (int)Interlocked.Read(ref _totalEntitiesFailed);
-            var currentProgress = GetCurrentProgressPercentage() * 100;
-
-            // 🚨 FIX: Prevent sending problematic reset-to-0 events during disposal
-            if (processedEntities == 0 && failedEntities == 0 && currentProgress == 0 && _disposed)
-            {
-                _logger.LogWarning("🚨 [DISPOSAL-FIX] Blocked reset-to-0 event during disposal for migration {MigrationId}", _migrationId);
-                return;
-            }
-
-            // 🚨 STATUS FIX: Determine if migration is completed
-            var totalEntities = GetEstimatedTotalEntities();
-            var totalProcessed = processedEntities + failedEntities;
-            var migrationStatus = totalProcessed >= totalEntities ? "completed" : "running";
-
-            // ✅ CENTRALIZED SIGNALR: Use factory for consistent event creation with auto-populated base properties
-            var progressEvent = _signalREventFactory.CreateMigrationProgress(_migrationId, new MigrationProgressOptions
-            {
-                CurrentEntityType = _entityType,
-                OverallProgress = currentProgress, // Convert to percentage (0-100)
-                Status = migrationStatus, // 🚨 STATUS FIX: Use dynamic status instead of hardcoded "running"
-                TotalEntities = totalEntities, // 🚨 CRITICAL FIX: Use actual total entities (192) instead of estimated (200)
-                ProcessedEntities = totalProcessed, // 🚨 FIX: Send total processed (successful + failed) instead of just successful
-                FailedEntities = failedEntities
-                // ✅ Base properties (Timestamp, IsCancelled, HubMethod) auto-populated by factory
-                // ✅ Validation built-in
-                // ✅ Consistent naming enforced
-            });
-
-            await _progressEventPublisher.PublishMigrationProgressAsync(progressEvent, cancellationToken);
-            
-            _logger.LogInformation("📊 [SIGNALR-UPDATE] Sent progress: {ProcessedEntities}/{TotalEntities} ({Progress:F1}%), Status: {Status} (Successful: {SuccessfulEntities}, Failed: {FailedEntities})", 
-                totalProcessed, totalEntities, currentProgress, migrationStatus, processedEntities, failedEntities);
-                
-            // 🎯 STATUS TRACKING: Log when migration completes
-            if (migrationStatus == "completed")
-            {
-                _logger.LogInformation("🎉 [MIGRATION-COMPLETED] Migration {MigrationId} reached completion status! Final: {ProcessedEntities}/{TotalEntities} entities", 
-                    _migrationId, processedEntities, totalEntities);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to send SignalR update for migration {MigrationId}", _migrationId);
-        }
-    }
+    // Note: SignalR broadcasting removed - handled by CentralizedProgressBroadcastService
 
     /// <summary>
     /// Checks and triggers milestone events

@@ -110,6 +110,8 @@ public class UpdateEntityProgressActivity
                         MigrationId = migrationId,
                         EntityType = entityType,
                         Phase = "Completed",
+                        // 🎯 PROGRESSIVE DISCOVERY FIX: For component entities, use ProcessedCount as TotalCount if TotalCount is 0
+                        TotalCount = realEntityProgress.TotalCount > 0 ? realEntityProgress.TotalCount : realEntityProgress.ProcessedCount,
                         ProcessedCount = realEntityProgress.ProcessedCount,
                         SuccessCount = realEntityProgress.SuccessCount,
                         FailureCount = realEntityProgress.FailureCount,

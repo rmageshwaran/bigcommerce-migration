@@ -121,6 +121,12 @@ public class ProgressUpdate
     public string Phase { get; set; } = string.Empty;
     
     /// <summary>
+    /// Total number of entities expected for this entity type (can be updated during completion)
+    /// Set to 0 to indicate no update to existing TotalCount
+    /// </summary>
+    public int TotalCount { get; set; }
+    
+    /// <summary>
     /// Number of entities processed
     /// </summary>
     public int ProcessedCount { get; set; }

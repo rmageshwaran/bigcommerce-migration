@@ -113,6 +113,18 @@ function dashboardReducer(state: DashboardState, action: DashboardAction): Dashb
       return { ...state, apiConnected: action.payload };
       
     case 'UPDATE_MIGRATION_PROGRESS':
+      console.log(`🔄 [DEBUG] UPDATE_MIGRATION_PROGRESS reducer called with:`, {
+        migrationId: action.payload.migrationId,
+        status: action.payload.status,
+        payloadKeys: Object.keys(action.payload)
+      });
+      
+      // 🚨 FILTER OUT: Skip migrations with undefined/null/empty IDs
+      if (!action.payload.migrationId || action.payload.migrationId === 'undefined' || action.payload.migrationId === 'null') {
+        console.warn('🚫 [DEBUG] Skipping migration with invalid ID:', action.payload.migrationId);
+        return state;
+      }
+      
       // Don't add cancelled migrations back to active state
       if (state.cancelledMigrations.has(action.payload.migrationId)) {
         console.log('🚫 Skipping update for cancelled migration:', action.payload.migrationId);
@@ -120,6 +132,7 @@ function dashboardReducer(state: DashboardState, action: DashboardAction): Dashb
       }
       const newMigrations = new Map(state.activeMigrations);
       newMigrations.set(action.payload.migrationId, action.payload);
+      console.log(`✅ [DEBUG] Migration added to state. Total active migrations: ${newMigrations.size}`);
       return { ...state, activeMigrations: newMigrations };
       
     case 'REMOVE_MIGRATION':
@@ -366,7 +379,28 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
         
         // Handle response safely - check if data exists and is an array
         if (migrationsResponse && migrationsResponse.data && Array.isArray(migrationsResponse.data)) {
-          migrationsResponse.data.forEach(migration => {
+          console.log(`🏪 [DEBUG] Processing ${migrationsResponse.data.length} migrations from API`);
+          
+          // 🚨 FILTER OUT: Only process migrations with valid IDs
+          const validMigrations = migrationsResponse.data.filter(migration => {
+            const isValid = migration.migrationId && migration.migrationId !== 'undefined' && migration.migrationId !== 'null';
+            if (!isValid) {
+              console.warn(`🚫 [DEBUG] Filtering out migration with invalid ID:`, {
+                migrationId: migration.migrationId,
+                allKeys: Object.keys(migration)
+              });
+            }
+            return isValid;
+          });
+          
+          console.log(`🏪 [DEBUG] Processing ${validMigrations.length} valid migrations (filtered ${migrationsResponse.data.length - validMigrations.length} invalid)`);
+          
+          validMigrations.forEach((migration, index) => {
+            console.log(`🏪 [DEBUG] Valid Migration ${index + 1}:`, {
+              migrationId: migration.migrationId,
+              status: migration.status,
+              allKeys: Object.keys(migration)
+            });
             dispatch({ type: 'UPDATE_MIGRATION_PROGRESS', payload: migration });
           });
           console.log('✅ Active migrations data refreshed:', migrationsResponse.data.length, 'migrations');
@@ -513,30 +547,50 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
       });
     });
 
-    // Migration progress updates
+    // 🎯 GLOBAL Migration Events - Only for dashboard-level management (not detailed progress)
     const progressUnsubscribe = signalRService.on('migrationProgress', (progress: MigrationProgress) => {
-      console.log('🎯 DashboardContext received migrationProgress:', progress);
+      console.log('🎯 DashboardContext received migrationProgress (GLOBAL):', progress);
       
-      // Fix backend status mismatch: detect if migration is actually running despite "queued" status
-      const normalizedProgress = { ...progress };
+      // 🔧 FIX: Handle both camelCase and PascalCase for SignalR serialization
+      const migrationId = progress.migrationId || (progress as any).MigrationId;
+      const eventType = (progress as any).eventType || (progress as any).EventType;
       
-      if (progress.status === 'queued' || progress.status === 'pending') {
-        // Check if migration is actually running based on data indicators
-        const isActuallyRunning = 
-          progress.processedEntities > 0 ||
-          progress.currentPhase === 'Processing' ||
-          progress.overallProgressPercentage > 0 ||
-          (progress.currentEntity && progress.currentEntity !== '') ||
-          ((progress as any).currentProcessing && Object.keys((progress as any).currentProcessing).length > 0);
-          
-        if (isActuallyRunning) {
-          console.log(`🔧 Status normalization: Backend says "${progress.status}" but migration is actually running`);
-          console.log(`📊 Evidence: processedEntities=${progress.processedEntities}, currentPhase="${progress.currentPhase}", progress=${progress.overallProgressPercentage}%`);
-          normalizedProgress.status = 'in_progress';
-        }
+      // 🚨 DASHBOARD ONLY: Only process high-level status changes, not chunk details
+      // Individual migration components handle their own detailed progress
+      if (eventType === 'chunk-progress') {
+        console.log('📊 [DASHBOARD] Ignoring chunk progress - handled by individual components');
+        return; // ✅ Don't process chunk events at dashboard level
       }
       
-      dispatch({ type: 'UPDATE_MIGRATION_PROGRESS', payload: normalizedProgress });
+      // 🎯 DASHBOARD SCOPE: Only handle migration-level events (started, completed, cancelled)
+      if (eventType === 'migration-started' || eventType === 'migration-completed' || progress.status === 'cancelled') {
+        const normalizedProgress = { 
+          ...progress,
+          migrationId: migrationId // Ensure migrationId is always present
+        };
+        
+        console.log(`🏠 [DASHBOARD] Processing migration-level event: ${eventType || progress.status}`);
+        dispatch({ type: 'UPDATE_MIGRATION_PROGRESS', payload: normalizedProgress });
+      }
+    });
+
+    // 🎉 Migration Completed Events - TRUE migration completion
+    const migrationCompletedUnsubscribe = signalRService.on('migration-completed', (eventData: any) => {
+      console.log('🎉 [DASHBOARD-CONTEXT] TRUE Migration Completed Event:', eventData);
+      
+      const migrationId = eventData.migrationId || eventData.MigrationId;
+      if (migrationId) {
+        const completedMigration = {
+          ...eventData,
+          migrationId,
+          status: 'completed'
+        };
+        
+        dispatch({ type: 'UPDATE_MIGRATION_PROGRESS', payload: completedMigration });
+        
+        // Show completion notification
+        notificationService.success(`Migration ${migrationId} completed successfully!`, 'Migration completed successfully');
+      }
     });
 
     // Migration status updates (completed, failed, cancelled, etc.)
@@ -728,6 +782,7 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
       // Unsubscribe from SignalR events
       connectionUnsubscribe();
       progressUnsubscribe();
+      migrationCompletedUnsubscribe();
       statusUnsubscribe();
       subBatchCompletedUnsubscribe();
       entityProgressUnsubscribe();

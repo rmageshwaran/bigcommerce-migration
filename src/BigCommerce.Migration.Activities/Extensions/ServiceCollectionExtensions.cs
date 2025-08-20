@@ -139,11 +139,7 @@ public static class ServiceCollectionExtensions
         // ✅ Hierarchical Option Mapping Service (for Phase 3 variant migration)
         services.AddScoped<IHierarchicalOptionMappingService, HierarchicalOptionMappingService>();
         
-        // ✅ P2-T1.5: Dual-Tier Progress Aggregation System
-        // Tier 1: Pipeline Progress Aggregator (comprehensive entity progress within chunks)
-        services.AddTransient<PipelineProgressAggregator>(); // Transient for per-chunk instances
-        // Tier 2: Universal Migration Progress Aggregator (ecosystem-wide progress)
-        services.AddSingleton<IUniversalMigrationProgressAggregator, UniversalMigrationProgressAggregator>();
+        // Note: Dual-Tier Progress Aggregation System removed - using simplified chunk-level progress with CentralizedProgressBroadcastService
         
         // Note: EntityMigrationDurableOrchestrator is now used in Functions project - no DI registration needed here
         

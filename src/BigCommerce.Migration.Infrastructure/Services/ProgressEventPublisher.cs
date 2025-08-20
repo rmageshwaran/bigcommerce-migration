@@ -86,33 +86,33 @@ namespace BigCommerce.Migration.Infrastructure.Services
         }
 
         /// <inheritdoc />
-        public async Task PublishMigrationProgressAsync(MigrationProgressEvent migrationProgress, CancellationToken cancellationToken = default)
+        public async Task PublishMigrationStartedAsync(MigrationStartedEvent startedEvent, CancellationToken cancellationToken = default)
         {
-            await PublishAsync(migrationProgress, cancellationToken);
+            await PublishAsync(startedEvent, cancellationToken).ConfigureAwait(false);
         }
 
         /// <inheritdoc />
-        public async Task PublishBatchProgressAsync(BatchProgressEvent batchProgress, CancellationToken cancellationToken = default)
+        public async Task PublishEntityStartedAsync(EntityStartedEvent entityStartedEvent, CancellationToken cancellationToken = default)
         {
-            await PublishAsync(batchProgress, cancellationToken);
+            await PublishAsync(entityStartedEvent, cancellationToken).ConfigureAwait(false);
         }
 
         /// <inheritdoc />
-        public async Task PublishEntityProgressAsync(EntityProgressEvent entityProgress, CancellationToken cancellationToken = default)
+        public async Task PublishEntityChunkProgressAsync(EntityChunkProgressEvent chunkEvent, CancellationToken cancellationToken = default)
         {
-            await PublishAsync(entityProgress, cancellationToken);
+            await PublishAsync(chunkEvent, cancellationToken).ConfigureAwait(false);
         }
 
         /// <inheritdoc />
-        public async Task PublishErrorAsync(ErrorProgressEvent errorProgress, CancellationToken cancellationToken = default)
+        public async Task PublishMigrationCompletedAsync(MigrationCompletedEvent completedEvent, CancellationToken cancellationToken = default)
         {
-            await PublishAsync(errorProgress, cancellationToken);
+            await PublishAsync(completedEvent, cancellationToken).ConfigureAwait(false);
         }
 
         /// <inheritdoc />
-        public async Task PublishStatusAsync(StatusProgressEvent statusProgress, CancellationToken cancellationToken = default)
+        public async Task PublishErrorAsync(ErrorProgressEvent errorEvent, CancellationToken cancellationToken = default)
         {
-            await PublishAsync(statusProgress, cancellationToken);
+            await PublishAsync(errorEvent, cancellationToken).ConfigureAwait(false);
         }
     }
 } 

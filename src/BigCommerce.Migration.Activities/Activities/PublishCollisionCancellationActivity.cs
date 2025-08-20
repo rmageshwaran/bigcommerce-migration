@@ -57,25 +57,17 @@ public class PublishCollisionCancellationActivity
             _logger.LogInformation("🔒 [COLLISION-CANCEL] Cancellation flag set in blob storage for migration {MigrationId}", request.MigrationId);
 
             // Step 2: Send SignalR notification about collision cancellation
-            var statusEvent = _signalREventFactory.CreateStatusProgress(request.MigrationId, new StatusProgressOptions
+            var errorEvent = _signalREventFactory.CreateErrorProgress(request.MigrationId, new ErrorProgressOptions
             {
-                Status = "Cancelled",
-                Message = $"Migration cancelled due to orchestrator collision: {request.Reason}",
+                ErrorMessage = $"Migration cancelled due to orchestrator collision: {request.Reason}",
+                Severity = "critical",
                 IsCancelled = true,
                 CancellationReason = request.Reason,
                 CancelledAt = request.CancelledAt,
-                Data = new Dictionary<string, object>
-                {
-                    ["reason"] = request.Reason,
-                    ["cancelledAt"] = request.CancelledAt.ToString("O"),
-                    ["collisionInstanceId"] = request.InstanceId ?? "unknown",
-                    ["approach"] = "collision-detection-cancellation",
-                    ["cancellationType"] = "orchestrator-collision",
-                    ["integrated"] = true // Phase 4.1: Enhanced integration marker
-                }
+                IsContinuable = false // Collision cancellation stops the migration
             });
 
-            await _progressEventPublisher.PublishStatusAsync(statusEvent);
+            await _progressEventPublisher.PublishErrorAsync(errorEvent);
             _logger.LogInformation("🔒 [COLLISION-CANCEL] SignalR collision cancellation notification sent for migration {MigrationId}", request.MigrationId);
 
         }

@@ -224,6 +224,13 @@ namespace BigCommerce.Migration.Functions.Functions
                 var activeMigrations = new List<object>();
                 foreach (var migration in migrationListResult.Migrations)
                 {
+                    // 🚨 FILTER OUT: Skip entries with invalid/missing IDs (e.g., health-checks)
+                    if (string.IsNullOrEmpty(migration.Id))
+                    {
+                        _logger.LogWarning("DEBUG: Skipping migration entry with null/empty ID - likely a health-check or invalid entry");
+                        continue;
+                    }
+                    
                     _logger.LogInformation("DEBUG: Processing migration {MigrationId} with status {Status}", migration.Id, migration.Status);
                     
                     try
@@ -258,6 +265,13 @@ namespace BigCommerce.Migration.Functions.Functions
                     catch (Exception ex)
                     {
                         _logger.LogWarning(ex, "Failed to get progress for migration {MigrationId}, including basic info", migration.Id);
+                        
+                        // 🚨 DOUBLE-CHECK: Ensure we don't add entries with invalid IDs even in exception case
+                        if (string.IsNullOrEmpty(migration.Id))
+                        {
+                            _logger.LogWarning("DEBUG: Skipping migration entry with null/empty ID in exception handler - likely a health-check");
+                            continue;
+                        }
                         
                         // Include basic migration info even if progress fails
                         activeMigrations.Add(new

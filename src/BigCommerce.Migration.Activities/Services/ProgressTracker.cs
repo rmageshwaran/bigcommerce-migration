@@ -64,8 +64,7 @@ public class ProgressTracker : IProgressTracker
                 CalculateOverallProgress(progress);
             }
             
-            // Publish progress update event to queue for SignalR broadcasting
-            await PublishMigrationProgressEventAsync(migrationId, progress, cancellationToken);
+            // Note: SignalR progress publishing removed - handled by CentralizedProgressBroadcastService
             
             // Persist progress to storage for durability across application restarts
             if (_storageService != null)
@@ -234,8 +233,7 @@ public class ProgressTracker : IProgressTracker
                 CalculateOverallProgress(progress);
             }
             
-            // Publish entity start event to queue for SignalR broadcasting
-            await PublishEntityProgressEventAsync(migrationId, entityType, progress, cancellationToken);
+            // Note: SignalR entity publishing removed - handled by CentralizedProgressBroadcastService
         }
         catch (OperationCanceledException)
         {
@@ -306,8 +304,7 @@ public class ProgressTracker : IProgressTracker
                 }
             }
             
-            // Publish entity completion event to queue for SignalR broadcasting
-            await PublishEntityProgressEventAsync(migrationId, entityType, progress, cancellationToken);
+            // Note: SignalR entity completion publishing removed - handled by CentralizedProgressBroadcastService
             
             // NOTE: Database persistence is handled by UpdateProgressAsync flow, not needed here
         }
@@ -376,6 +373,13 @@ public class ProgressTracker : IProgressTracker
             entityProgress.FailureCount = update.FailureCount;
             entityProgress.SkippedCount = update.SkippedCount;
             entityProgress.CancelledCount = update.CancelledCount; // 🚨 CRITICAL FIX: Update cancelled count in database
+            
+            // 🎯 PROGRESSIVE DISCOVERY FIX: Update TotalCount for component entities when they complete
+            // Use 0 to indicate "no update" instead of nullable
+            if (update.TotalCount > 0)
+            {
+                entityProgress.TotalCount = update.TotalCount;
+            }
             
             // 🚨 STATUS FIX: Calculate entity progress percentage using total processed (including skipped)
             // This ensures proper completion when ProcessedCount = SuccessCount + FailureCount + SkippedCount
@@ -593,96 +597,23 @@ public class ProgressTracker : IProgressTracker
         }
     }
 
-    /// <summary>
-    /// Publishes a migration progress event to the queue for SignalR broadcasting
-    /// SOLID: Single Responsibility - handles only migration progress event publishing
-    /// Phase 4.2: Enhanced to include soft cancellation state in progress events
-    /// </summary>
-    private async Task PublishMigrationProgressEventAsync(string migrationId, MigrationProgress progress, CancellationToken cancellationToken)
+    // Note: Migration progress publishing removed - handled by CentralizedProgressBroadcastService
+    private Task PublishMigrationProgressEventAsync(string migrationId, MigrationProgress progress, CancellationToken cancellationToken)
     {
-        try
-        {
-            _logger.LogInformation("📊 [PROGRESS-TRACKER] Publishing migration progress event for MigrationId: {MigrationId}, Progress: {Progress}%, Status: {Status}, Entities: {ProcessedEntities}/{TotalEntities}", 
-                migrationId, progress.OverallProgressPercentage, progress.Status, progress.ProcessedEntities, progress.TotalEntities);
-
-            // ✅ CENTRALIZED SIGNALR: Use factory for consistent event creation with auto-populated base properties
-            var progressEvent = _signalREventFactory.CreateMigrationProgress(migrationId, new MigrationProgressOptions
-            {
-                OverallProgress = progress.OverallProgressPercentage,
-                Status = progress.Status,
-                TotalEntities = progress.TotalEntities,
-                ProcessedEntities = progress.ProcessedEntities,
-                FailedEntities = progress.FailedEntities,
-                SuccessfulEntities = progress.SuccessfulEntities, // 🎯 SUCCESS RATE FIX: Pass backend-calculated SuccessfulEntities to frontend
-                CurrentEntityType = progress.CurrentEntity,
-                
-                // 🎯 TIME TRACKING FIX: Pass time properties to fix "0m 0s" displays
-                StartTime = progress.StartTime,
-                ElapsedTime = progress.ElapsedTime,
-                EntitiesPerSecond = progress.EntitiesPerSecond,
-                EstimatedTimeRemaining = progress.EstimatedTimeRemaining,
-                
-                // Phase 4.2: Include soft cancellation state in progress event
-                IsCancelled = progress.IsCancelled ?? false,
-                CancellationReason = progress.CancellationReason,
-                CancelledAt = progress.CancelledAt
-                // ✅ Base properties (Timestamp, HubMethod) auto-populated by factory
-                // ✅ Validation built-in
-                // ✅ Consistent naming enforced
-            });
-
-            _logger.LogInformation("📡 [PROGRESS-TRACKER] Calling ProgressEventPublisher for MigrationId: {MigrationId}", migrationId);
-            await _progressEventPublisher.PublishMigrationProgressAsync(progressEvent, cancellationToken);
-            _logger.LogInformation("✅ [PROGRESS-TRACKER] Successfully published migration progress event for MigrationId: {MigrationId}", migrationId);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "💥 [PROGRESS-TRACKER] Failed to publish migration progress event for migration {MigrationId}", migrationId);
-            // Don't rethrow - progress events should not break the migration
-        }
+        // Method kept as stub for backward compatibility but no longer publishes events
+        _logger.LogDebug("📊 [PROGRESS-TRACKER] Progress tracking for MigrationId: {MigrationId}, Progress: {Progress}%, Status: {Status}", 
+            migrationId, progress.OverallProgressPercentage, progress.Status);
+        return Task.CompletedTask;
     }
 
-    /// <summary>
-    /// Publishes an entity progress event to the queue for SignalR broadcasting
-    /// SOLID: Single Responsibility - handles only entity progress event publishing
-    /// Phase 4.2: Enhanced to include soft cancellation state in entity progress events
-    /// </summary>
-    private async Task PublishEntityProgressEventAsync(string migrationId, string entityType, MigrationProgress progress, CancellationToken cancellationToken)
+    // Note: Entity progress publishing removed - handled by CentralizedProgressBroadcastService
+    private Task PublishEntityProgressEventAsync(string migrationId, string entityType, MigrationProgress progress, CancellationToken cancellationToken)
     {
-        try
-        {
-            var entityProgress = progress.EntityProgress.ContainsKey(entityType) ? progress.EntityProgress[entityType] : null;
-            
-            // ✅ CENTRALIZED SIGNALR: Use factory for consistent event creation with auto-populated base properties
-            var entityEvent = _signalREventFactory.CreateEntityProgress(migrationId, new EntityProgressOptions
-            {
-                EntityType = entityType,
-                TotalCount = entityProgress?.TotalCount ?? 0,
-                ProcessedCount = entityProgress?.ProcessedCount ?? 0,
-                // 🚨 FIX: Pass actual success/failure/skipped/cancelled counts from EntityProgress instead of letting factory calculate incorrectly
-                SuccessCount = entityProgress?.SuccessCount ?? 0,
-                FailureCount = entityProgress?.FailureCount ?? 0,
-                SkippedCount = entityProgress?.SkippedCount ?? 0,
-                CancelledCount = entityProgress?.CancelledCount ?? 0, // 🚫 ADD: Include cancelled count in SignalR events
-                Status = entityProgress?.Status ?? "starting",
-                ProcessingTime = entityProgress?.ProcessingTime,
-                // Phase 4.2: Include soft cancellation state in entity progress event
-                IsCancelled = progress.IsCancelled ?? false,
-                CancellationReason = progress.CancellationReason,
-                CancelledAt = progress.CancelledAt
-                // ✅ Base properties (Timestamp, HubMethod) auto-populated by factory
-                // ✅ SuccessCount/FailureCount/SkippedCount now passed from actual EntityProgress data
-                // ✅ Validation built-in
-                // ✅ Consistent naming enforced
-            });
-
-            await _progressEventPublisher.PublishEntityProgressAsync(entityEvent, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to publish entity progress event for migration {MigrationId}, entity {EntityType}", migrationId, entityType);
-            // Don't rethrow - progress events should not break the migration
-        }
+        // Method kept as stub for backward compatibility but no longer publishes events
+        var entityProgress = progress.EntityProgress.ContainsKey(entityType) ? progress.EntityProgress[entityType] : null;
+        _logger.LogDebug("📊 [PROGRESS-TRACKER] Entity progress tracking for {EntityType}: {ProcessedCount}/{TotalCount}", 
+            entityType, entityProgress?.ProcessedCount ?? 0, entityProgress?.TotalCount ?? 0);
+        return Task.CompletedTask;
     }
 
     /// <inheritdoc />

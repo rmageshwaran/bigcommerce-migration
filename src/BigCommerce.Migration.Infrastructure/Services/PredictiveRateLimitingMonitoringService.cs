@@ -106,6 +106,8 @@ public class PredictiveRateLimitingMonitoringService : IPredictiveRateLimitingMo
         {
             var predictiveStatus = await _predictiveService.GetRateLimitStatusAsync(storeId, cancellationToken);
 
+            // Note: Quota update events removed in simplified SignalR approach
+            /*
             var quotaEvent = _signalREventFactory.CreateQuotaUpdate(storeId, new QuotaUpdateOptions
             {
                 TotalQuota = predictiveStatus.TotalQuota,
@@ -118,7 +120,8 @@ public class PredictiveRateLimitingMonitoringService : IPredictiveRateLimitingMo
                 DataAge = predictiveStatus.DataAge
             });
 
-            await _progressEventPublisher.PublishAsync(quotaEvent);
+            // await _progressEventPublisher.PublishAsync(quotaEvent);
+            */
             UpdateMonitoringState(storeId, "QuotaUpdate");
 
             _logger.LogTrace("Published quota update event for store {StoreId}: {Remaining}/{Total} tokens",
@@ -140,6 +143,8 @@ public class PredictiveRateLimitingMonitoringService : IPredictiveRateLimitingMo
         {
             var predictiveStatus = await _predictiveService.GetRateLimitStatusAsync(storeId, cancellationToken);
 
+            // Note: Predictive rate limit events removed in simplified SignalR approach
+            /*
             var predictiveEvent = _signalREventFactory.CreatePredictiveRateLimit(storeId, new PredictiveRateLimitOptions
             {
                 InstanceId = predictiveStatus.InstanceId,
@@ -155,7 +160,8 @@ public class PredictiveRateLimitingMonitoringService : IPredictiveRateLimitingMo
                 CanProcessRequests = predictiveStatus.CanProcessRequests()
             });
 
-            await _progressEventPublisher.PublishAsync(predictiveEvent);
+            // await _progressEventPublisher.PublishAsync(predictiveEvent);
+            */
             UpdateMonitoringState(storeId, "PredictiveStatus");
 
             _logger.LogTrace("Published predictive status event for store {StoreId}: {Available}/{Allocated} tokens, Health: {Health}",
@@ -177,6 +183,8 @@ public class PredictiveRateLimitingMonitoringService : IPredictiveRateLimitingMo
         {
             var systemHealth = await _healthMonitor.GetSystemHealthAsync(storeId, cancellationToken);
 
+            // Note: System health events removed in simplified SignalR approach
+            /*
             var healthEvent = _signalREventFactory.CreateSystemHealth(storeId, new SystemHealthOptions
             {
                 OverallHealthStatus = systemHealth.OverallHealthStatus.ToString(),
@@ -190,7 +198,8 @@ public class PredictiveRateLimitingMonitoringService : IPredictiveRateLimitingMo
                 RecommendedActions = systemHealth.GetRecommendedActions()
             });
 
-            await _progressEventPublisher.PublishAsync(healthEvent);
+            // await _progressEventPublisher.PublishAsync(healthEvent);
+            */
             UpdateMonitoringState(storeId, "SystemHealth");
 
             _logger.LogTrace("Published system health event for store {StoreId}: {Status} ({Score:F2}), Trend: {Trend}",

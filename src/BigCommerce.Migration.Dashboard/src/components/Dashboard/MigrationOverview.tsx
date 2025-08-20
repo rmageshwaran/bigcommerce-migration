@@ -31,6 +31,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { apiService } from '../../services/apiService';
 import { getSignalRService } from '../../services/signalRService';
 import { notificationService } from '../../services/notificationService';
+import { EnhancedMigrationOverview } from './EnhancedMigrationOverview';
 
 /**
  * MigrationOverview Component
@@ -268,6 +269,11 @@ export const MigrationOverview: React.FC = () => {
 
   // Get active migrations array (cancelled migrations are already filtered at DashboardContext level)
   const activeMigrationsArray = Array.from(activeMigrations.values());
+  console.log(`🏠 [DEBUG] MigrationOverview activeMigrationsArray:`, activeMigrationsArray.map(m => ({
+    migrationId: m.migrationId,
+    status: m.status,
+    allKeys: Object.keys(m)
+  })));
 
   return (
     <Box sx={{ flexGrow: 1, p: 3 }}>
@@ -421,76 +427,133 @@ export const MigrationOverview: React.FC = () => {
                 {activeMigrationsArray.map((migration) => (
                   <Card key={migration.migrationId} variant="outlined" sx={{ mb: 2 }}>
                     <CardContent>
-                      <Box display="flex" justifyContent="space-between" alignItems="center">
+                      {/* Enhanced Migration Display for Active Migrations */}
+                      {!['completed', 'failed', 'cancelled'].includes(migration.status) ? (
                         <Box>
-                          <Box display="flex" alignItems="center" gap={1} sx={{ mb: 1 }}>
-                            <Typography variant="subtitle1">
-                              Migration: {migration.migrationId}
-                            </Typography>
-                            {/* Live Updates Status Indicator */}
-                            {joiningGroups.has(migration.migrationId) ? (
-                              <Chip
+                          {/* Header with basic info and controls */}
+                          <Box display="flex" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+                            <Box>
+                              <Box display="flex" alignItems="center" gap={1} sx={{ mb: 1 }}>
+                                <Typography variant="subtitle1">
+                                  Migration: {migration.migrationId}
+                                </Typography>
+                                {/* Live Updates Status Indicator */}
+                                {joiningGroups.has(migration.migrationId) ? (
+                                  <Chip
+                                    size="small"
+                                    icon={<CircularProgress size={16} />}
+                                    label="Joining..."
+                                    color="info"
+                                    variant="outlined"
+                                    sx={{ 
+                                      fontSize: '0.75rem',
+                                      height: '24px',
+                                      '& .MuiChip-icon': { fontSize: '16px' }
+                                    }}
+                                  />
+                                ) : joinedGroups.has(migration.migrationId) ? (
+                                  <Chip
+                                    size="small"
+                                    icon={<SuccessIcon />}
+                                    label="Connected"
+                                    color="success"
+                                    variant="outlined"
+                                    sx={{ 
+                                      fontSize: '0.75rem',
+                                      height: '24px',
+                                      '& .MuiChip-icon': { fontSize: '16px' }
+                                    }}
+                                  />
+                                ) : (
+                                  <Chip
+                                    size="small"
+                                    icon={signalRConnection.isConnected ? <SuccessIcon /> : <ErrorIcon />}
+                                    label={signalRConnection.isConnected ? 'Live Updates' : 'No Live Updates'}
+                                    color={signalRConnection.isConnected ? 'success' : 'warning'}
+                                    variant="outlined"
+                                    sx={{ 
+                                      fontSize: '0.75rem',
+                                      height: '24px',
+                                      '& .MuiChip-icon': { fontSize: '16px' }
+                                    }}
+                                  />
+                                )}
+                              </Box>
+                              <Typography variant="body2" color="text.secondary" gutterBottom>
+                                Status: {migration.status}
+                              </Typography>
+                              <Typography variant="caption">
+                                {(migration.processedEntities ?? 0)} / {(migration.totalEntities ?? 0)} entities
+                              </Typography>
+                            </Box>
+                            <Stack direction="row" spacing={1} alignItems="center">
+                              {/* Only show View Dashboard button for active migrations */}
+                              <Button
+                                variant="contained"
                                 size="small"
-                                icon={<CircularProgress size={16} />}
-                                label="Joining..."
-                                color="info"
-                                variant="outlined"
-                                sx={{ 
-                                  fontSize: '0.75rem',
-                                  height: '24px',
-                                  '& .MuiChip-icon': { fontSize: '16px' }
-                                }}
-                              />
-                            ) : joinedGroups.has(migration.migrationId) ? (
-                              <Chip
-                                size="small"
-                                icon={<SuccessIcon />}
-                                label="Connected"
-                                color="success"
-                                variant="outlined"
-                                sx={{ 
-                                  fontSize: '0.75rem',
-                                  height: '24px',
-                                  '& .MuiChip-icon': { fontSize: '16px' }
-                                }}
-                              />
-                            ) : (
-                              <Chip
-                                size="small"
-                                icon={signalRConnection.isConnected ? <SuccessIcon /> : <ErrorIcon />}
-                                label={signalRConnection.isConnected ? 'Live Updates' : 'No Live Updates'}
-                                color={signalRConnection.isConnected ? 'success' : 'warning'}
-                                variant="outlined"
-                                sx={{ 
-                                  fontSize: '0.75rem',
-                                  height: '24px',
-                                  '& .MuiChip-icon': { fontSize: '16px' }
-                                }}
-                              />
-                            )}
+                                onClick={() => handleNavigateToMigrationDetail(migration.migrationId)}
+                                disabled={joiningGroups.has(migration.migrationId)}
+                              >
+                                {joiningGroups.has(migration.migrationId) ? 'Joining...' : 'View Dashboard'}
+                              </Button>
+                              
+                              {/* Cancel button */}
+                              {(() => {
+                                const isInActiveList = activeMigrations.has(migration.migrationId);
+                                const hasRunningStatus = migration.status === 'running' || migration.status === 'in_progress' || migration.status === 'inprogress' || migration.status?.toLowerCase().includes('progress');
+                                
+                                return isInActiveList || hasRunningStatus;
+                              })() && (
+                                <Tooltip title="Cancel Migration">
+                                  <IconButton
+                                    size="small"
+                                    color="error"
+                                    onClick={() => handleCancelClick(migration.migrationId)}
+                                    disabled={isCancelling || joiningGroups.has(migration.migrationId)}
+                                    sx={{ 
+                                      border: '1px solid',
+                                      borderColor: 'error.main',
+                                      '&:hover': {
+                                        backgroundColor: 'error.light',
+                                        color: 'white'
+                                      }
+                                    }}
+                                  >
+                                    <StopIcon fontSize="small" />
+                                  </IconButton>
+                                </Tooltip>
+                              )}
+                            </Stack>
                           </Box>
-                          <Typography variant="body2" color="text.secondary" gutterBottom>
-                            Status: {migration.status}
-                          </Typography>
-                          <Typography variant="caption">
-                            {(migration.processedEntities ?? 0)} / {(migration.totalEntities ?? 0)} entities
-                          </Typography>
-                        </Box>
-                        <Stack direction="row" spacing={1} alignItems="center">
-                          {/* Only show View Dashboard button for active migrations */}
-                          {!['completed', 'failed', 'cancelled'].includes(migration.status) && (
-                            <Button
-                              variant="contained"
-                              size="small"
-                              onClick={() => handleNavigateToMigrationDetail(migration.migrationId)}
-                              disabled={joiningGroups.has(migration.migrationId)}
-                            >
-                              {joiningGroups.has(migration.migrationId) ? 'Joining...' : 'View Dashboard'}
-                            </Button>
-                          )}
                           
-                          {/* Show status for completed migrations */}
-                          {['completed', 'failed', 'cancelled'].includes(migration.status) && (
+                          {/* Enhanced Migration Overview - Real-time progress */}
+                          {(() => {
+                            console.log(`🏠 [DEBUG] Rendering EnhancedMigrationOverview for migrationId: "${migration.migrationId}"`);
+                            return null;
+                          })()}
+                          <EnhancedMigrationOverview 
+                            migrationId={migration.migrationId} 
+                            onRefresh={handleRefresh}
+                          />
+                        </Box>
+                      ) : (
+                        /* Simple display for completed/failed/cancelled migrations */
+                        <Box display="flex" justifyContent="space-between" alignItems="center">
+                          <Box>
+                            <Box display="flex" alignItems="center" gap={1} sx={{ mb: 1 }}>
+                              <Typography variant="subtitle1">
+                                Migration: {migration.migrationId}
+                              </Typography>
+                            </Box>
+                            <Typography variant="body2" color="text.secondary" gutterBottom>
+                              Status: {migration.status}
+                            </Typography>
+                            <Typography variant="caption">
+                              {(migration.processedEntities ?? 0)} / {(migration.totalEntities ?? 0)} entities
+                            </Typography>
+                          </Box>
+                          <Stack direction="row" spacing={1} alignItems="center">
+                            {/* Show status chip for completed migrations */}
                             <Chip
                               size="small"
                               label={`Migration ${migration.status}`}
@@ -502,47 +565,9 @@ export const MigrationOverview: React.FC = () => {
                                 textTransform: 'capitalize'
                               }}
                             />
-                          )}
-                          {/* Cancel button - show for active migrations (immediate) and running migrations */}
-                          {(() => {
-                            console.log('🔍 Migration Overview - Migration:', migration.migrationId, 'Status:', migration.status);
-                            
-                            // Don't show cancel button for completed, failed, or cancelled migrations
-                            const isCompleted = migration.status === 'completed' || migration.status === 'failed' || migration.status === 'cancelled';
-                            if (isCompleted) {
-                              console.log('🚫 Migration is completed/failed/cancelled - hiding cancel button');
-                              return false;
-                            }
-                            
-                            // Show cancel button if:
-                            // 1. Migration exists in active list (immediate) OR
-                            // 2. Status indicates running/progress (after data loads)
-                            const isInActiveList = activeMigrations.has(migration.migrationId);
-                            const hasRunningStatus = migration.status === 'running' || migration.status === 'in_progress' || migration.status === 'inprogress' || migration.status?.toLowerCase().includes('progress');
-                            
-                            return isInActiveList || hasRunningStatus;
-                          })() && (
-                            <Tooltip title="Cancel Migration">
-                              <IconButton
-                                size="small"
-                                color="error"
-                                onClick={() => handleCancelClick(migration.migrationId)}
-                                disabled={isCancelling || joiningGroups.has(migration.migrationId)}
-                                sx={{ 
-                                  border: '1px solid',
-                                  borderColor: 'error.main',
-                                  '&:hover': {
-                                    backgroundColor: 'error.light',
-                                    color: 'white'
-                                  }
-                                }}
-                              >
-                                <StopIcon fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
-                          )}
-                        </Stack>
-                      </Box>
+                          </Stack>
+                        </Box>
+                      )}
                     </CardContent>
                   </Card>
                 ))}

@@ -28,44 +28,113 @@ export const useMigrationProgress = (
   
   const signalRService = getSignalRService();
 
-  // Handle migration progress updates from SignalR
-  const handleProgressUpdate = useCallback((progressData: MigrationProgress) => {
-    if (progressData.migrationId === migrationId) {
-      setProgress(progressData);
+  // Handle migration started events (Phase 3: Simplified Events)
+  const handleMigrationStarted = useCallback((eventData: any) => {
+    if (eventData.migrationId === migrationId) {
+      console.log('🚀 useMigrationProgress: Migration Started', eventData);
+      setProgress({
+        migrationId: eventData.migrationId,
+        status: 'running',
+        startTime: new Date(eventData.startDateTime),
+        lastUpdated: new Date(),
+        elapsedTime: 0,
+        estimatedTimeRemaining: 0,
+        totalEntities: eventData.entities?.reduce((sum: number, entity: any) => sum + entity.totalCount, 0) || 0,
+        processedEntities: 0,
+        successfulEntities: 0,
+        failedEntities: 0,
+        skippedEntities: 0,
+        cancelledEntities: 0,
+        overallProgressPercentage: 0,
+        entityProgress: {},
+        currentPhase: 'initializing',
+        currentEntity: '',
+        entitiesPerSecond: 0,
+        errorRate: 0
+      });
       setIsLoading(false);
     }
   }, [migrationId]);
 
-  // Handle migration status updates from SignalR
-  const handleStatusUpdate = useCallback((statusData: any) => {
-    if (statusData.migrationId === migrationId) {
-      // Update progress based on status data
-      setProgress(prev => prev ? { ...prev, ...statusData } : null);
+  // Handle chunk progress updates (Phase 3: Simplified Events)
+  const handleChunkProgress = useCallback((eventData: any) => {
+    if (eventData.migrationId === migrationId) {
+      console.log('📊 useMigrationProgress: Chunk Progress', eventData);
+      
+      setProgress(prev => {
+        if (!prev) return prev;
+        
+        // Update entity progress
+        const updatedEntityProgress = { ...prev.entityProgress };
+        updatedEntityProgress[eventData.entityType] = {
+          entityType: eventData.entityType,
+          totalCount: eventData.totalEntitiesForType,
+          processedCount: eventData.cumulativeProcessed + eventData.cumulativeFailed,
+          successCount: eventData.cumulativeProcessed,
+          failureCount: eventData.cumulativeFailed,
+          skippedCount: 0,
+          cancelledCount: 0,
+          progressPercentage: eventData.progressPercentage,
+          status: eventData.status,
+          startTime: prev.startTime,
+          processingTime: eventData.processingTimeMs / 1000
+        };
+        
+        // Calculate overall progress
+        const totalEntities = Object.values(updatedEntityProgress).reduce((sum, entity) => sum + entity.totalCount, 0);
+        const processedEntities = Object.values(updatedEntityProgress).reduce((sum, entity) => sum + entity.processedCount, 0);
+        const successfulEntities = Object.values(updatedEntityProgress).reduce((sum, entity) => sum + entity.successCount, 0);
+        const failedEntities = Object.values(updatedEntityProgress).reduce((sum, entity) => sum + entity.failureCount, 0);
+        
+        return {
+          ...prev,
+          entityProgress: updatedEntityProgress,
+          totalEntities,
+          processedEntities,
+          successfulEntities,
+          failedEntities,
+          overallProgressPercentage: totalEntities > 0 ? (processedEntities / totalEntities) * 100 : 0,
+          currentEntity: eventData.entityType,
+          lastUpdated: new Date(),
+          elapsedTime: Date.now() - prev.startTime.getTime()
+        };
+      });
     }
   }, [migrationId]);
 
-  // Handle entity progress updates from SignalR (when entities complete)
-  const handleEntityProgressUpdate = useCallback((entityData: any) => {
-    if (entityData.migrationId === migrationId || entityData.MigrationId === migrationId) {
-      console.log('🔄 useMigrationProgress: Received EntityProgressUpdated:', entityData);
+  // Handle migration completion events (Phase 3: Simplified Events)
+  const handleMigrationCompleted = useCallback((eventData: any) => {
+    if (eventData.migrationId === migrationId) {
+      console.log('✅ useMigrationProgress: Migration Completed', eventData);
       
-      // If entity status is completed, update the overall migration status
-      if (entityData.Status === 'completed' || entityData.status === 'completed') {
-        console.log('✅ useMigrationProgress: Entity completed, updating migration status to completed');
-        setProgress(prev => prev ? { 
-          ...prev, 
-          status: 'completed',
-          processedEntities: entityData.ProcessedCount || entityData.processedCount || prev.processedEntities,
-          totalEntities: entityData.TotalCount || entityData.totalCount || prev.totalEntities
-        } : null);
-      } else {
-        // Update entity counts for other statuses
-        setProgress(prev => prev ? { 
-          ...prev,
-          processedEntities: entityData.ProcessedCount || entityData.processedCount || prev.processedEntities,
-          totalEntities: entityData.TotalCount || entityData.totalCount || prev.totalEntities
-        } : null);
-      }
+      setProgress(prev => prev ? {
+        ...prev,
+        status: eventData.status.toLowerCase().includes('cancelled') ? 'cancelled' : 
+               eventData.status.toLowerCase().includes('failed') ? 'failed' : 'completed',
+        overallProgressPercentage: 100,
+        processedEntities: eventData.totalProcessedEntities,
+        successfulEntities: eventData.totalProcessedEntities - eventData.totalFailedEntities,
+        failedEntities: eventData.totalFailedEntities,
+        lastUpdated: new Date(),
+        elapsedTime: eventData.durationMs
+      } : null);
+    }
+  }, [migrationId]);
+
+  // Handle error events (Phase 3: Simplified Events)
+  const handleErrorEvent = useCallback((eventData: any) => {
+    if (eventData.migrationId === migrationId) {
+      console.warn('❌ useMigrationProgress: Error Event', eventData);
+      setError(`${eventData.errorType}: ${eventData.errorMessage}`);
+    }
+  }, [migrationId]);
+
+  // Legacy event handlers (for backward compatibility)
+  const handleLegacyProgressUpdate = useCallback((progressData: MigrationProgress) => {
+    if (progressData.migrationId === migrationId) {
+      console.log('🔄 useMigrationProgress: Legacy Progress Update', progressData);
+      setProgress(progressData);
+      setIsLoading(false);
     }
   }, [migrationId]);
 
@@ -121,10 +190,14 @@ export const useMigrationProgress = (
 
   // Set up SignalR listeners and connection
   useEffect(() => {
-    // Subscribe to SignalR events
-    const progressUnsubscribe = signalRService.on('MigrationProgressUpdated', handleProgressUpdate);
-    const statusUnsubscribe = signalRService.on('MigrationStatusChanged', handleStatusUpdate);
-    const entityProgressUnsubscribe = signalRService.on('EntityProgressUpdated', handleEntityProgressUpdate);
+    // Subscribe to simplified SignalR events (Phase 3)
+    const startedUnsubscribe = signalRService.on('migration-started', handleMigrationStarted);
+    const chunkProgressUnsubscribe = signalRService.on('chunk-progress', handleChunkProgress);
+    const completedUnsubscribe = signalRService.on('migration-completed', handleMigrationCompleted);
+    const errorUnsubscribe = signalRService.on('error', handleErrorEvent);
+    
+    // Legacy event subscriptions (for backward compatibility)
+    const legacyProgressUnsubscribe = signalRService.on('MigrationProgressUpdated', handleLegacyProgressUpdate);
     const connectionUnsubscribe = signalRService.on('connectionStateChanged', handleConnectionStateChange);
 
     // Initial connection state
@@ -153,9 +226,11 @@ export const useMigrationProgress = (
 
     // Cleanup function
     return () => {
-      progressUnsubscribe();
-      statusUnsubscribe();
-      entityProgressUnsubscribe();
+      startedUnsubscribe();
+      chunkProgressUnsubscribe();
+      completedUnsubscribe();
+      errorUnsubscribe();
+      legacyProgressUnsubscribe();
       connectionUnsubscribe();
       
       // Leave migration group on cleanup
@@ -166,9 +241,11 @@ export const useMigrationProgress = (
   }, [
     signalRService,
     autoConnect,
-    handleProgressUpdate,
-    handleStatusUpdate,
-    handleEntityProgressUpdate,
+    handleMigrationStarted,
+    handleChunkProgress,
+    handleMigrationCompleted,
+    handleErrorEvent,
+    handleLegacyProgressUpdate,
     handleConnectionStateChange,
     joinMigrationGroup,
     leaveMigrationGroup,

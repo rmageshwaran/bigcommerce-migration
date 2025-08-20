@@ -302,8 +302,8 @@ public class ChunkIncrementEvent : ITableEntity
         if (string.IsNullOrEmpty(EntityType))
             errors.Add("EntityType is required");
 
-        if (ChunkNumber <= 0)
-            errors.Add("ChunkNumber must be positive");
+        if (ChunkNumber < 0)
+            errors.Add("ChunkNumber cannot be negative");
 
         if (ChunkStartIndex < 0)
             errors.Add("ChunkStartIndex cannot be negative");

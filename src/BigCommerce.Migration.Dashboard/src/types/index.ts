@@ -22,6 +22,10 @@ export interface MigrationProgress {
   currentEntity: string;
   entitiesPerSecond: number;
   errorRate: number;
+  // Additional properties for enhanced display
+  sourceStore?: string;
+  destinationStore?: string;
+  estimatedEndTime?: Date;
 }
 
 export interface EntityProgress {
@@ -376,4 +380,94 @@ export interface EntityCompletion {
     completedAt: Date;
   };
   timestamp: Date;
+}
+
+// Enhanced Migration Display Types for Phase 3 UI
+export interface EnhancedMigrationDisplayData {
+  migrationId: string;
+  sourceStore: string;
+  destinationStore: string;
+  startDateTime: string;
+  estimatedEndTime?: string;
+  overallProgress: number;
+  totalProcessed: number;
+  totalSuccess: number;
+  totalFailed: number;
+  totalSkipped: number;
+  entities: EntityDisplayData[];
+  status: MigrationStatus;
+  lastUpdated: Date;
+}
+
+export interface EntityDisplayData {
+  entityType: string;
+  totalCount: number;
+  processedCount: number;
+  successCount: number;
+  failedCount: number;
+  skippedCount: number;
+  progressPercentage: number;
+  status: 'processing' | 'completed' | 'cancelled' | 'failed' | 'pending';
+  currentChunk?: number;
+  totalChunks?: number;
+  processingSpeed?: number; // entities per second
+}
+
+// Simplified SignalR Event Types for Phase 3
+export interface MigrationStartedEvent {
+  migrationId: string;
+  sourceStore: string;
+  destinationStore: string;
+  startDateTime: string;
+  estimatedEndTime?: string;
+  entities: Array<{
+    entityType: string;
+    totalCount: number;
+    estimatedDuration?: number;
+  }>;
+}
+
+export interface EntityStartedEvent {
+  migrationId: string;
+  entityType: string;
+  totalCount: number;
+  estimatedDurationMs?: number;
+  message: string;
+  startDateTime: string;
+}
+
+export interface EntityChunkProgressEvent {
+  migrationId: string;
+  entityType: string;
+  chunkNumber: number;
+  totalChunks: number;
+  chunkSize: number;
+  processedInChunk: number;
+  failedInChunk: number;
+  cumulativeProcessed: number;
+  cumulativeFailed: number;
+  totalEntitiesForType: number;
+  progressPercentage: number;
+  status: string;
+  message: string;
+  processingTimeMs: number;
+}
+
+export interface MigrationCompletedEvent {
+  migrationId: string;
+  status: string;
+  message: string;
+  totalProcessedEntities: number;
+  totalFailedEntities: number;
+  durationMs: number;
+  endDateTime: string;
+}
+
+export interface ErrorProgressEvent {
+  migrationId: string;
+  errorType: string;
+  errorMessage: string;
+  entityType?: string;
+  entityId?: string;
+  stackTrace?: string;
 } 

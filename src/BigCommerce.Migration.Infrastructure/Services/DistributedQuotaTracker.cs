@@ -178,7 +178,7 @@ public class DistributedQuotaTracker : IDistributedQuotaTracker
                 UpdateThrottleTracker(storeId);
 
                         // Real-time SignalR notification for dashboard visibility
-        _ = Task.Run(async () => await PublishQuotaUpdateEventAsync(storeId, quotaEntity));
+                    _ = Task.Run(() => PublishQuotaUpdateEvent(storeId, quotaEntity));
         // Fire-and-forget to not block quota updates
 
                 return true;
@@ -395,7 +395,7 @@ public class DistributedQuotaTracker : IDistributedQuotaTracker
     /// <summary>
     /// Publishes quota update event for real-time dashboard visibility
     /// </summary>
-    private async Task PublishQuotaUpdateEventAsync(string storeId, StoreQuotaEntity quota)
+    private void PublishQuotaUpdateEvent(string storeId, StoreQuotaEntity quota)
     {
         try
         {
@@ -403,21 +403,10 @@ public class DistributedQuotaTracker : IDistributedQuotaTracker
                 _configuration.Predictive.HealthyQuotaThreshold,
                 _configuration.Predictive.CriticalQuotaThreshold);
 
-            var quotaEvent = _signalREventFactory.CreateQuotaUpdate(storeId, new QuotaUpdateOptions
-            {
-                TotalQuota = quota.CurrentQuota,
-                RemainingTokens = quota.RemainingTokens,
-                UtilizationPercent = quota.GetQuotaUtilization(),
-                HealthStatus = healthStatus.ToString(),
-                SafeTokens = quota.CalculateSafeTokens(
-                    _configuration.Predictive.SafetyBufferPercentage,
-                    _configuration.Predictive.HealthyQuotaThreshold,
-                    _configuration.Predictive.CriticalQuotaThreshold),
-                QuotaResetTime = quota.QuotaResetTime,
-                LastUpdated = quota.LastUpdated
-            });
-
-            await _progressEventPublisher.PublishAsync(quotaEvent);
+            // Note: Quota update events removed in simplified SignalR approach
+            // These detailed system events are not essential for migration progress tracking
+            _logger.LogDebug("Quota update event skipped for store {StoreId}: {Remaining}/{Total} tokens ({Utilization:P1}), Health: {Health} - events simplified",
+                storeId, quota.RemainingTokens, quota.CurrentQuota, quota.GetQuotaUtilization(), healthStatus);
 
             _logger.LogDebug("Published quota update event for store {StoreId}: {Remaining}/{Total} tokens ({Utilization:P1}), Health: {Health}",
                 storeId, quota.RemainingTokens, quota.CurrentQuota, quota.GetQuotaUtilization(), healthStatus);

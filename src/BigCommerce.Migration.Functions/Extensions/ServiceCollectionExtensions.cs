@@ -546,6 +546,11 @@ public static class ServiceCollectionExtensions
         // Single source of truth for all SignalR event creation and messaging
         services.AddSingleton<ISignalREventFactory, SignalREventFactory>();
         services.AddSingleton<ISignalRMessageConverter, SignalRMessageConverter>();
+        
+        // 🎯 **CENTRALIZED PROGRESS BROADCASTING** (Phase 2 Implementation)
+        // Single point of truth for all real-time progress communication
+        // Rate-limited chunk-level progress updates only (~95% event reduction)
+        services.AddSingleton<ICentralizedProgressBroadcastService, CentralizedProgressBroadcastService>();
 
         // ✅ **ENTITY DEPENDENCY RESOLUTION SYSTEM** (Intelligent Phase Sequencing)
         // Automatically resolves entity dependencies and triggers phased processing
@@ -698,7 +703,7 @@ public class AzureStorageHealthCheck : IHealthCheck
                 Id = $"health-check-{DateTime.UtcNow:yyyy-MM-dd-HH-mm-ss}",
                 SourceStoreId = "health-check",
                 DestinationStoreId = "health-check",
-                Status = MigrationStatus.InProgress,
+                Status = MigrationStatus.Completed, // ✅ FIX: Use Completed so it won't appear in active migrations
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };

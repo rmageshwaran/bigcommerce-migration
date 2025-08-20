@@ -630,7 +630,7 @@ public class MonitoringFunctions
                 Id = $"health-check-{Guid.NewGuid()}",
                 SourceStoreId = "health-check",
                 DestinationStoreId = "health-check",
-                Status = BigCommerce.Migration.Core.Models.MigrationStatus.InProgress,
+                Status = BigCommerce.Migration.Core.Models.MigrationStatus.Completed, // ✅ FIX: Use Completed so it won't appear in active migrations
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };

@@ -53,12 +53,20 @@ const storeConfigurations = {
   staging: {
     storeId: "4diwbwzw1t", 
     accessToken: "4ym1thwfbm941mfj8jpvwzm5zlxecmk",
-    channelId: "1"
+    channelId: "1",
+    displayName: "Staging"
   },
   development: {
     storeId: "in2msaitrc",
     accessToken: "bntqbbjvnnap8agkdbo5bekqehb473z",
-    channelId: "1"
+    channelId: "1",
+    displayName: "Development"
+  },
+  production: {
+    storeId: "production-store-id", // Placeholder - replace with actual production store ID
+    accessToken: "production-access-token",
+    channelId: "1",
+    displayName: "Production"
   }
 };
 
@@ -320,94 +328,104 @@ export const MigrationStartForm: React.FC = () => {
       {/* Store Configuration */}
       <Card sx={{ mb: 4 }}>
         <CardContent sx={{ p: 3 }}>
-          <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 3, alignItems: { md: 'flex-end' } }}>
-            <Box sx={{ flex: '0 0 auto', minWidth: { md: '150px' } }}>
-              <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-                Source
-              </Typography>
-              <FormControl fullWidth size="small">
-                <Select
-                  value={formData.sourceStore}
-                  onChange={(e) => setFormData(prev => ({ ...prev, sourceStore: e.target.value }))}
-                  sx={{ 
-                    '& .MuiOutlinedInput-notchedOutline': {
-                      borderColor: 'divider',
-                    },
-                  }}
-                >
-                  <MenuItem value="production">Production</MenuItem>
-                  <MenuItem value="staging">Staging</MenuItem>
-                  <MenuItem value="development">Development</MenuItem>
-                </Select>
-              </FormControl>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            {/* Store Selection Row */}
+            <Box sx={{ display: 'flex', flexDirection: { xs: 'column', lg: 'row' }, gap: 3, alignItems: { lg: 'flex-end' } }}>
+              <Box sx={{ flex: '1 1 auto', minWidth: { lg: '180px' } }}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                  Source
+                </Typography>
+                <FormControl fullWidth size="small">
+                  <Select
+                    value={formData.sourceStore}
+                    onChange={(e) => setFormData(prev => ({ ...prev, sourceStore: e.target.value }))}
+                    sx={{ 
+                      '& .MuiOutlinedInput-notchedOutline': {
+                        borderColor: 'divider',
+                      },
+                      minWidth: '180px',
+                    }}
+                  >
+                    {Object.entries(storeConfigurations).map(([key, config]) => (
+                      <MenuItem key={key} value={key}>
+                        {config.storeId} ({config.displayName})
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Box>
+
+              <Box sx={{ flex: '1 1 auto', minWidth: { lg: '200px' } }}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                  Source Storefront
+                </Typography>
+                <FormControl fullWidth size="small">
+                  <Select
+                    value={formData.sourceStorefront}
+                    onChange={(e) => setFormData(prev => ({ ...prev, sourceStorefront: e.target.value }))}
+                    sx={{ 
+                      '& .MuiOutlinedInput-notchedOutline': {
+                        borderColor: 'divider',
+                      },
+                    }}
+                  >
+                    <MenuItem value="Main Storefront">Main Storefront</MenuItem>
+                    <MenuItem value="Secondary Storefront">Secondary Storefront</MenuItem>
+                  </Select>
+                </FormControl>
+              </Box>
+
+              <Box sx={{ flex: '0 0 auto', textAlign: 'center', display: { xs: 'none', lg: 'flex' }, alignItems: 'center', justifyContent: 'center', minHeight: '40px' }}>
+                <ArrowForwardIcon sx={{ color: 'text.secondary', fontSize: '2rem' }} />
+              </Box>
+
+              <Box sx={{ flex: '1 1 auto', minWidth: { lg: '180px' } }}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                  Destination
+                </Typography>
+                <FormControl fullWidth size="small">
+                  <Select
+                    value={formData.destinationStore}
+                    onChange={(e) => setFormData(prev => ({ ...prev, destinationStore: e.target.value }))}
+                    sx={{ 
+                      '& .MuiOutlinedInput-notchedOutline': {
+                        borderColor: 'divider',
+                      },
+                      minWidth: '180px',
+                    }}
+                  >
+                    {Object.entries(storeConfigurations).map(([key, config]) => (
+                      <MenuItem key={key} value={key}>
+                        {config.storeId} ({config.displayName})
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Box>
+
+              <Box sx={{ flex: '1 1 auto', minWidth: { lg: '200px' } }}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                  Destination Storefront
+                </Typography>
+                <FormControl fullWidth size="small">
+                  <Select
+                    value={formData.destinationStorefront}
+                    onChange={(e) => setFormData(prev => ({ ...prev, destinationStorefront: e.target.value }))}
+                    sx={{ 
+                      '& .MuiOutlinedInput-notchedOutline': {
+                        borderColor: 'divider',
+                      },
+                    }}
+                  >
+                    <MenuItem value="Main Storefront">Main Storefront</MenuItem>
+                    <MenuItem value="Secondary Storefront">Secondary Storefront</MenuItem>
+                  </Select>
+                </FormControl>
+              </Box>
             </Box>
 
-            <Box sx={{ flex: '1 1 auto', minWidth: { md: '200px' } }}>
-              <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-                Source Storefront
-              </Typography>
-              <FormControl fullWidth size="small">
-                <Select
-                  value={formData.sourceStorefront}
-                  onChange={(e) => setFormData(prev => ({ ...prev, sourceStorefront: e.target.value }))}
-                  sx={{ 
-                    '& .MuiOutlinedInput-notchedOutline': {
-                      borderColor: 'divider',
-                    },
-                  }}
-                >
-                  <MenuItem value="Main Storefront">Main Storefront</MenuItem>
-                  <MenuItem value="Secondary Storefront">Secondary Storefront</MenuItem>
-                </Select>
-              </FormControl>
-            </Box>
-
-            <Box sx={{ flex: '0 0 auto', textAlign: 'center', display: { xs: 'none', md: 'block' } }}>
-              <ArrowForwardIcon sx={{ color: 'text.secondary', fontSize: '2rem' }} />
-            </Box>
-
-            <Box sx={{ flex: '0 0 auto', minWidth: { md: '150px' } }}>
-              <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-                Destination
-              </Typography>
-              <FormControl fullWidth size="small">
-                <Select
-                  value={formData.destinationStore}
-                  onChange={(e) => setFormData(prev => ({ ...prev, destinationStore: e.target.value }))}
-                  sx={{ 
-                    '& .MuiOutlinedInput-notchedOutline': {
-                      borderColor: 'divider',
-                    },
-                  }}
-                >
-                  <MenuItem value="production">Production</MenuItem>
-                  <MenuItem value="staging">Staging</MenuItem>
-                  <MenuItem value="development">Development</MenuItem>
-                </Select>
-              </FormControl>
-            </Box>
-
-            <Box sx={{ flex: '1 1 auto', minWidth: { md: '200px' } }}>
-              <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-                Destination Storefront
-              </Typography>
-              <FormControl fullWidth size="small">
-                <Select
-                  value={formData.destinationStorefront}
-                  onChange={(e) => setFormData(prev => ({ ...prev, destinationStorefront: e.target.value }))}
-                  sx={{ 
-                    '& .MuiOutlinedInput-notchedOutline': {
-                      borderColor: 'divider',
-                    },
-                  }}
-                >
-                  <MenuItem value="Main Storefront">Main Storefront</MenuItem>
-                  <MenuItem value="Secondary Storefront">Secondary Storefront</MenuItem>
-                </Select>
-              </FormControl>
-            </Box>
-
-            <Box sx={{ flex: '0 0 auto', textAlign: { xs: 'center', md: 'right' }, display: 'flex', alignItems: 'flex-end' }}>
+            {/* Start Migration Button Row */}
+            <Box sx={{ display: 'flex', justifyContent: { xs: 'center', lg: 'flex-end' }, pt: 2 }}>
               <Button
                 variant="contained"
                 startIcon={<ArrowForwardIcon />}
@@ -416,12 +434,13 @@ export const MigrationStartForm: React.FC = () => {
                 sx={{
                   textTransform: 'none',
                   fontWeight: 600,
-                  px: 3,
+                  px: 4,
                   py: 1.5,
                   borderRadius: '6px',
-                  height: 40, // Match the height of small input fields
+                  height: 48,
                   whiteSpace: 'nowrap',
                   fontSize: '0.875rem',
+                  minWidth: '180px',
                 }}
               >
                 {loading ? 'Starting...' : 'Start the Migration'}

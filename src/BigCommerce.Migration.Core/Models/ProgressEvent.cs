@@ -1,26 +1,24 @@
 using System;
+using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
 namespace BigCommerce.Migration.Core.Models
 {
     /// <summary>
-    /// Base class for all SignalR progress events sent through Azure Storage Queues
-    /// SOLID: Single Responsibility - represents a progress event for SignalR broadcasting
-    /// Queue-based approach: Decouples SignalR broadcasting from orchestrators
-    /// Phase 4.2: Enhanced with soft cancellation token support for efficient cancellation filtering
+    /// Simplified base class for all SignalR progress events
+    /// Following the clean architecture approach with only essential events
+    /// 
+    /// ✅ SIMPLIFIED APPROACH:
+    /// - Only 4 event types (vs 11 previously)
+    /// - Chunk-level progress only (no sub-batches)
+    /// - Clean lifecycle: Start → ChunkProgress → Complete/Error
     /// </summary>
     [JsonPolymorphic(TypeDiscriminatorPropertyName = "eventType")]
-    [JsonDerivedType(typeof(MigrationProgressEvent), "progress")]
-    [JsonDerivedType(typeof(BatchProgressEvent), "batch")]
-    [JsonDerivedType(typeof(EntityProgressEvent), "entity")]
+    [JsonDerivedType(typeof(MigrationStartedEvent), "migration-started")]
+    [JsonDerivedType(typeof(EntityStartedEvent), "entity-started")]
+    [JsonDerivedType(typeof(EntityChunkProgressEvent), "chunk-progress")]
+    [JsonDerivedType(typeof(MigrationCompletedEvent), "migration-completed")]
     [JsonDerivedType(typeof(ErrorProgressEvent), "error")]
-    [JsonDerivedType(typeof(StatusProgressEvent), "status")]
-    [JsonDerivedType(typeof(SubBatchStartedEvent), "subbatch-started")]
-    [JsonDerivedType(typeof(SubBatchCompletedEvent), "subbatch-completed")]
-    [JsonDerivedType(typeof(SubBatchMigrationProgressEvent), "subbatch-progress")]
-    [JsonDerivedType(typeof(QuotaUpdateEvent), "quota-update")]
-    [JsonDerivedType(typeof(PredictiveRateLimitEvent), "predictive-rate-limit")]
-    [JsonDerivedType(typeof(SystemHealthEvent), "system-health")]
     public abstract class ProgressEvent
     {
         /// <summary>
@@ -29,7 +27,7 @@ namespace BigCommerce.Migration.Core.Models
         public string MigrationId { get; set; } = string.Empty;
 
         /// <summary>
-        /// Type of progress event (progress, batch, entity, error, status)
+        /// Type of progress event
         /// </summary>
         public string EventType { get; set; } = string.Empty;
 
@@ -54,253 +52,240 @@ namespace BigCommerce.Migration.Core.Models
         public string? GroupName { get; set; }
 
         /// <summary>
-        /// Phase 4.2: Soft cancellation token - indicates if the migration is cancelled
-        /// This is passed from orchestrator to avoid storage calls in SignalR functions
+        /// Indicates if the migration is cancelled
         /// </summary>
         public bool IsCancelled { get; set; }
 
         /// <summary>
-        /// Phase 4.2: Cancellation reason (if cancelled)
+        /// Cancellation reason (if cancelled)
         /// </summary>
         public string? CancellationReason { get; set; }
 
         /// <summary>
-        /// Phase 4.2: When the cancellation was detected (if cancelled)
+        /// When the cancellation was detected (if cancelled)
         /// </summary>
         public DateTime? CancelledAt { get; set; }
     }
 
     /// <summary>
-    /// Progress event for overall migration progress updates
-    /// SOLID: Single Responsibility - handles migration-level progress
+    /// Event fired when a migration starts
+    /// Provides initial migration context and entities to be processed
     /// </summary>
-    public class MigrationProgressEvent : ProgressEvent
+    public class MigrationStartedEvent : ProgressEvent
     {
         /// <summary>
-        /// Initializes a new instance of MigrationProgressEvent
+        /// Initializes a new instance of MigrationStartedEvent
         /// </summary>
         [JsonConstructor]
-        public MigrationProgressEvent()
+        public MigrationStartedEvent()
         {
-            EventType = "progress";
-            HubMethod = "MigrationProgressUpdated";
+            EventType = "migration-started";
+            HubMethod = "MigrationStarted";
         }
 
         /// <summary>
-        /// Overall migration progress percentage (0-100)
+        /// Source store identifier
         /// </summary>
-        public double OverallProgress { get; set; }
+        public string SourceStore { get; set; } = string.Empty;
 
         /// <summary>
-        /// Current migration status (running, completed, failed, cancelled)
+        /// Destination store identifier
         /// </summary>
-        public string Status { get; set; } = string.Empty;
-
-        /// <summary>
-        /// Total number of entities to process
-        /// </summary>
-        public int TotalEntities { get; set; }
-
-        /// <summary>
-        /// Number of entities successfully processed
-        /// </summary>
-        public int ProcessedEntities { get; set; }
-
-        /// <summary>
-        /// Number of entities that failed to process
-        /// </summary>
-        public int FailedEntities { get; set; }
-
-        /// <summary>
-        /// Number of entities successfully processed (ProcessedEntities - FailedEntities)
-        /// Calculated by backend to avoid frontend computation
-        /// </summary>
-        public int SuccessfulEntities { get; set; }
-
-        /// <summary>
-        /// Current entity type being processed
-        /// </summary>
-        public string? CurrentEntityType { get; set; }
+        public string DestinationStore { get; set; } = string.Empty;
 
         /// <summary>
         /// When the migration started
-        /// Used to calculate elapsed time and processing speed
         /// </summary>
-        public DateTime? StartTime { get; set; }
+        public DateTime StartDateTime { get; set; } = DateTime.UtcNow;
 
         /// <summary>
-        /// How long the migration has been running
-        /// Calculated from StartTime to current time
+        /// Estimated completion time (if available)
         /// </summary>
-        public TimeSpan? ElapsedTime { get; set; }
+        public DateTime? EstimatedEndTime { get; set; }
 
         /// <summary>
-        /// Current processing speed in entities per second
-        /// Calculated as ProcessedEntities / ElapsedTime.TotalSeconds
+        /// List of entities that will be migrated
         /// </summary>
-        public double? EntitiesPerSecond { get; set; }
-
-        /// <summary>
-        /// Estimated time remaining (optional)
-        /// </summary>
-        public TimeSpan? EstimatedTimeRemaining { get; set; }
-
-        /// <summary>
-        /// Current batch number being processed
-        /// Used for "Current Processing Status" section
-        /// </summary>
-        public int? CurrentBatchNumber { get; set; }
-
-        /// <summary>
-        /// Current processing activity (e.g., "Fetching", "Processing", "Transforming")
-        /// Used for "Current Processing Status" section
-        /// </summary>
-        public string? CurrentActivity { get; set; }
-
-        /// <summary>
-        /// Detailed information about the current batch being processed
-        /// Used for "Current Processing Status" section batch progress display
-        /// </summary>
-        public CurrentBatchDetails? CurrentBatch { get; set; }
+        public List<EntityInfo> Entities { get; set; } = new();
     }
 
     /// <summary>
-    /// Progress event for batch processing updates
-    /// SOLID: Single Responsibility - handles batch-level progress
+    /// Event triggered when an individual entity type starts processing (after discovery)
     /// </summary>
-    public class BatchProgressEvent : ProgressEvent
+    public class EntityStartedEvent : ProgressEvent
     {
         /// <summary>
-        /// Initializes a new instance of BatchProgressEvent
+        /// Initializes a new instance of EntityStartedEvent
         /// </summary>
-        [JsonConstructor]
-        public BatchProgressEvent()
+        public EntityStartedEvent()
         {
-            EventType = "batch";
-            HubMethod = "BatchProgressUpdated";
+            EventType = "entity-started";
+            HubMethod = "EntityStarted";
         }
 
         /// <summary>
-        /// Type of entity being processed in this batch
+        /// Type of entity that is starting (e.g., products, options, modifiers)
         /// </summary>
         public string EntityType { get; set; } = string.Empty;
 
         /// <summary>
-        /// Batch number within the entity type
-        /// </summary>
-        public int BatchNumber { get; set; }
-
-        /// <summary>
-        /// Total number of batches for this entity type
-        /// </summary>
-        public int TotalBatches { get; set; }
-
-        /// <summary>
-        /// Number of entities in this batch
-        /// </summary>
-        public int BatchSize { get; set; }
-
-        /// <summary>
-        /// Number of entities successfully processed in this batch
-        /// </summary>
-        public int ProcessedCount { get; set; }
-
-        /// <summary>
-        /// Number of entities that failed in this batch
-        /// </summary>
-        public int FailedCount { get; set; }
-
-        /// <summary>
-        /// Number of entities that were skipped in this batch
-        /// </summary>
-        public int SkippedCount { get; set; }
-
-        /// <summary>
-        /// Number of entities that were cancelled in this batch
-        /// </summary>
-        public int CancelledCount { get; set; }
-
-        /// <summary>
-        /// Batch processing status (starting, processing, completed, failed)
-        /// </summary>
-        public string Status { get; set; } = string.Empty;
-
-        /// <summary>
-        /// Time taken to process this batch
-        /// </summary>
-        public TimeSpan? ProcessingTime { get; set; }
-    }
-
-    /// <summary>
-    /// Progress event for individual entity processing updates
-    /// SOLID: Single Responsibility - handles entity-level progress
-    /// </summary>
-    public class EntityProgressEvent : ProgressEvent
-    {
-        /// <summary>
-        /// Initializes a new instance of EntityProgressEvent
-        /// </summary>
-        [JsonConstructor]
-        public EntityProgressEvent()
-        {
-            EventType = "entity";
-            HubMethod = "EntityProgressUpdated";
-        }
-
-        /// <summary>
-        /// Type of entity (products, categories, brands, etc.)
-        /// </summary>
-        public string EntityType { get; set; } = string.Empty;
-
-        /// <summary>
-        /// Total number of entities of this type
+        /// Total count of entities discovered for this type
         /// </summary>
         public int TotalCount { get; set; }
 
         /// <summary>
-        /// Number of entities processed so far
+        /// Estimated duration for processing this entity type (optional)
         /// </summary>
-        public int ProcessedCount { get; set; }
+        public int? EstimatedDurationMs { get; set; }
 
         /// <summary>
-        /// Number of entities successfully created
+        /// Status message for this entity start
         /// </summary>
-        public int SuccessCount { get; set; }
+        public string Message { get; set; } = string.Empty;
 
         /// <summary>
-        /// Number of entities that failed to process
+        /// Date and time when this entity started processing
         /// </summary>
-        public int FailureCount { get; set; }
+        public string StartDateTime { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// Event fired when an entity chunk completes processing
+    /// This is the main progress event - fired after each chunk is processed
+    /// </summary>
+    public class EntityChunkProgressEvent : ProgressEvent
+    {
+        /// <summary>
+        /// Initializes a new instance of EntityChunkProgressEvent
+        /// </summary>
+        [JsonConstructor]
+        public EntityChunkProgressEvent()
+        {
+            EventType = "chunk-progress";
+            HubMethod = "EntityChunkProgress";
+        }
 
         /// <summary>
-        /// Number of entities that were skipped during processing
+        /// Type of entity being processed (e.g., "products", "categories", "brands")
         /// </summary>
-        public int SkippedCount { get; set; }
+        public string EntityType { get; set; } = string.Empty;
 
         /// <summary>
-        /// Number of entities that were cancelled during processing
+        /// Chunk number that was just processed
         /// </summary>
-        public int CancelledCount { get; set; }
+        public int ChunkNumber { get; set; }
 
         /// <summary>
-        /// Entity processing status (starting, processing, completed)
+        /// Total number of chunks for this entity type
         /// </summary>
-        public string Status { get; set; } = string.Empty;
+        public int TotalChunks { get; set; }
+
+        /// <summary>
+        /// Total entities processed cumulatively across all chunks for this entity type
+        /// </summary>
+        public int TotalProcessed { get; set; }
+
+        /// <summary>
+        /// Total entities successfully processed cumulatively across all chunks for this entity type
+        /// </summary>
+        public int TotalSuccess { get; set; }
+
+        /// <summary>
+        /// Total entities that failed processing cumulatively across all chunks for this entity type
+        /// </summary>
+        public int TotalFailed { get; set; }
+
+        /// <summary>
+        /// Total entities that were skipped in this chunk
+        /// </summary>
+        public int TotalSkipped { get; set; }
+
+        /// <summary>
+        /// Total entities that were cancelled in this chunk
+        /// </summary>
+        public int TotalCancelled { get; set; }
+
+        /// <summary>
+        /// Total entities expected for this entity type (from discovery phase)
+        /// </summary>
+        public int TotalEntitiesForType { get; set; }
 
         /// <summary>
         /// Progress percentage for this entity type (0-100)
         /// </summary>
-        public double Progress => TotalCount > 0 ? (double)ProcessedCount / TotalCount * 100 : 0;
+        public double ProgressPercentage { get; set; }
 
         /// <summary>
-        /// Time taken to process entities of this type so far
+        /// Status of the chunk processing
         /// </summary>
-        public TimeSpan? ProcessingTime { get; set; }
+        public string Status { get; set; } = "completed";
+
+        /// <summary>
+        /// Time taken to process this chunk
+        /// </summary>
+        public TimeSpan ProcessingTime { get; set; }
+
+        /// <summary>
+        /// Current processing rate (entities per second)
+        /// </summary>
+        public double? EntitiesPerSecond { get; set; }
+
+        /// <summary>
+        /// Estimated time remaining for this entity type
+        /// </summary>
+        public TimeSpan? EstimatedTimeRemaining { get; set; }
     }
 
     /// <summary>
-    /// Progress event for error notifications
-    /// SOLID: Single Responsibility - handles error broadcasting
+    /// Event fired when a migration completes (successfully, with errors, or cancelled)
+    /// Provides final summary of the entire migration
+    /// </summary>
+    public class MigrationCompletedEvent : ProgressEvent
+    {
+        /// <summary>
+        /// Initializes a new instance of MigrationCompletedEvent
+        /// </summary>
+        [JsonConstructor]
+        public MigrationCompletedEvent()
+        {
+            EventType = "migration-completed";
+            HubMethod = "MigrationCompleted";
+        }
+
+        /// <summary>
+        /// Final migration status
+        /// </summary>
+        public string Status { get; set; } = string.Empty;
+
+        /// <summary>
+        /// When the migration ended
+        /// </summary>
+        public DateTime EndDateTime { get; set; } = DateTime.UtcNow;
+
+        /// <summary>
+        /// Total duration of the migration
+        /// </summary>
+        public TimeSpan TotalDuration { get; set; }
+
+        /// <summary>
+        /// Final counts across all entities
+        /// </summary>
+        public MigrationFinalCounts FinalCounts { get; set; } = new();
+
+        /// <summary>
+        /// Summary information for each entity type processed
+        /// </summary>
+        public List<EntitySummary> Entities { get; set; } = new();
+
+        /// <summary>
+        /// Optional completion message
+        /// </summary>
+        public string? Message { get; set; }
+    }
+
+    /// <summary>
+    /// Event fired when an error occurs during migration
+    /// Used for error notifications and logging
     /// </summary>
     public class ErrorProgressEvent : ProgressEvent
     {
@@ -315,7 +300,7 @@ namespace BigCommerce.Migration.Core.Models
         }
 
         /// <summary>
-        /// Error severity level (warning, error, critical)
+        /// Error severity level
         /// </summary>
         public string Severity { get; set; } = "error";
 
@@ -323,15 +308,6 @@ namespace BigCommerce.Migration.Core.Models
         /// Error message to display
         /// </summary>
         public string Message { get; set; } = string.Empty;
-
-        /// <summary>
-        /// Error property for backward compatibility (aliases Message)
-        /// </summary>
-        public string Error 
-        { 
-            get => Message; 
-            set => Message = value; 
-        }
 
         /// <summary>
         /// Entity type where error occurred (optional)
@@ -344,9 +320,9 @@ namespace BigCommerce.Migration.Core.Models
         public string? EntityId { get; set; }
 
         /// <summary>
-        /// Batch number where error occurred (optional)
+        /// Chunk number where error occurred (optional)
         /// </summary>
-        public int? BatchNumber { get; set; }
+        public int? ChunkNumber { get; set; }
 
         /// <summary>
         /// Detailed error information for debugging
@@ -360,266 +336,348 @@ namespace BigCommerce.Migration.Core.Models
     }
 
     /// <summary>
-    /// Progress event for migration status changes
-    /// SOLID: Single Responsibility - handles status broadcasting
+    /// Information about an entity type in the migration
     /// </summary>
-    public class StatusProgressEvent : ProgressEvent
+    public class EntityInfo
     {
         /// <summary>
-        /// Initializes a new instance of StatusProgressEvent
+        /// Type of entity (e.g., "products", "categories", "brands")
         /// </summary>
-        [JsonConstructor]
-        public StatusProgressEvent()
-        {
-            EventType = "status";
-            HubMethod = "MigrationStatusChanged";
-        }
+        public string EntityType { get; set; } = string.Empty;
 
         /// <summary>
-        /// New migration status (started, running, completed, failed, cancelled)
+        /// Total number of entities to be processed
+        /// </summary>
+        public int TotalCount { get; set; }
+
+        /// <summary>
+        /// Estimated processing time for this entity type
+        /// </summary>
+        public TimeSpan? EstimatedDuration { get; set; }
+    }
+
+    /// <summary>
+    /// Final counts for the entire migration
+    /// </summary>
+    public class MigrationFinalCounts
+    {
+        /// <summary>
+        /// Total entities processed across all types
+        /// </summary>
+        public int TotalProcessed { get; set; }
+
+        /// <summary>
+        /// Total entities successfully processed
+        /// </summary>
+        public int TotalSuccess { get; set; }
+
+        /// <summary>
+        /// Total entities that failed processing
+        /// </summary>
+        public int TotalFailed { get; set; }
+
+        /// <summary>
+        /// Total entities that were skipped
+        /// </summary>
+        public int TotalSkipped { get; set; }
+
+        /// <summary>
+        /// Total entities that were cancelled
+        /// </summary>
+        public int TotalCancelled { get; set; }
+    }
+
+    /// <summary>
+    /// Summary information for a specific entity type
+    /// </summary>
+    public class EntitySummary
+    {
+        /// <summary>
+        /// Type of entity
+        /// </summary>
+        public string EntityType { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Total entities processed for this type
+        /// </summary>
+        public int TotalProcessed { get; set; }
+
+        /// <summary>
+        /// Successful entities for this type
+        /// </summary>
+        public int SuccessCount { get; set; }
+
+        /// <summary>
+        /// Failed entities for this type
+        /// </summary>
+        public int FailedCount { get; set; }
+
+        /// <summary>
+        /// Skipped entities for this type
+        /// </summary>
+        public int SkippedCount { get; set; }
+
+        /// <summary>
+        /// Cancelled entities for this type
+        /// </summary>
+        public int CancelledCount { get; set; }
+
+        /// <summary>
+        /// Time taken to process this entity type
+        /// </summary>
+        public TimeSpan ProcessingTime { get; set; }
+
+        /// <summary>
+        /// Final status for this entity type
         /// </summary>
         public string Status { get; set; } = string.Empty;
+    }
+
+    // === OPTIONS CLASSES ===
+
+    /// <summary>
+    /// Base options class for all progress events
+    /// </summary>
+    public abstract class ProgressOptionsBase
+    {
+        /// <summary>
+        /// Optional connection ID to send to specific client
+        /// </summary>
+        public string? ConnectionId { get; set; }
 
         /// <summary>
-        /// Status message to display
+        /// Optional group name to broadcast to specific group
+        /// </summary>
+        public string? GroupName { get; set; }
+
+        /// <summary>
+        /// Indicates if the migration is cancelled
+        /// </summary>
+        public bool? IsCancelled { get; set; }
+
+        /// <summary>
+        /// Cancellation reason (if cancelled)
+        /// </summary>
+        public string? CancellationReason { get; set; }
+
+        /// <summary>
+        /// When the cancellation was detected (if cancelled)
+        /// </summary>
+        public DateTime? CancelledAt { get; set; }
+    }
+
+    /// <summary>
+    /// Options for creating a MigrationStartedEvent
+    /// </summary>
+    public class MigrationStartedOptions : ProgressOptionsBase
+    {
+        /// <summary>
+        /// Source store identifier
+        /// </summary>
+        public string SourceStore { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Destination store identifier
+        /// </summary>
+        public string DestinationStore { get; set; } = string.Empty;
+
+        /// <summary>
+        /// When the migration started
+        /// </summary>
+        public DateTime? StartDateTime { get; set; }
+
+        /// <summary>
+        /// Estimated completion time (if available)
+        /// </summary>
+        public DateTime? EstimatedEndTime { get; set; }
+
+        /// <summary>
+        /// List of entities that will be migrated
+        /// </summary>
+        public List<EntityInfo>? Entities { get; set; }
+    }
+
+    /// <summary>
+    /// Options for creating an EntityStartedEvent
+    /// </summary>
+    public class EntityStartedOptions : ProgressOptionsBase
+    {
+        /// <summary>
+        /// Type of entity that is starting (e.g., products, options, modifiers)
+        /// </summary>
+        public string EntityType { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Total count of entities discovered for this type
+        /// </summary>
+        public int TotalCount { get; set; }
+
+        /// <summary>
+        /// Estimated duration for processing this entity type (optional)
+        /// </summary>
+        public int? EstimatedDurationMs { get; set; }
+
+        /// <summary>
+        /// Status message for this entity start
         /// </summary>
         public string Message { get; set; } = string.Empty;
 
         /// <summary>
-        /// Additional metadata about the status change
+        /// Date and time when this entity started processing
         /// </summary>
-        public object? Metadata { get; set; }
+        public DateTime? StartDateTime { get; set; }
     }
 
     /// <summary>
-    /// 🎯 SUB-BATCH PROGRESS: Event fired when a sub-batch starts processing
-    /// Provides granular progress tracking within pages for real-time dashboard updates
+    /// Options for creating an EntityChunkProgressEvent
     /// </summary>
-    public class SubBatchStartedEvent : ProgressEvent
+    public class EntityChunkProgressOptions : ProgressOptionsBase
     {
         /// <summary>
-        /// Initializes a new instance of SubBatchStartedEvent
-        /// </summary>
-        [JsonConstructor]
-        public SubBatchStartedEvent()
-        {
-            EventType = "subbatch-started";
-            HubMethod = "SubBatchStarted";
-        }
-
-        /// <summary>
-        /// Original page/batch number (1-4 for 192 brands)
-        /// </summary>
-        public int ParentBatchNumber { get; set; }
-        
-        /// <summary>
-        /// Sub-batch number within the parent batch (1-10 for each page)
-        /// </summary>
-        public int SubBatchNumber { get; set; }
-        
-        /// <summary>
-        /// Total number of sub-batches in this page
-        /// </summary>
-        public int TotalSubBatches { get; set; }
-        
-        /// <summary>
-        /// Number of entities in this sub-batch (typically 5)
-        /// </summary>
-        public int EntitiesInSubBatch { get; set; }
-        
-        /// <summary>
-        /// Maximum concurrency for this sub-batch
-        /// </summary>
-        public int MaxConcurrency { get; set; }
-        
-        /// <summary>
-        /// Entity type being processed
+        /// Type of entity being processed (required)
         /// </summary>
         public string EntityType { get; set; } = string.Empty;
-        
-        /// <summary>
-        /// When this sub-batch started processing
-        /// </summary>
-        public DateTime StartedAt { get; set; } = DateTime.UtcNow;
-    }
-
-    /// <summary>
-    /// 🎯 SUB-BATCH PROGRESS: Event fired when a sub-batch completes processing
-    /// Enables 10x more granular progress updates (40 total vs 4 page-level updates)
-    /// </summary>
-    public class SubBatchCompletedEvent : ProgressEvent
-    {
-        /// <summary>
-        /// Initializes a new instance of SubBatchCompletedEvent
-        /// </summary>
-        [JsonConstructor]
-        public SubBatchCompletedEvent()
-        {
-            EventType = "subbatch-completed";
-            HubMethod = "SubBatchCompleted";
-        }
 
         /// <summary>
-        /// Original page/batch number (1-4 for 192 brands)
+        /// Chunk number that was just processed
         /// </summary>
-        public int ParentBatchNumber { get; set; }
-        
-        /// <summary>
-        /// Sub-batch number within the parent batch (1-10 for each page)
-        /// </summary>
-        public int SubBatchNumber { get; set; }
-        
-        /// <summary>
-        /// Total number of sub-batches in this page
-        /// </summary>
-        public int TotalSubBatches { get; set; }
-        
-        /// <summary>
-        /// Number of entities successfully processed in this sub-batch
-        /// </summary>
-        public int SuccessfulEntities { get; set; }
-        
-        /// <summary>
-        /// Number of entities that failed in this sub-batch
-        /// </summary>
-        public int FailedEntities { get; set; }
-        
-        /// <summary>
-        /// Total entities processed in this sub-batch
-        /// </summary>
-        public int TotalEntities { get; set; }
-        
-        /// <summary>
-        /// Entity type being processed
-        /// </summary>
-        public string EntityType { get; set; } = string.Empty;
-        
-        /// <summary>
-        /// Time taken to process this sub-batch
-        /// </summary>
-        public TimeSpan ProcessingTime { get; set; }
-        
-        /// <summary>
-        /// When this sub-batch completed
-        /// </summary>
-        public DateTime CompletedAt { get; set; } = DateTime.UtcNow;
-        
-        /// <summary>
-        /// List of errors that occurred in this sub-batch
-        /// </summary>
-        public List<string> Errors { get; set; } = new();
-        
-        /// <summary>
-        /// Cumulative successful entities across all completed sub-batches in this migration
-        /// </summary>
-        public int CumulativeSuccessfulEntities { get; set; }
-        
-        /// <summary>
-        /// Cumulative failed entities across all completed sub-batches in this migration
-        /// </summary>
-        public int CumulativeFailedEntities { get; set; }
-        
-        /// <summary>
-        /// Total entities expected to be processed in the entire migration
-        /// </summary>
-        public int TotalMigrationEntities { get; set; }
-        
-        /// <summary>
-        /// Progress percentage based on completed sub-batches (0-100)
-        /// Calculated as: (completed sub-batches / total sub-batches) * 100
-        /// </summary>
-        public double ProgressPercentage { get; set; }
-        
-        /// <summary>
-        /// Estimated time remaining based on current processing speed
-        /// </summary>
-        public TimeSpan? EstimatedTimeRemaining { get; set; }
-    }
-
-    /// <summary>
-    /// 🎯 SUB-BATCH PROGRESS: Aggregate progress event for the entire migration
-    /// Combines progress from all pages and sub-batches for dashboard display
-    /// </summary>
-    public class SubBatchMigrationProgressEvent : ProgressEvent
-    {
-        /// <summary>
-        /// Initializes a new instance of SubBatchMigrationProgressEvent
-        /// </summary>
-        [JsonConstructor]
-        public SubBatchMigrationProgressEvent()
-        {
-            EventType = "subbatch-progress";
-            HubMethod = "SubBatchMigrationProgress";
-        }
+        public int ChunkNumber { get; set; }
 
         /// <summary>
-        /// Total number of pages in this migration
+        /// Total number of chunks for this entity type
         /// </summary>
-        public int TotalPages { get; set; }
-        
+        public int TotalChunks { get; set; }
+
         /// <summary>
-        /// Number of pages that have completed processing
+        /// Total entities processed in this chunk
         /// </summary>
-        public int CompletedPages { get; set; }
-        
+        public int TotalProcessed { get; set; }
+
         /// <summary>
-        /// Total number of sub-batches across all pages
+        /// Total entities successfully processed in this chunk
         /// </summary>
-        public int TotalSubBatches { get; set; }
-        
+        public int TotalSuccess { get; set; }
+
         /// <summary>
-        /// Number of sub-batches that have completed processing
+        /// Total entities that failed processing in this chunk
         /// </summary>
-        public int CompletedSubBatches { get; set; }
-        
+        public int TotalFailed { get; set; }
+
         /// <summary>
-        /// Total entities successfully processed across all sub-batches
+        /// Total entities that were skipped in this chunk
         /// </summary>
-        public int TotalSuccessfulEntities { get; set; }
-        
+        public int TotalSkipped { get; set; }
+
         /// <summary>
-        /// Total entities that failed across all sub-batches
+        /// Total entities that were cancelled in this chunk
         /// </summary>
-        public int TotalFailedEntities { get; set; }
-        
+        public int TotalCancelled { get; set; }
+
         /// <summary>
-        /// Total entities expected to be processed
+        /// Total entities expected for this entity type (from discovery phase)
         /// </summary>
-        public int TotalExpectedEntities { get; set; }
-        
+        public int? TotalEntitiesForType { get; set; }
+
+        /// <summary>
+        /// Progress percentage for this entity type (0-100)
+        /// </summary>
+        public double? ProgressPercentage { get; set; }
+
+        /// <summary>
+        /// Status of the chunk processing
+        /// </summary>
+        public string? Status { get; set; }
+
+        /// <summary>
+        /// Time taken to process this chunk
+        /// </summary>
+        public TimeSpan? ProcessingTime { get; set; }
+
         /// <summary>
         /// Current processing rate (entities per second)
         /// </summary>
-        public double ProcessingRate { get; set; }
-        
+        public double? EntitiesPerSecond { get; set; }
+
         /// <summary>
-        /// Overall progress percentage (0-100)
-        /// </summary>
-        public double OverallProgressPercentage { get; set; }
-        
-        /// <summary>
-        /// Estimated time remaining for the entire migration
+        /// Estimated time remaining for this entity type
         /// </summary>
         public TimeSpan? EstimatedTimeRemaining { get; set; }
-        
-        /// <summary>
-        /// When this progress update was generated
-        /// </summary>
-        public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
-        
-        /// <summary>
-        /// Time elapsed since migration started
-        /// </summary>
-        public TimeSpan ElapsedTime { get; set; }
-        
-        /// <summary>
-        /// List of recent errors across all sub-batches
-        /// </summary>
-        public List<string> RecentErrors { get; set; } = new();
-        
-        /// <summary>
-        /// Performance metrics for monitoring
-        /// </summary>
-        public Dictionary<string, object> PerformanceMetrics { get; set; } = new();
     }
-} 
+
+    /// <summary>
+    /// Options for creating a MigrationCompletedEvent
+    /// </summary>
+    public class MigrationCompletedOptions : ProgressOptionsBase
+    {
+        /// <summary>
+        /// Final migration status (required)
+        /// </summary>
+        public string Status { get; set; } = string.Empty;
+
+        /// <summary>
+        /// When the migration ended
+        /// </summary>
+        public DateTime? EndDateTime { get; set; }
+
+        /// <summary>
+        /// Total duration of the migration
+        /// </summary>
+        public TimeSpan? TotalDuration { get; set; }
+
+        /// <summary>
+        /// Final counts across all entities
+        /// </summary>
+        public MigrationFinalCounts? FinalCounts { get; set; }
+
+        /// <summary>
+        /// Summary information for each entity type processed
+        /// </summary>
+        public List<EntitySummary>? Entities { get; set; }
+
+        /// <summary>
+        /// Optional completion message
+        /// </summary>
+        public string? Message { get; set; }
+    }
+
+    /// <summary>
+    /// Options for creating an ErrorProgressEvent
+    /// </summary>
+    public class ErrorProgressOptions : ProgressOptionsBase
+    {
+        /// <summary>
+        /// Error message to display (required)
+        /// </summary>
+        public string ErrorMessage { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Error severity level
+        /// </summary>
+        public string? Severity { get; set; }
+
+        /// <summary>
+        /// Entity type where error occurred (optional)
+        /// </summary>
+        public string? EntityType { get; set; }
+
+        /// <summary>
+        /// Entity ID where error occurred (optional)
+        /// </summary>
+        public string? EntityId { get; set; }
+
+        /// <summary>
+        /// Chunk number where error occurred (optional)
+        /// </summary>
+        public int? ChunkNumber { get; set; }
+
+        /// <summary>
+        /// Exception that caused the error (for detailed information)
+        /// </summary>
+        public Exception? Exception { get; set; }
+
+        /// <summary>
+        /// Whether the migration can continue after this error
+        /// </summary>
+        public bool? IsContinuable { get; set; }
+    }
+}

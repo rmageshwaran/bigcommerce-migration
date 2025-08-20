@@ -28,7 +28,7 @@
     "BaseUrl": "https://api.bigcommerce.com",
     "RequestTimeout": "00:00:30",
     "MaxRetries": 3,
-    "RateLimitRequestsPerSecond": 12,
+    "RateLimitRequestsPerSecond": 2,
     "EnableDebugLogging": true,
     "UserAgent": "BigCommerce-Migration-System/1.0-Docker"
   },
@@ -54,9 +54,9 @@
       "EnableQuotaTracking": true
     },
     "RateCalculation": {
-      "MinimumRate": 5.0,
-      "MaximumRate": 50.0,
-      "DefaultRate": 12.0,
+      "MinimumRate": 1.0,
+      "MaximumRate": 5.0,
+      "DefaultRate": 2.0,
       "ResponseTimeWeight": 0.2,
       "ErrorRateWeight": 0.12,
       "BigCommerceRateLimitWeight": 0.12,
@@ -82,7 +82,7 @@
       "IncludeDetailedHealthInEvents": true
     },
     "Safety": {
-      "FallbackRateRequestsPerSecond": 8.0,
+      "FallbackRateRequestsPerSecond": 1.0,
       "MaxConsecutiveFailures": 3,
       "FallbackRetryDelayMinutes": 10,
       "EnableAutomaticRecovery": true,
@@ -108,9 +108,69 @@
     }
   },
   "AppSettings": {
-    "BatchSize": 10,
-    "MaxConcurrency": 3,
+    "BatchSize": 2,
+    "MaxConcurrency": 1,
     "RetryAttempts": 3
+  },
+  "ParallelProcessing": {
+    "maxConcurrentBatches": 1,
+    "respectDynamicRateLimits": true,
+    "enableSignalRUpdates": true,
+    "signalRUpdateIntervalMs": 1000,
+    "enableAdaptiveConcurrency": false,
+    "enableSubBatchOptimization": false,
+    "targetCpuUtilization": 0.10,
+    "batchTimeoutMinutes": 10,
+    "subBatchConfigurations": {
+      "products": {
+        "entityType": "products",
+        "chunkSize": 5,
+        "fetchBatchSize": 5,
+        "pageSize": 5,
+        "subBatchSize": 2,
+        "maxConcurrency": 1,
+        "enableSubBatching": true,
+        "subBatchDelayMs": 2000,
+        "processSubBatchesSequentially": true,
+        "include": "bulk_pricing_rules,custom_fields,channels,videos"
+      },
+      "product-components": {
+        "entityType": "product-components",
+        "chunkSize": 2,
+        "fetchBatchSize": 2,
+        "pageSize": 2,
+        "subBatchSize": 1,
+        "maxConcurrency": 1,
+        "enableSubBatching": true,
+        "subBatchDelayMs": 3000,
+        "processSubBatchesSequentially": true,
+        "include": "options,modifiers,images,reviews"
+      },
+      "brands": {
+        "entityType": "brands",
+        "chunkSize": 3,
+        "fetchBatchSize": 3,
+        "pageSize": 3,
+        "subBatchSize": 1,
+        "maxConcurrency": 1,
+        "enableSubBatching": true,
+        "subBatchDelayMs": 2000,
+        "processSubBatchesSequentially": true,
+        "include": ""
+      },
+      "variants": {
+        "entityType": "variants",
+        "fetchBatchSize": 3,
+        "chunkSize": 3,
+        "pageSize": 3,
+        "subBatchSize": 1,
+        "maxConcurrency": 1,
+        "enableSubBatching": true,
+        "subBatchDelayMs": 2000,
+        "processSubBatchesSequentially": true,
+        "include": ""
+      }
+    }
   },
   "Logging": {
     "LogLevel": {

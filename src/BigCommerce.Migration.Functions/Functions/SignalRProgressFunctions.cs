@@ -193,14 +193,10 @@ namespace BigCommerce.Migration.Functions.Functions
 
                 ProgressEvent? result = eventType switch
                 {
-                    "progress" => JsonSerializer.Deserialize<MigrationProgressEvent>(queueMessage ?? string.Empty, options),
-                    "batch" => JsonSerializer.Deserialize<BatchProgressEvent>(queueMessage ?? string.Empty, options),
-                    "entity" => JsonSerializer.Deserialize<EntityProgressEvent>(queueMessage ?? string.Empty, options),
+                    "migration-started" => JsonSerializer.Deserialize<MigrationStartedEvent>(queueMessage ?? string.Empty, options),
+                    "chunk-progress" => JsonSerializer.Deserialize<EntityChunkProgressEvent>(queueMessage ?? string.Empty, options),
+                    "migration-completed" => JsonSerializer.Deserialize<MigrationCompletedEvent>(queueMessage ?? string.Empty, options),
                     "error" => JsonSerializer.Deserialize<ErrorProgressEvent>(queueMessage ?? string.Empty, options),
-                    "status" => JsonSerializer.Deserialize<StatusProgressEvent>(queueMessage ?? string.Empty, options),
-                    "subbatch-started" => JsonSerializer.Deserialize<SubBatchStartedEvent>(queueMessage ?? string.Empty, options),
-                    "subbatch-completed" => JsonSerializer.Deserialize<SubBatchCompletedEvent>(queueMessage ?? string.Empty, options),
-                    "subbatch-progress" => JsonSerializer.Deserialize<SubBatchMigrationProgressEvent>(queueMessage ?? string.Empty, options),
                     _ => null
                 };
 
@@ -242,45 +238,32 @@ namespace BigCommerce.Migration.Functions.Functions
                     var payloadJson = JsonSerializer.Serialize(progressEvent, new JsonSerializerOptions { WriteIndented = true });
                     _logger.LogInformation("🔨 [SIGNALR-CREATE] SignalR payload:\n{PayloadJson}", payloadJson);
                     
-                    // 🎯 SPECIFIC LOGGING FOR SUB-BATCH EVENTS: Track entity counts and progress for sync debugging
-                    if (progressEvent is SubBatchCompletedEvent subBatchEvent)
-                    {
-                        _logger.LogInformation("📊 [SIGNALR-BROADCAST] SubBatchCompleted OUTBOUND: " +
-                            "ParentBatch={ParentBatch}, " +
-                            "SubBatch={SubBatch}/{TotalSubBatches}, " +
-                            "Cumulative={CumulativeSuccessful}/{CumulativeFailed} of {TotalMigration}, " +
-                            "Progress={Progress:F2}%, " +
-                            "Expected Frontend Display: '{ExpectedDisplay}', " +
-                            "Timestamp={Timestamp}",
-                            subBatchEvent.ParentBatchNumber,
-                            subBatchEvent.SubBatchNumber, subBatchEvent.TotalSubBatches,
-                            subBatchEvent.CumulativeSuccessfulEntities, subBatchEvent.CumulativeFailedEntities, subBatchEvent.TotalMigrationEntities,
-                            subBatchEvent.ProgressPercentage,
-                            $"{subBatchEvent.CumulativeSuccessfulEntities}/{subBatchEvent.TotalMigrationEntities} ({subBatchEvent.ProgressPercentage:F1}%)",
-                            subBatchEvent.Timestamp.ToString("HH:mm:ss.fff"));
-                    }
-                    else if (progressEvent is MigrationProgressEvent migrationEvent)
-                    {
-                        _logger.LogInformation("📊 [SIGNALR-BROADCAST] MigrationProgress OUTBOUND: " +
-                            "ProcessedEntities={ProcessedEntities}/{TotalEntities}, " +
-                            "OverallProgress={OverallProgress}%, " +
-                            "Status={Status}, " +
-                            "Expected Frontend Display: '{ExpectedDisplay}', " +
-                            "Timestamp={Timestamp}",
-                            migrationEvent.ProcessedEntities, migrationEvent.TotalEntities,
-                            migrationEvent.OverallProgress,
-                            migrationEvent.Status,
-                            $"{migrationEvent.ProcessedEntities}/{migrationEvent.TotalEntities} ({migrationEvent.OverallProgress:F1}%)",
-                            migrationEvent.Timestamp.ToString("HH:mm:ss.fff"));
-                    }
+                    // 🎯 SIMPLIFIED LOGGING: Clean event types for easier debugging
+                    var eventType = progressEvent.EventType;
+                    _logger.LogInformation("📊 [SIGNALR-BROADCAST] {EventType} OUTBOUND: MigrationId={MigrationId}, Timestamp={Timestamp}",
+                        eventType, progressEvent.MigrationId, progressEvent.Timestamp.ToString("HH:mm:ss.fff"));
                 }
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, "⚠️ [SIGNALR-CREATE] Failed to serialize payload for logging");
                 }
 
-                // 🎯 CENTRALIZED SIGNALR: Convert to frontend format (PascalCase → camelCase) before sending
-                var frontendEvent = _signalRMessageConverter.ConvertToFrontendObject(progressEvent);
+                // 🎯 SIMPLIFIED SIGNALR: Convert to SignalR message format with proper camelCase serialization
+                var signalRMessageObj = _signalRMessageConverter.ConvertToSignalRMessageObject(progressEvent);
+                
+                // 🔧 FIX: Pre-serialize to camelCase JSON to ensure consistent frontend format
+                // This handles nested objects properly (like entities arrays)
+                var frontendEventJson = JsonSerializer.Serialize(signalRMessageObj.EventData, new JsonSerializerOptions
+                {
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                    WriteIndented = false
+                });
+                
+                // Parse back to JsonElement to maintain SignalR compatibility while ensuring camelCase properties
+                var frontendEvent = JsonSerializer.Deserialize<JsonElement>(frontendEventJson);
+                
+                _logger.LogInformation("🔧 [SIGNALR-CAMELCASE] Pre-serialized event to camelCase: {EventJson}", frontendEventJson);
+                
                 var signalRMessage = new SignalRMessageAction(progressEvent.HubMethod, new object[] { frontendEvent });
                 
                 _logger.LogInformation("✅ [SIGNALR-CREATE] Successfully created SignalR message action!");

@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Backend Events Test</title>
+</head>
+<body>
+    <h1>Backend SignalR Events Test</h1>
+    <button onclick="triggerBackendEvents()">Trigger Backend Events</button>
+    <div id="output"></div>
+
+    <script>
+        async function triggerBackendEvents() {
+            const output = document.getElementById('output');
+            output.innerHTML = 'Triggering backend events...';
+            
+            try {
+                const response = await fetch('http://localhost:7071/api/test/events', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        migrationId: `validation-test-${Date.now()}`,
+                        eventType: 'full-migration-flow'
+                    })
+                });
+                
+                if (response.ok) {
+                    output.innerHTML = '<p style="color: green;">✅ Backend events triggered successfully!</p><p>Now go to <a href="http://localhost:3000/test/phase5">http://localhost:3000/test/phase5</a> and click "Run All Tests"</p>';
+                } else {
+                    output.innerHTML = `<p style="color: red;">❌ Failed: ${response.status}</p>`;
+                }
+            } catch (error) {
+                output.innerHTML = `<p style="color: red;">❌ Error: ${error.message}</p>`;
+            }
+        }
+    </script>
+</body>
+</html>

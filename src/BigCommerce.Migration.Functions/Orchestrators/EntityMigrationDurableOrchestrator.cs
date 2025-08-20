@@ -2,6 +2,7 @@
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.DurableTask;
 using Microsoft.Extensions.Logging;
+using BigCommerce.Migration.Core.Utilities;
 using BigCommerce.Migration.Core.Models;
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Activities.Models;
@@ -34,6 +35,27 @@ public static class EntityMigrationDurableOrchestrator
 
         var migrationId = input.MigrationId;
         var entityType = input.EntityType;
+        
+        // 🆕 PRODUCT-COMPONENTS SPECIAL HANDLING: Send entity-started events for all component types
+        if (entityType.Equals("product-components", StringComparison.OrdinalIgnoreCase))
+        {
+            logger.LogInformation("🔧 Product-components phase starting - broadcasting entity-started events for all component types (progressive discovery)");
+            
+            var componentTypes = new[] { "options", "modifiers", "images", "reviews" };
+            
+            foreach (var componentType in componentTypes)
+            {
+                await context.CallActivityAsync("BroadcastEntityStartedActivity", new
+                {
+                    MigrationId = migrationId,
+                    EntityType = componentType,
+                    TotalCount = 0, // Progressive discovery - total unknown until processing
+                    Message = $"{componentType} migration started - total count unknown (progressive discovery)"
+                });
+                
+                logger.LogInformation("🎯 Broadcasted entity-started for {ComponentType} with totalCount=0 (progressive discovery)", componentType);
+            }
+        }
         
         var result = new EntityMigrationResult
         {
@@ -139,6 +161,10 @@ public static class EntityMigrationDurableOrchestrator
                 "DiscoverEntitiesActivity",
                 discoverRequest);
 
+            // 🎯 PROGRESSIVE DISCOVERY: Determine if this is progressive discovery early
+            var isProgressiveDiscovery = discoverResult?.PaginationMetadata?.ContainsKey("ProgressiveDiscovery") == true &&
+                                       JsonElementHelper.GetBooleanValue(discoverResult.PaginationMetadata["ProgressiveDiscovery"]);
+
             if (discoverResult.Errors.Any())
             {
                 // 🚫 CANCELLATION FIX: Check if discovery failed due to cancellation
@@ -180,18 +206,38 @@ public static class EntityMigrationDurableOrchestrator
 
             if (discoverResult.TotalCount == 0)
             {
-                logger.LogInformation("No {EntityType} entities found to migrate for MigrationId: {MigrationId}", 
-                    entityType, migrationId);
-                result.IsSuccess = true;
-                result.EndTime = context.CurrentUtcDateTime;
-                return result;
+                // 🎯 PROGRESSIVE DISCOVERY FIX: Don't exit early for component types
+                // Progressive discovery returns 0 but processing should still happen to discover incrementally
+                if (isProgressiveDiscovery)
+                {
+                    logger.LogInformation("🔄 Progressive discovery: {EntityType} TotalCount=0 but will discover during processing for MigrationId: {MigrationId}", 
+                        entityType, migrationId);
+                    // Continue processing - don't return early
+                }
+                else
+                {
+                    logger.LogInformation("No {EntityType} entities found to migrate for MigrationId: {MigrationId}", 
+                        entityType, migrationId);
+                    result.IsSuccess = true;
+                    result.EndTime = context.CurrentUtcDateTime;
+                    return result;
+                }
             }
 
             logger.LogInformation("Discovered {EntityCount} {EntityType} entities for MigrationId: {MigrationId}", 
                 discoverResult.TotalCount, entityType, migrationId);
 
-            // 🚨 FIX: Set TotalEntities from discovery result
+            // 🚨 FIX: Set TotalEntities from discovery result (or keep as 0 for progressive discovery)
             result.TotalEntities = discoverResult.TotalCount;
+
+            // 🆕 BROADCAST ENTITY STARTED EVENT: After discovery, broadcast individual entity start with real count
+            await context.CallActivityAsync("BroadcastEntityStartedActivity", new
+            {
+                MigrationId = migrationId,
+                EntityType = entityType,
+                TotalCount = discoverResult.TotalCount,
+                Message = $"{entityType} discovery completed - starting processing of {discoverResult.TotalCount} entities"
+            });
 
             // Step 5: Start entity progress tracking
             await context.CallActivityAsync(
@@ -229,8 +275,22 @@ public static class EntityMigrationDurableOrchestrator
             var entityIds = discoverResult?.EntityIds ?? new List<string>();
             
             // Handle efficient pagination strategy (empty EntityIds but has TotalCount)
-            var useDirectPagination = !entityIds.Any() && (discoverResult?.TotalCount ?? 0) > 0;
+            var useDirectPagination = !entityIds.Any() && ((discoverResult?.TotalCount ?? 0) > 0 || isProgressiveDiscovery);
             var totalEntities = useDirectPagination ? (discoverResult?.TotalCount ?? 0) : entityIds.Count;
+            
+            // 🔧 PROGRESSIVE DISCOVERY: For progressive discovery, use metadata to determine processing scope
+            if (isProgressiveDiscovery && totalEntities == 0)
+            {
+                // Use total products from metadata since we'll process products page by page to extract components
+                var totalProducts = 0;
+                if (discoverResult?.PaginationMetadata?.ContainsKey("TotalProducts") == true)
+                {
+                    totalProducts = JsonElementHelper.GetIntegerValue(discoverResult.PaginationMetadata["TotalProducts"]);
+                }
+                totalEntities = totalProducts; // Process all products to extract components
+                logger.LogInformation("🔄 Progressive discovery: Will process {TotalProducts} products to extract {EntityType} components", 
+                    totalProducts, entityType);
+            }
             
             // 🎯 PERFORMANCE OPTIMIZATION: Use configuration-driven chunking  
             var chunkingThreshold = 100; // TODO: Make this configurable too
@@ -652,6 +712,8 @@ public static class EntityMigrationDurableOrchestrator
         if (totalCount == 0) return 0;
         return (int)Math.Ceiling((double)totalCount / batchSize);
     }
+
+
 }
 
  

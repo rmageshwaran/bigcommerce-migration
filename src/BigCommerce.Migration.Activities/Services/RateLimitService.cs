@@ -99,7 +99,7 @@ public class RateLimitService : IRateLimitService
     }
     
     /// <inheritdoc />
-    public async Task RecordApiCallAsync(string storeId, string endpoint, double responseTime, bool isSuccessful, CancellationToken cancellationToken = default)
+    public Task RecordApiCallAsync(string storeId, string endpoint, double responseTime, bool isSuccessful, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         
@@ -119,7 +119,7 @@ public class RateLimitService : IRateLimitService
                 storeLimit.LastCallTime = DateTime.UtcNow;
             }
             
-            await Task.CompletedTask;
+            return Task.CompletedTask;
         }
         catch (OperationCanceledException)
         {

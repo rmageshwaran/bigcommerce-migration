@@ -19,7 +19,7 @@ import { MigrationDetailView } from './components/Views/MigrationDetailView';
 import NotificationToastContainer from './components/Notifications/NotificationToastContainer';
 import { ThemeContextProvider } from './contexts/ThemeContext';
 import { SignalRIntegrationTest } from './components/Tests/SignalRIntegrationTest';
-import { EnhancedMigrationDashboard } from './components/Dashboard/EnhancedMigrationDashboard';
+import { Phase5ComprehensiveTest } from './components/Tests/Phase5ComprehensiveTest';
 
 // New page components for the redesigned interface
 const HomePage = () => (
@@ -60,65 +60,7 @@ const SettingsPage = () => (
   </Box>
 );
 
-// Real-time migration dashboard pages
-const EnhancedMigrationPage = () => {
-  const [searchParams] = useSearchParams();
-  const migrationId = searchParams.get('migrationId');
-  const navigate = useNavigate();
-  
-  if (!migrationId) {
-    return (
-      <Box p={3}>
-        <Typography variant="h4" gutterBottom>
-          Enhanced Migration Dashboard
-        </Typography>
-        <Typography variant="body1" paragraph>
-          Advanced real-time monitoring with batch-level tracking and performance analytics.
-        </Typography>
-        
-        <Card sx={{ p: 4, textAlign: 'center' }}>
-          <Typography variant="h6" gutterBottom color="text.secondary">
-            No Active Migration
-          </Typography>
-          <Typography variant="body1" paragraph>
-            To see enhanced migration progress, you need to start a migration first.
-          </Typography>
-          <Stack direction="row" spacing={2} justifyContent="center">
-            <Button
-              variant="contained"
-              color="primary"
-              onClick={() => navigate('/start')}
-            >
-              Start Migration
-            </Button>
-            <Button
-              variant="outlined"
-              onClick={() => navigate('/')}
-            >
-              Back to Overview
-            </Button>
-          </Stack>
-        </Card>
-      </Box>
-    );
-  }
-  
-  return (
-    <EnhancedMigrationDashboard
-      migrationId={migrationId}
-      autoConnect={true}
-      enableNotifications={true}
-      onMigrationComplete={(id) => {
-        console.log('Migration completed:', id);
-        // ✅ FIX: Don't navigate away - let user stay on dashboard to see final results
-      }}
-      onMigrationError={(id, error) => {
-        console.log('Migration failed:', id, error);
-        // ✅ FIX: Don't navigate away - let user see error details on dashboard
-      }}
-    />
-  );
-};
+// Removed: Enhanced Migration Page - real-time progress is now only shown on main overview page
 
 function App() {
   useEffect(() => {
@@ -168,8 +110,8 @@ function App() {
               <Route path="/history/:requestId" element={<MigrationDetailPage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/test/signalr" element={<SignalRIntegrationTest />} />
-              <Route path="/enhanced" element={<EnhancedMigrationPage />} />
-              <Route path="/realtime" element={<Navigate to="/enhanced" />} />
+              <Route path="/test/phase5" element={<Phase5ComprehensiveTest />} />
+              {/* Removed: /enhanced and /realtime routes - real-time progress is now only on main page */}
             </Routes>
           </DashboardLayout>
         </Router>

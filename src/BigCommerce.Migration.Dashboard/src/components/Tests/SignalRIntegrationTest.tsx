@@ -78,21 +78,22 @@ export const SignalRIntegrationTest: React.FC = () => {
     }
   };
 
-  // Test queue-based events simulation
-  const testQueueEvents = async () => {
+  // Test simplified events (Phase 3)
+  const testSimplifiedEvents = async () => {
     try {
-      // Simulate the queue-based events our backend sends
-      addEvent('Test Queue Events', 'Testing queue-based event reception...');
+      // Test the new simplified event system
+      addEvent('Test Simplified Events', 'Testing Phase 3 simplified event reception...');
       
       // In a real scenario, these events would come from our backend
-      // via the queue → SignalR Functions → frontend pipeline
-      console.log('🎯 Testing queue-based event system:');
-      console.log('- Expecting: MigrationProgressUpdated, EntityProgressUpdated, etc.');
-      console.log('- Backend sends via SignalRProgressFunctions');
-      console.log('- Frontend receives via updated event handlers');
+      // via the centralized broadcasting service → SignalR Functions → frontend pipeline
+      console.log('🎯 Testing Phase 3 simplified event system:');
+      console.log('- Expecting: migration-started, chunk-progress, migration-completed, error');
+      console.log('- Backend sends via CentralizedProgressBroadcastService');
+      console.log('- Events are rate-limited and simplified for better performance');
+      console.log('- Frontend receives clean, consistent event structure');
       
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to test queue events');
+      setError(err instanceof Error ? err.message : 'Failed to test simplified events');
     }
   };
 
@@ -111,31 +112,46 @@ export const SignalRIntegrationTest: React.FC = () => {
       addEvent('ConnectionStateChanged', connectionData);
     });
 
-    // Migration progress listener
+    // Phase 3: Simplified SignalR Event Listeners
+    const unsubscribeMigrationStarted = signalRService.on('migration-started', (event) => {
+      addEvent('🚀 Migration Started (Phase 3)', event);
+    });
+
+    const unsubscribeChunkProgress = signalRService.on('chunk-progress', (event) => {
+      addEvent('📊 Chunk Progress (Phase 3)', event);
+    });
+
+    const unsubscribeMigrationCompleted = signalRService.on('migration-completed', (event) => {
+      addEvent('✅ Migration Completed (Phase 3)', event);
+    });
+
+    const unsubscribeSimplifiedError = signalRService.on('error', (event) => {
+      addEvent('❌ Error Event (Phase 3)', event);
+    });
+
+    // Legacy event listeners (for backward compatibility testing)
     const unsubscribeProgress = signalRService.on('migrationProgress', (progress) => {
-      addEvent('MigrationProgress', progress);
+      addEvent('MigrationProgress (Legacy)', progress);
     });
 
-    // Migration status listener
     const unsubscribeStatus = signalRService.on('MigrationStatus', (status) => {
-      addEvent('MigrationStatus', status);
+      addEvent('MigrationStatus (Legacy)', status);
     });
 
-    // Queue-based event listeners (updated for new backend architecture)
     const unsubscribeDetailedProgress = signalRService.on('DetailedProgress', (progress) => {
-      addEvent('EntityProgressUpdated→DetailedProgress', progress);
+      addEvent('EntityProgressUpdated→DetailedProgress (Legacy)', progress);
     });
 
     const unsubscribeBatchStarted = signalRService.on('BatchStarted', (batch) => {
-      addEvent('BatchProgressUpdated→BatchStarted', batch);
+      addEvent('BatchProgressUpdated→BatchStarted (Legacy)', batch);
     });
 
     const unsubscribeBatchCompleted = signalRService.on('BatchCompleted', (batch) => {
-      addEvent('BatchProgressUpdated→BatchCompleted', batch);
+      addEvent('BatchProgressUpdated→BatchCompleted (Legacy)', batch);
     });
 
     const unsubscribeEntityUpdate = signalRService.on('entityUpdate', (entityProgress) => {
-      addEvent('EntityProgressUpdated→entityUpdate', entityProgress);
+      addEvent('EntityProgressUpdated→entityUpdate (Legacy)', entityProgress);
     });
 
     const unsubscribePerformanceMetrics = signalRService.on('PerformanceMetrics', (metrics) => {
@@ -147,9 +163,9 @@ export const SignalRIntegrationTest: React.FC = () => {
       addEvent('SystemHealth', health);
     });
 
-    // Error listener
-    const unsubscribeError = signalRService.on('error', (errorData) => {
-      addEvent('Error', errorData);
+    // Legacy error listener (for testing backward compatibility)
+    const unsubscribeLegacyError = signalRService.on('ErrorOccurred', (errorData) => {
+      addEvent('ErrorOccurred (Legacy)', errorData);
       setError(errorData.message || 'SignalR error occurred');
     });
 
@@ -160,6 +176,13 @@ export const SignalRIntegrationTest: React.FC = () => {
 
     // Cleanup
     return () => {
+      // Simplified event unsubscriptions
+      unsubscribeMigrationStarted();
+      unsubscribeChunkProgress();
+      unsubscribeMigrationCompleted();
+      unsubscribeSimplifiedError();
+      
+      // Legacy event unsubscriptions
       unsubscribeConnection();
       unsubscribeProgress();
       unsubscribeStatus();
@@ -169,7 +192,7 @@ export const SignalRIntegrationTest: React.FC = () => {
       unsubscribeEntityUpdate();
       unsubscribePerformanceMetrics();
       unsubscribeHealth();
-      unsubscribeError();
+      unsubscribeLegacyError();
     };
   }, [signalRService]);
 
@@ -227,10 +250,10 @@ export const SignalRIntegrationTest: React.FC = () => {
               
               <Button
                 variant="outlined"
-                onClick={testQueueEvents}
+                onClick={testSimplifiedEvents}
                 disabled={!isConnected}
                               >
-                  Test Queue Events
+                  Test Simplified Events
                 </Button>
             </Stack>
 

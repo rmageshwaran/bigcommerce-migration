@@ -317,8 +317,10 @@ export class ApiService {
    * 🆕 TASK 4.2: Enhanced with error handling for progress update failures
    */
   public async getMigrationProgress(migrationId: string): Promise<MigrationProgress> {
+    console.log(`📡 [DEBUG] getMigrationProgress called with migrationId: "${migrationId}"`);
     try {
       const progress = await this.get<MigrationProgress>(`/migrations/${migrationId}/status-http`);
+      console.log(`📊 [DEBUG] getMigrationProgress response:`, progress);
       
       // 🆕 TASK 4.2: Validate that we're getting real-time aggregated data
       if (progress && typeof progress === 'object') {

@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
+using BigCommerce.Migration.Core.Utilities;
 using Microsoft.Extensions.Logging;
 
 namespace BigCommerce.Migration.Infrastructure.Services;
@@ -846,11 +847,11 @@ public class BigCommerceApiClient : IBigCommerceApiClient
     {
         return new ProductSummary
         {
-            Id = data.TryGetValue("id", out var id) ? Convert.ToInt32(id) : 0,
+            Id = data.TryGetValue("id", out var id) ? JsonElementHelper.GetIntegerValue(id) : 0,
             Name = data.TryGetValue("name", out var name) ? name.ToString() ?? string.Empty : string.Empty,
             Sku = data.TryGetValue("sku", out var sku) ? sku.ToString() ?? string.Empty : string.Empty,
             Status = data.TryGetValue("status", out var status) ? status.ToString() ?? string.Empty : string.Empty,
-            IsDeleted = data.TryGetValue("is_deleted", out var deleted) && Convert.ToBoolean(deleted)
+            IsDeleted = data.TryGetValue("is_deleted", out var deleted) && JsonElementHelper.GetBooleanValue(deleted)
         };
     }
     
@@ -861,9 +862,9 @@ public class BigCommerceApiClient : IBigCommerceApiClient
     {
         return new CategorySummary
         {
-            Id = data.TryGetValue("id", out var id) ? Convert.ToInt32(id) : 0,
+            Id = data.TryGetValue("id", out var id) ? JsonElementHelper.GetIntegerValue(id) : 0,
             Name = data.TryGetValue("name", out var name) ? name.ToString() ?? string.Empty : string.Empty,
-            ParentId = data.TryGetValue("parent_id", out var parentId) ? Convert.ToInt32(parentId) : 0
+            ParentId = data.TryGetValue("parent_id", out var parentId) ? JsonElementHelper.GetIntegerValue(parentId) : 0
         };
     }
     
@@ -874,8 +875,10 @@ public class BigCommerceApiClient : IBigCommerceApiClient
     {
         return new BrandSummary
         {
-            Id = data.TryGetValue("id", out var id) ? Convert.ToInt32(id) : 0,
+            Id = data.TryGetValue("id", out var id) ? JsonElementHelper.GetIntegerValue(id) : 0,
             Name = data.TryGetValue("name", out var name) ? name.ToString() ?? string.Empty : string.Empty
         };
     }
+
+
 } 

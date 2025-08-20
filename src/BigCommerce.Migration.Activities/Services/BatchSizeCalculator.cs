@@ -20,7 +20,7 @@ public class BatchSizeCalculator : IBatchSizeCalculator
     }
     
     /// <inheritdoc />
-    public async Task<int> CalculateOptimalBatchSizeAsync(string entityType, string storeId)
+    public Task<int> CalculateOptimalBatchSizeAsync(string entityType, string storeId)
     {
         if (string.IsNullOrEmpty(entityType))
             throw new ArgumentException("Entity type cannot be null or empty", nameof(entityType));
@@ -32,12 +32,11 @@ public class BatchSizeCalculator : IBatchSizeCalculator
             entityType, storeId);
         
         // TODO: Implement actual batch size calculation in Phase 6
-        await Task.CompletedTask;
-        return GetDefaultBatchSize(entityType);
+        return Task.FromResult(GetDefaultBatchSize(entityType));
     }
     
     /// <inheritdoc />
-    public async Task RecordBatchPerformanceAsync(string entityType, string storeId, int batchSize, 
+    public Task RecordBatchPerformanceAsync(string entityType, string storeId, int batchSize, 
         double processingTimeMs, int successCount, int failureCount)
     {
         if (string.IsNullOrEmpty(entityType))
@@ -51,7 +50,7 @@ public class BatchSizeCalculator : IBatchSizeCalculator
             entityType, storeId, batchSize, processingTimeMs, successCount, failureCount);
         
         // TODO: Implement actual batch performance recording in Phase 6
-        await Task.CompletedTask;
+        return Task.CompletedTask;
     }
     
     /// <inheritdoc />
@@ -91,7 +90,7 @@ public class BatchSizeCalculator : IBatchSizeCalculator
     }
     
     /// <inheritdoc />
-    public async Task<BatchSizeRecommendation> GetBatchSizeRecommendationAsync(string entityType, string storeId)
+    public Task<BatchSizeRecommendation> GetBatchSizeRecommendationAsync(string entityType, string storeId)
     {
         if (string.IsNullOrEmpty(entityType))
             throw new ArgumentException("Entity type cannot be null or empty", nameof(entityType));
@@ -103,11 +102,10 @@ public class BatchSizeCalculator : IBatchSizeCalculator
             entityType, storeId);
         
         // TODO: Implement actual recommendation logic in Phase 6
-        await Task.CompletedTask;
         
         var defaultSize = GetDefaultBatchSize(entityType);
         
-        return new BatchSizeRecommendation
+        return Task.FromResult(new BatchSizeRecommendation
         {
             EntityType = entityType,
             StoreId = storeId,
@@ -117,6 +115,6 @@ public class BatchSizeCalculator : IBatchSizeCalculator
             Reason = "Using default batch size - no performance data available",
             AvgProcessingTimePerEntity = 0.0,
             ErrorRate = 0.0
-        };
+        });
     }
 } 

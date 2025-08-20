@@ -9,7 +9,7 @@ import {
   Switch,
   FormControlLabel
 } from '@mui/material';
-import { EnhancedMigrationDashboard } from '../Dashboard/EnhancedMigrationDashboard';
+// Removed: EnhancedMigrationDashboard - testing real-time progress via main overview page only
 import { IntegrationTest } from './IntegrationTest';
 
 interface MockData {
@@ -186,16 +186,16 @@ export const MockIntegrationTest: React.FC = () => {
               {/* Placeholder for Real Dashboard Component */}
               <Alert severity="info">
                 <Typography variant="body2">
-                  🎯 <strong>Ready for Real Dashboard:</strong><br/>
-                  The EnhancedMigrationDashboard component would appear here
-                  and connect to your backend's SignalR hub for live updates.
+                  🎯 <strong>Real-time Progress Now on Main Page:</strong><br/>
+                  Real-time migration progress is now displayed on the main migrations overview page
+                  using the simplified SignalR events (Phase 3 architecture).
                   
                   <br/><br/>
-                  <strong>Backend Integration Status:</strong><br/>
-                  ✅ SignalR configured: vortexiq-migration-signalr-dev<br/>
-                  ✅ API endpoints mapped<br/>
-                  ✅ Authentication ready<br/>
-                  ✅ Real-time events supported
+                  <strong>Simplified Event System:</strong><br/>
+                  ✅ 4 Event Types: migration-started, chunk-progress, migration-completed, error<br/>
+                  ✅ Centralized Broadcasting Service<br/>
+                  ✅ Rate-limited events (2-second intervals)<br/>
+                  ✅ Single page real-time display
                 </Typography>
               </Alert>
             </Box>

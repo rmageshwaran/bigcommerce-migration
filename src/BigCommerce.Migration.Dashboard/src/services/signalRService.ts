@@ -263,11 +263,48 @@ export class SignalRService {
       });
     });
 
-    // 🎯 CENTRALIZED SIGNALR: Core Progress Events (backend now sends camelCase directly)
+    // 🎯 PHASE 3: Simplified SignalR Events (Primary) - Fixed hub method names
+    this.connection.on('MigrationStarted', (eventData: any) => {
+      console.log('🚀 SignalR: Migration Started', eventData);
+      this.notifyListeners('migration-started', eventData);
+    });
+
+    this.connection.on('EntityStarted', (eventData: any) => {
+      console.log('🎯 SignalR: Entity Started', eventData);
+      this.notifyListeners('entity-started', eventData);
+    });
+
+    this.connection.on('EntityChunkProgress', (eventData: any) => {
+      console.log('📊 [DEBUG] SignalR: Entity Chunk Progress received', eventData);
+      console.log('📊 [DEBUG] EventData structure:', {
+        entityType: eventData?.entityType,
+        cumulativeProcessed: eventData?.cumulativeProcessed,
+        totalEntitiesForType: eventData?.totalEntitiesForType,
+        allKeys: eventData ? Object.keys(eventData) : []
+      });
+      this.notifyListeners('chunk-progress', eventData);
+      // Also forward to legacy listeners for backward compatibility
+      this.notifyListeners('entityUpdate', eventData);
+      this.notifyListeners('migrationProgress', eventData);
+    });
+
+    this.connection.on('MigrationCompleted', (eventData: any) => {
+      console.log('✅ SignalR: Migration Completed', eventData);
+      this.notifyListeners('migration-completed', eventData);
+      // Also forward to legacy listeners for backward compatibility
+      this.notifyListeners('MigrationStatus', eventData);
+    });
+
+    this.connection.on('ErrorProgress', (eventData: any) => {
+      console.warn('❌ SignalR: Error Event', eventData);
+      this.notifyListeners('error', eventData);
+    });
+
+    // 🎯 LEGACY: Core Progress Events (for backward compatibility)
     this.connection.on('MigrationProgressUpdated', (eventData: any) => {
-      console.log('🎯 DEBUG: Received MigrationProgressUpdated:', eventData);
+      console.log('🔄 DEBUG: Received MigrationProgressUpdated (legacy)', eventData);
       const enrichedProgress = this.enrichMigrationProgressEvent(eventData);
-      console.log('🎯 DEBUG: Enriched MigrationProgress:', enrichedProgress);
+      console.log('🔄 DEBUG: Enriched MigrationProgress:', enrichedProgress);
       this.notifyListeners('migrationProgress', enrichedProgress);
     });
 

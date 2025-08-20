@@ -47,7 +47,7 @@ public class GlobalExceptionHandlerMiddleware : IFunctionsWorkerMiddleware
 
         var requestPath = httpRequestData.Url.AbsolutePath;
         var requestMethod = httpRequestData.Method;
-        var requestId = GetRequestId(context);
+        var requestId = await GetRequestIdAsync(context);
 
         // Log the exception with context
         _logger.LogError(exception, 
@@ -338,7 +338,7 @@ public class GlobalExceptionHandlerMiddleware : IFunctionsWorkerMiddleware
     /// <summary>
     /// Gets request ID from context or generates a new one
     /// </summary>
-    private string GetRequestId(FunctionContext context)
+    private async Task<string> GetRequestIdAsync(FunctionContext context)
     {
         // Try to get request ID from various sources
         if (context.Items.TryGetValue("RequestId", out var requestId) && requestId != null)
@@ -347,7 +347,7 @@ public class GlobalExceptionHandlerMiddleware : IFunctionsWorkerMiddleware
         }
 
         // Try to get from HTTP headers
-        var httpRequest = context.GetHttpRequestDataAsync().Result;
+        var httpRequest = await context.GetHttpRequestDataAsync();
         if (httpRequest?.Headers.TryGetValues("X-Request-ID", out var headerValues) == true)
         {
             var headerValue = headerValues.FirstOrDefault();

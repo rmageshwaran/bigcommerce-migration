@@ -3,7 +3,7 @@ using BigCommerce.Migration.Core.Models;
 using BigCommerce.Migration.Activities.Services;
 using Microsoft.Extensions.Logging;
 
-namespace BigCommerce.Migration.Activities.Strategies;
+namespace BigCommerce.Migration.Activities.Strategies.Transform;
 
 /// <summary>
 /// Transform strategy for product entities
@@ -34,7 +34,7 @@ public class ProductTransformStrategy : IEntityTransformStrategy
         CancellationToken cancellationToken = default)
     {
         _logger.LogDebug("Transforming product for migration {MigrationId}", migrationId);
-        
+
         var transformed = new Dictionary<string, object>();
 
         // Required field: name
@@ -50,7 +50,7 @@ public class ProductTransformStrategy : IEntityTransformStrategy
         var productType = GetStringValue(entity, "type") ?? "physical";
         if (!IsValidProductType(productType))
         {
-            _logger.LogWarning("Invalid product type '{ProductType}', defaulting to 'physical' for migration {MigrationId}", 
+            _logger.LogWarning("Invalid product type '{ProductType}', defaulting to 'physical' for migration {MigrationId}",
                 productType, migrationId);
             productType = "physical";
         }
@@ -124,11 +124,11 @@ public class ProductTransformStrategy : IEntityTransformStrategy
         // NOTE: Keep "id" field for EntityMapping creation - ProductCreationStrategy will remove it before API call
         transformed.Remove("related_products"); // Remove from transformed output (metadata extracted in ProcessEntityChunkActivity)
         transformed.Remove("channels"); // Remove from transformed output (metadata extracted in ProcessEntityChunkActivity)
-        
+
         // Final validation and cleanup
         ValidateRequiredFields(transformed, migrationId);
 
-        _logger.LogDebug("Transformed product '{ProductName}' with {FieldCount} fields for migration {MigrationId}", 
+        _logger.LogDebug("Transformed product '{ProductName}' with {FieldCount} fields for migration {MigrationId}",
             productName, transformed.Count, migrationId);
 
         return await Task.FromResult(transformed);
@@ -192,7 +192,7 @@ public class ProductTransformStrategy : IEntityTransformStrategy
     {
         // Main price field - REQUIRED by BigCommerce API
         var price = GetDecimalValue(entity, "price") ?? GetDecimalValue(entity, "retail_price");
-        
+
         if (price.HasValue && price > 0)
         {
             transformed["price"] = price.Value;
@@ -203,10 +203,10 @@ public class ProductTransformStrategy : IEntityTransformStrategy
             var productName = GetStringValue(entity, "name") ?? "unknown";
             var productId = GetStringValue(entity, "id") ?? "unknown";
             var sku = GetStringValue(entity, "sku") ?? "no-sku";
-            
+
             _logger.LogWarning("🛒 [PROD-PRICE-FIX] Product '{ProductName}' (ID: {ProductId}, SKU: {Sku}) has invalid price: {Price}. Defaulting to $1 to prevent API validation failure.",
                 productName, productId, sku, price?.ToString() ?? "null");
-            
+
             transformed["price"] = 1.0; // Default to $1
         }
 
@@ -238,7 +238,7 @@ public class ProductTransformStrategy : IEntityTransformStrategy
     private void TransformWeightField(Dictionary<string, object> entity, Dictionary<string, object> transformed)
     {
         var weight = GetDecimalValue(entity, "weight");
-        
+
         if (weight.HasValue && weight > 0)
         {
             transformed["weight"] = weight.Value;
@@ -249,10 +249,10 @@ public class ProductTransformStrategy : IEntityTransformStrategy
             var productName = GetStringValue(entity, "name") ?? "unknown";
             var productId = GetStringValue(entity, "id") ?? "unknown";
             var sku = GetStringValue(entity, "sku") ?? "no-sku";
-            
+
             _logger.LogWarning("📦 [PROD-WEIGHT-FIX] Product '{ProductName}' (ID: {ProductId}, SKU: {Sku}) has invalid weight: {Weight}. Defaulting to 1 lb to prevent API validation failure.",
                 productName, productId, sku, weight?.ToString() ?? "null");
-            
+
             transformed["weight"] = 1.0; // Default to 1 lb
         }
     }
@@ -289,32 +289,32 @@ public class ProductTransformStrategy : IEntityTransformStrategy
         // 🚀 HARD-CODED CATEGORY: Using fixed category ID 14988 for all products
         // This removes the dependency on category migration while focusing on brand/product migration
         const int HARD_CODED_CATEGORY_ID = 14988;
-        
+
         // Check if the source product has any categories (for logging purposes)
         if (entity.TryGetValue("categories", out var categoriesValue))
         {
             var sourceCategoryIds = ExtractCategoryIds(categoriesValue);
             if (sourceCategoryIds.Any())
             {
-                _logger.LogDebug("Product had {SourceCategoryCount} source categories, assigning hard-coded category ID {CategoryId} in migration {MigrationId}", 
+                _logger.LogDebug("Product had {SourceCategoryCount} source categories, assigning hard-coded category ID {CategoryId} in migration {MigrationId}",
                     sourceCategoryIds.Count, HARD_CODED_CATEGORY_ID, migrationId);
             }
             else
             {
-                _logger.LogDebug("Product had no source categories, assigning hard-coded category ID {CategoryId} in migration {MigrationId}", 
+                _logger.LogDebug("Product had no source categories, assigning hard-coded category ID {CategoryId} in migration {MigrationId}",
                     HARD_CODED_CATEGORY_ID, migrationId);
             }
         }
         else
         {
-            _logger.LogDebug("Product had no categories field, assigning hard-coded category ID {CategoryId} in migration {MigrationId}", 
+            _logger.LogDebug("Product had no categories field, assigning hard-coded category ID {CategoryId} in migration {MigrationId}",
                 HARD_CODED_CATEGORY_ID, migrationId);
         }
 
         // Always assign the hard-coded category ID
         transformed["categories"] = new List<int> { HARD_CODED_CATEGORY_ID };
-        
-        _logger.LogDebug("✅ Assigned hard-coded category ID {CategoryId} to product in migration {MigrationId}", 
+
+        _logger.LogDebug("✅ Assigned hard-coded category ID {CategoryId} to product in migration {MigrationId}",
             HARD_CODED_CATEGORY_ID, migrationId);
     }
 
@@ -351,7 +351,7 @@ public class ProductTransformStrategy : IEntityTransformStrategy
     /// <summary>
     /// Transforms brand mapping using entity mapping service
     /// </summary>
-    private async Task TransformBrandMappingAsync(Dictionary<string, object> entity, Dictionary<string, object> transformed, 
+    private async Task TransformBrandMappingAsync(Dictionary<string, object> entity, Dictionary<string, object> transformed,
         string migrationId, CancellationToken cancellationToken)
     {
         var sourceBrandId = GetIntValue(entity, "brand_id");
@@ -361,27 +361,27 @@ public class ProductTransformStrategy : IEntityTransformStrategy
             {
                 // Use entity mapping service to get destination brand ID
                 var destinationBrandId = await _entityMappingService.GetDestinationIdAsync(
-                    migrationId, 
-                    "brands", 
-                    sourceBrandId.ToString(), 
+                    migrationId,
+                    "brands",
+                    sourceBrandId.ToString(),
                     cancellationToken);
-                
+
                 if (!string.IsNullOrEmpty(destinationBrandId) && int.TryParse(destinationBrandId, out var mappedBrandId))
                 {
                     transformed["brand_id"] = mappedBrandId;
-                    _logger.LogDebug("Mapped source brand ID {SourceId} to destination ID {DestinationId} in migration {MigrationId}", 
+                    _logger.LogDebug("Mapped source brand ID {SourceId} to destination ID {DestinationId} in migration {MigrationId}",
                         sourceBrandId, mappedBrandId, migrationId);
                 }
                 else
                 {
-                    _logger.LogWarning("No mapping found for source brand ID {SourceId} in migration {MigrationId}. Product will be created without brand.", 
+                    _logger.LogWarning("No mapping found for source brand ID {SourceId} in migration {MigrationId}. Product will be created without brand.",
                         sourceBrandId, migrationId);
                     // Don't include brand_id if no mapping exists
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to map brand ID {SourceId} in migration {MigrationId}. Product will be created without brand.", 
+                _logger.LogError(ex, "Failed to map brand ID {SourceId} in migration {MigrationId}. Product will be created without brand.",
                     sourceBrandId, migrationId);
                 // Don't include brand_id if mapping fails
             }
@@ -512,13 +512,13 @@ public class ProductTransformStrategy : IEntityTransformStrategy
             var transformedCustomFields = new List<object>();
             foreach (var field in customFields)
             {
-                if (field is Dictionary<string, object> customField && 
+                if (field is Dictionary<string, object> customField &&
                     customField.ContainsKey("name") && customField.ContainsKey("value"))
                 {
                     transformedCustomFields.Add(customField);
                 }
             }
-            
+
             if (transformedCustomFields.Any())
             {
                 transformed["custom_fields"] = transformedCustomFields;
@@ -543,7 +543,7 @@ public class ProductTransformStrategy : IEntityTransformStrategy
                     transformedOptions.Add(optionDict);
                 }
             }
-            
+
             if (transformedOptions.Any())
             {
                 transformed["options"] = transformedOptions;
@@ -582,7 +582,7 @@ public class ProductTransformStrategy : IEntityTransformStrategy
     private void ValidateRequiredFields(Dictionary<string, object> transformed, string migrationId)
     {
         var requiredFields = new[] { "name", "type" };
-        
+
         foreach (var field in requiredFields)
         {
             if (!transformed.ContainsKey(field) || string.IsNullOrWhiteSpace(transformed[field]?.ToString()))
@@ -608,7 +608,7 @@ public class ProductTransformStrategy : IEntityTransformStrategy
                     transformedVideos.Add(videoDict);
                 }
             }
-            
+
             if (transformedVideos.Any())
             {
                 transformed["videos"] = transformedVideos;
@@ -631,7 +631,7 @@ public class ProductTransformStrategy : IEntityTransformStrategy
                     transformedRules.Add(ruleDict);
                 }
             }
-            
+
             if (transformedRules.Any())
             {
                 transformed["bulk_pricing_rules"] = transformedRules;
@@ -777,7 +777,7 @@ public class ProductTransformStrategy : IEntityTransformStrategy
             {
                 transformedGiftWrapping.Add(item);
             }
-            
+
             if (transformedGiftWrapping.Any())
             {
                 transformed["gift_wrapping_options_list"] = transformedGiftWrapping;
@@ -872,12 +872,12 @@ public class ProductTransformStrategy : IEntityTransformStrategy
         {
             return jsonElement.GetArrayLength() == 0;
         }
-        
+
         if (value is System.Collections.ICollection collection)
         {
             return collection.Count == 0;
         }
-        
+
         return false;
     }
-} 
+}

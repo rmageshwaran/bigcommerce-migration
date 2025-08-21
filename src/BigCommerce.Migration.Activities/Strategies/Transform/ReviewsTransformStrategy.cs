@@ -2,7 +2,7 @@ using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
 using Microsoft.Extensions.Logging;
 
-namespace BigCommerce.Migration.Activities.Strategies;
+namespace BigCommerce.Migration.Activities.Strategies.Transform;
 
 /// <summary>
 /// Transform strategy for product reviews entities
@@ -42,7 +42,7 @@ public class ReviewsTransformStrategy : IEntityTransformStrategy
         // 🧹 CLEANUP: Remove null values and source-specific fields
         CleanupReviewData(transformed);
 
-        _logger.LogDebug("✅ [REVIEWS-TRANSFORM] Transformed review entity for migration {MigrationId}: rating={Rating}, status={Status}", 
+        _logger.LogDebug("✅ [REVIEWS-TRANSFORM] Transformed review entity for migration {MigrationId}: rating={Rating}, status={Status}",
             migrationId, transformed.TryGetValue("rating", out var finalRating) ? finalRating : "unknown",
             transformed.TryGetValue("status", out var status) ? status : "unknown");
 
@@ -53,8 +53,8 @@ public class ReviewsTransformStrategy : IEntityTransformStrategy
     /// Ensures product_id is properly mapped from source to destination product ID
     /// </summary>
     private async Task EnsureProductIdMappingAsync(
-        Dictionary<string, object> transformed, 
-        string migrationId, 
+        Dictionary<string, object> transformed,
+        string migrationId,
         CancellationToken cancellationToken)
     {
         if (!transformed.TryGetValue("product_id", out var productIdValue) || productIdValue == null)
@@ -78,12 +78,12 @@ public class ReviewsTransformStrategy : IEntityTransformStrategy
             {
                 // Update to destination product ID
                 transformed["product_id"] = productMapping.DestinationId;
-                _logger.LogDebug("🔗 [REVIEWS-TRANSFORM] Mapped product_id: {SourceProductId} → {DestinationProductId}", 
+                _logger.LogDebug("🔗 [REVIEWS-TRANSFORM] Mapped product_id: {SourceProductId} → {DestinationProductId}",
                     sourceProductId, productMapping.DestinationId);
             }
             else
             {
-                _logger.LogWarning("⚠️ [REVIEWS-TRANSFORM] No product mapping found for product {SourceProductId} in migration {MigrationId}", 
+                _logger.LogWarning("⚠️ [REVIEWS-TRANSFORM] No product mapping found for product {SourceProductId} in migration {MigrationId}",
                     sourceProductId, migrationId);
             }
         }

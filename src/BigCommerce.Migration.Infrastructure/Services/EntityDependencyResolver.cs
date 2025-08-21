@@ -162,9 +162,9 @@ public class EntityDependencyResolver : IEntityDependencyResolver
                 PhaseName = "Product Components",
                 PhaseNumber = 2,
                 PageSize = 10, // Reduced due to comprehensive includes
-                Include = "options,modifiers,images,reviews",
+                Include = "options,modifiers,reviews",
                 CreatesNewEntities = true,
-                TargetEntityTypes = new List<string> { "options", "modifiers", "images", "reviews" },
+                TargetEntityTypes = new List<string> { "options", "modifiers", "reviews" },
                 RequiresPreviousPhaseCompletion = true
             },
             
@@ -187,7 +187,7 @@ public class EntityDependencyResolver : IEntityDependencyResolver
                 PhaseName = "Product Options",
                 PhaseNumber = 2,
                 PageSize = 10, // Reduced due to comprehensive includes
-                Include = "options,modifiers,images,reviews", // Include all to get full product data
+                Include = "options", // Include all to get full product data
                 CreatesNewEntities = true,
                 TargetEntityTypes = new List<string> { "options" },
                 RequiresPreviousPhaseCompletion = true
@@ -199,7 +199,7 @@ public class EntityDependencyResolver : IEntityDependencyResolver
                 PhaseName = "Product Modifiers",
                 PhaseNumber = 2,
                 PageSize = 10,
-                Include = "options,modifiers,images,reviews",
+                Include = "modifiers",
                 CreatesNewEntities = true,
                 TargetEntityTypes = new List<string> { "modifiers" },
                 RequiresPreviousPhaseCompletion = true
@@ -211,7 +211,7 @@ public class EntityDependencyResolver : IEntityDependencyResolver
                 PhaseName = "Product Images",
                 PhaseNumber = 2,
                 PageSize = 10,
-                Include = "options,modifiers,images,reviews",
+                Include = "images",
                 CreatesNewEntities = true,
                 TargetEntityTypes = new List<string> { "images" },
                 RequiresPreviousPhaseCompletion = true
@@ -223,7 +223,7 @@ public class EntityDependencyResolver : IEntityDependencyResolver
                 PhaseName = "Product Reviews",
                 PhaseNumber = 2,
                 PageSize = 10,
-                Include = "options,modifiers,images,reviews",
+                Include = "reviews",
                 CreatesNewEntities = true,
                 TargetEntityTypes = new List<string> { "reviews" },
                 RequiresPreviousPhaseCompletion = true

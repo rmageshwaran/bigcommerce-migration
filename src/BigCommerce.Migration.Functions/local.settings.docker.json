@@ -12,12 +12,7 @@
 
     
     "MigrationStartQueueName": "migration-start",
-    "EntityBatchQueueName": "entity-batch",
-    "BatchCompletionQueueName": "batch-completion",
-    "ProgressUpdateQueueName": "progress-update",
-    "SignalRProgressQueueName": "signalr-progress-events",
-    "DeadLetterQueueName": "dead-letter",
-    "RetryQueueName": "retry"
+    "SignalRProgressQueueName": "signalr-progress-events"
   },
   "ConnectionStrings": {
     "AzureWebJobsStorage": "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;QueueEndpoint=http://azurite:10001/devstoreaccount1;TableEndpoint=http://azurite:10002/devstoreaccount1;",
@@ -144,7 +139,7 @@
         "enableSubBatching": true,
         "subBatchDelayMs": 3000,
         "processSubBatchesSequentially": true,
-        "include": "options,modifiers,images,reviews"
+        "include": "options,modifiers,reviews"
       },
       "brands": {
         "entityType": "brands",

@@ -64,11 +64,6 @@ resource "azurerm_windows_function_app" "function_app" {
 
     # Queue Configuration (matches appsettings.json)
     "MigrationStartQueueName"              = "migration-start"
-    "EntityBatchQueueName"                 = "entity-batch"
-    "BatchCompletionQueueName"             = "batch-completion"
-    "ProgressUpdateQueueName"              = "progress-update"
-    "DeadLetterQueueName"                  = "dead-letter"
-    "RetryQueueName"                       = "retry"
   }
 }
 

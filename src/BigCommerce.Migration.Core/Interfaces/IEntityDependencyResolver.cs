@@ -69,7 +69,7 @@ public class EntityPhaseConfiguration
     /// <summary>
     /// Include parameters for BigCommerce API
     /// Phase 1: bulk_pricing_rules,custom_fields,channels,videos
-    /// Phase 2: options,modifiers,images,reviews
+    /// Phase 2: options,modifiers,reviews
     /// </summary>
     public string Include { get; set; } = string.Empty;
 
@@ -81,7 +81,7 @@ public class EntityPhaseConfiguration
 
     /// <summary>
     /// Entity types that this phase will create/update
-    /// Phase 2: ["options", "modifiers", "images", "reviews"]
+    /// Phase 2: ["options", "modifiers", "reviews"]
     /// </summary>
     public List<string> TargetEntityTypes { get; set; } = new();
 

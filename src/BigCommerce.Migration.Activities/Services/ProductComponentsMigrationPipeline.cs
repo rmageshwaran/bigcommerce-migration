@@ -65,7 +65,7 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
             entities.Count, migrationId);
 
         // ✅ PHASE 2: Entities are already fetched with includes by standard discovery+fetch process
-        // Configuration: pageSize=10, include=options,modifiers,images,reviews
+        // Configuration: pageSize=10, include=options,modifiers,reviews
         var productsWithComponents = entities;
 
         var result = new ComprehensiveEntityProcessingResult

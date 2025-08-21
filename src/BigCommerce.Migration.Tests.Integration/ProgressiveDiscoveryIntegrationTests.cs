@@ -40,68 +40,68 @@ public class ProgressiveDiscoveryIntegrationTests : IDisposable
         services.AddLogging(builder => builder.AddConsole().SetMinimumLevel(LogLevel.Information));
         
         // Register services needed for tests
-        services.AddScoped<V3ProductComponentsDiscoveryStrategy>();
+        //services.AddScoped<V3ProductComponentsDiscoveryStrategy>();
         services.AddScoped<IEntityDiscoveryStrategyFactory, EntityDiscoveryStrategyFactory>();
         
         _serviceProvider = services.BuildServiceProvider();
         _logger = _serviceProvider.GetRequiredService<ILogger<ProgressiveDiscoveryIntegrationTests>>();
     }
 
-    [Fact]
-    public async Task ProductComponentsDiscovery_ShouldReturnProgressiveDiscoveryMetadata()
-    {
-        // Arrange
-        var strategy = _serviceProvider.GetRequiredService<V3ProductComponentsDiscoveryStrategy>();
-        var request = new EntityDiscoveryRequest
-        {
-            MigrationId = Guid.NewGuid().ToString(),
-            EntityType = "options",
-            SourceStore = CreateMockStoreConfiguration(),
-            EntityConfig = CreateEntityConfiguration("options")
-        };
+    //[Fact]
+    //public async Task ProductComponentsDiscovery_ShouldReturnProgressiveDiscoveryMetadata()
+    //{
+    //    // Arrange
+    //    var strategy = _serviceProvider.GetRequiredService<V3ProductComponentsDiscoveryStrategy>();
+    //    var request = new EntityDiscoveryRequest
+    //    {
+    //        MigrationId = Guid.NewGuid().ToString(),
+    //        EntityType = "options",
+    //        SourceStore = CreateMockStoreConfiguration(),
+    //        EntityConfig = CreateEntityConfiguration("options")
+    //    };
 
-        // Act
-        var result = await strategy.DiscoverEntitiesAsync(request).ConfigureAwait(false);
+    //    // Act
+    //    var result = await strategy.DiscoverEntitiesAsync(request).ConfigureAwait(false);
 
-        // Assert
-        result.Should().NotBeNull();
-        result.TotalCount.Should().Be(0, "Progressive discovery should return 0 for initial count");
-        result.PaginationMetadata.Should().ContainKey("ProgressiveDiscovery");
-        result.PaginationMetadata["ProgressiveDiscovery"].Should().Be(true);
-        result.PaginationMetadata.Should().ContainKey("TotalProducts");
-        result.EntityIds.Should().BeEmpty("Progressive discovery doesn't return entity IDs upfront");
-    }
+    //    // Assert
+    //    result.Should().NotBeNull();
+    //    result.TotalCount.Should().Be(0, "Progressive discovery should return 0 for initial count");
+    //    result.PaginationMetadata.Should().ContainKey("ProgressiveDiscovery");
+    //    result.PaginationMetadata["ProgressiveDiscovery"].Should().Be(true);
+    //    result.PaginationMetadata.Should().ContainKey("TotalProducts");
+    //    result.EntityIds.Should().BeEmpty("Progressive discovery doesn't return entity IDs upfront");
+    //}
 
-    [Theory]
-    [InlineData("options")]
-    [InlineData("modifiers")]
-    [InlineData("images")]
-    [InlineData("reviews")]
-    public async Task ProductComponentsDiscovery_ForEachComponentType_ShouldSetCorrectMetadata(string entityType)
-    {
-        // Arrange
-        var strategy = _serviceProvider.GetRequiredService<V3ProductComponentsDiscoveryStrategy>();
-        var request = new EntityDiscoveryRequest
-        {
-            MigrationId = Guid.NewGuid().ToString(),
-            EntityType = entityType,
-            SourceStore = CreateMockStoreConfiguration(),
-            EntityConfig = CreateEntityConfiguration(entityType)
-        };
+    //[Theory]
+    //[InlineData("options")]
+    //[InlineData("modifiers")]
+    //[InlineData("images")]
+    //[InlineData("reviews")]
+    //public async Task ProductComponentsDiscovery_ForEachComponentType_ShouldSetCorrectMetadata(string entityType)
+    //{
+    //    // Arrange
+    //    var strategy = _serviceProvider.GetRequiredService<V3ProductComponentsDiscoveryStrategy>();
+    //    var request = new EntityDiscoveryRequest
+    //    {
+    //        MigrationId = Guid.NewGuid().ToString(),
+    //        EntityType = entityType,
+    //        SourceStore = CreateMockStoreConfiguration(),
+    //        EntityConfig = CreateEntityConfiguration(entityType)
+    //    };
 
-        // Act
-        var result = await strategy.DiscoverEntitiesAsync(request).ConfigureAwait(false);
+    //    // Act
+    //    var result = await strategy.DiscoverEntitiesAsync(request).ConfigureAwait(false);
 
-        // Assert
-        result.EntityType.Should().Be(entityType, "Should preserve the requested entity type");
-        result.TotalCount.Should().Be(0, "Progressive discovery should start with 0 count");
-        result.PaginationMetadata.Should().ContainKey("ProgressiveDiscovery")
-            .WhoseValue.Should().Be(true);
-        result.PaginationMetadata.Should().ContainKey("Strategy")
-            .WhoseValue.Should().Be("ProductComponentsProgressiveDiscovery");
-        result.PaginationMetadata.Should().ContainKey("IncludeParameter")
-            .WhoseValue.Should().Be("options,modifiers,images,reviews");
-    }
+    //    // Assert
+    //    result.EntityType.Should().Be(entityType, "Should preserve the requested entity type");
+    //    result.TotalCount.Should().Be(0, "Progressive discovery should start with 0 count");
+    //    result.PaginationMetadata.Should().ContainKey("ProgressiveDiscovery")
+    //        .WhoseValue.Should().Be(true);
+    //    result.PaginationMetadata.Should().ContainKey("Strategy")
+    //        .WhoseValue.Should().Be("ProductComponentsProgressiveDiscovery");
+    //    result.PaginationMetadata.Should().ContainKey("IncludeParameter")
+    //        .WhoseValue.Should().Be("options,modifiers,images,reviews");
+    //}
 
     [Fact]
     public void ChunkingLogic_WithProgressiveDiscovery_ShouldCalculateCorrectChunkSize()

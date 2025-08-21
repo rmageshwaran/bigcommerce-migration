@@ -56,33 +56,27 @@ public class V3EfficientPaginationStrategy : IEntityDiscoveryStrategy
             var includeParam = request.EntityConfig?.Settings?.TryGetValue("include", out var includeValue) == true ? includeValue?.ToString() : null;
             _logger.LogDebug("🔍 [V3-EFFICIENT-DEBUG] Request details - EntityConfig.Include: '{Include}', EntityConfig.PageSize: {PageSize}, SourceStore: {StoreId}", 
                 includeParam, request.EntityConfig?.PageSize, request.SourceStore?.StoreId);
-
-            // ✅ FIXED: Use dynamic discovery limit based on entity configuration to maximize API efficiency
-            // Discovery must match processing chunk size to prevent pagination overlaps
-            var discoveryLimit = request.EntityConfig.PageSize; // Use configured page size for optimal API utilization
             
-            _logger.LogInformation("🚀 [PAGINATION-OPTIMIZED] Using discoveryLimit={DiscoveryLimit} for {EntityType} to match configured pageSize (optimized for API efficiency)", 
-                discoveryLimit, request.EntityType);
+            _logger.LogInformation("🚀 [PAGINATION-OPTIMIZED] Using for {EntityType} to match configured pageSize (optimized for API efficiency)", 
+                request.EntityType);
             
             var paginationRequest = new BigCommercePaginationRequest
             {
                 Page = 1,
-                Limit = discoveryLimit, // MUST match processing chunk size for pagination consistency
-                IncludeDeleted = request.EntityConfig.IncludeDeleted,
-                IncludeDrafts = request.EntityConfig.IncludeDrafts,
+                Limit = 1,
                 SortBy = "id",
                 SortDirection = "asc",
-                // ✅ ENHANCED PRODUCTS: Add include parameter for additional product data
-                // Use the include parameter from the entity configuration for product-components
                 Include = DetermineIncludeParameter(request.EntityType, includeParam)
             };
 
-            _logger.LogInformation("🔍 [V3-EFFICIENT-DEBUG] Making API call with Include='{Include}', Limit={Limit}, EntityType={EntityType}", 
-                paginationRequest.Include, paginationRequest.Limit, request.EntityType);
+            var entityType = DetermineEntityType(request.EntityType);
+
+            _logger.LogInformation("🔍 [V3-EFFICIENT-DEBUG] Making API call with Include='{Include}', Limit={Limit}, entityType={entityType}", 
+                paginationRequest.Include, paginationRequest.Limit, entityType);
 
             var response = await _apiClient.GetPaginatedEntitiesAsync(
-                request.SourceStore,
-                request.EntityType,
+                request.SourceStore!,
+                entityType,
                 paginationRequest,
                 cancellationToken);
                 
@@ -102,8 +96,8 @@ public class V3EfficientPaginationStrategy : IEntityDiscoveryStrategy
             return new EntityDiscoveryResult
             {
                 EntityType = request.EntityType,
-                EntityIds = new List<string>(), // ✅ Empty - will use pagination-based batching
-                EntityData = new List<Dictionary<string, object>>(), // ✅ NO caching for scalability
+                //EntityIds = new List<string>(), // ✅ Empty - will use pagination-based batching
+                //EntityData = new List<Dictionary<string, object>>(), // ✅ NO caching for scalability
                 TotalCount = totalCount,
                 ApiVersion = BigCommerceApiVersion.V3,
                 SkipDiscovery = false,
@@ -143,6 +137,17 @@ public class V3EfficientPaginationStrategy : IEntityDiscoveryStrategy
     }
 
     /// <summary>
+    /// Determine the actual entity type for parent entity components
+    /// </summary>
+    /// <param name="entityType"></param>
+    /// <returns>parent entity type</returns>
+    private string DetermineEntityType(string entityType)
+    {
+        var result = entityType.ToLowerInvariant() switch { "product-components" => "products", _ => entityType };
+        return result;
+    }
+
+    /// <summary>
     /// Determines the appropriate include parameter based on entity type and configuration
     /// </summary>
     /// <param name="entityType">The entity type being discovered</param>
@@ -157,7 +162,7 @@ public class V3EfficientPaginationStrategy : IEntityDiscoveryStrategy
         var result = entityType.ToLowerInvariant() switch
         {
             "products" => "bulk_pricing_rules,custom_fields,channels,videos", // Default for products
-            "product-components" => configuredInclude ?? "options,modifiers,images,reviews", // Use configured or default for components
+            "product-components" => configuredInclude ?? "options,modifiers,reviews", // Use configured or default for components
             "product-variants" => null, // Variants don't support include parameters
             "product-related" => configuredInclude,
             "product-metafields" => configuredInclude,

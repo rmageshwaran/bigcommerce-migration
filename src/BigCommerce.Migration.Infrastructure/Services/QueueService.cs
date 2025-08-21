@@ -20,10 +20,7 @@ public class QueueService : IQueueService
 
     // Queue names (configurable via environment variables)
     private const string MigrationStartQueueName = "migration-start";
-    private const string EntityBatchQueueName = "entity-batch";
-    private const string BatchCompletionQueueName = "batch-completion";
-    private const string DeadLetterQueueName = "dead-letter";
-
+    
     /// <summary>
     /// Initializes a new instance of the QueueService
     /// </summary>

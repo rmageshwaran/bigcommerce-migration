@@ -1,7 +1,7 @@
 using BigCommerce.Migration.Core.Interfaces;
 using Microsoft.Extensions.Logging;
 
-namespace BigCommerce.Migration.Activities.Strategies;
+namespace BigCommerce.Migration.Activities.Strategies.Transform;
 
 /// <summary>
 /// Factory for creating entity transform strategies
@@ -18,7 +18,7 @@ public class EntityTransformStrategyFactory : IEntityTransformStrategyFactory
         ILogger<EntityTransformStrategyFactory> logger)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        
+
         // Create case-insensitive dictionary for strategy lookup
         _strategies = strategies?.ToDictionary(
             s => s.EntityType.ToLowerInvariant(),
@@ -46,8 +46,8 @@ public class EntityTransformStrategyFactory : IEntityTransformStrategyFactory
 
         var availableTypes = string.Join(", ", _strategies.Keys);
         var message = $"No transform strategy found for entity type '{entityType}'. Available types: {availableTypes}";
-        
+
         _logger.LogError(message);
         throw new ArgumentException(message, nameof(entityType));
     }
-} 
+}

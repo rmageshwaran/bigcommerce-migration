@@ -1,7 +1,7 @@
 using BigCommerce.Migration.Core.Interfaces;
 using Microsoft.Extensions.Logging;
 
-namespace BigCommerce.Migration.Activities.Strategies;
+namespace BigCommerce.Migration.Activities.Strategies.Fetch;
 
 /// <summary>
 /// Factory for creating entity fetch strategies based on entity type
@@ -18,7 +18,7 @@ public class EntityFetchStrategyFactory : IEntityFetchStrategyFactory
         ILogger<EntityFetchStrategyFactory> logger)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        
+
         // Create case-insensitive dictionary for strategy lookup
         _strategies = strategies?.ToDictionary(
             s => s.EntityType.ToLowerInvariant(),
@@ -47,7 +47,7 @@ public class EntityFetchStrategyFactory : IEntityFetchStrategyFactory
 
         var availableTypes = string.Join(", ", _strategies.Keys);
         var message = $"No fetch strategy found for entity type '{entityType}'. Available types: {availableTypes}";
-        
+
         _logger.LogError(message);
         throw new ArgumentException(message, nameof(entityType));
     }
@@ -60,14 +60,14 @@ public class EntityFetchStrategyFactory : IEntityFetchStrategyFactory
     private static string NormalizeEntityType(string entityType)
     {
         var normalized = entityType.Trim().ToLowerInvariant();
-        
+
         // Handle singular/plural variations
         return normalized switch
         {
             "category" => "categories",
             // Note: "product", "brand", "variant" removed - these use direct pagination
-                    // Note: "image", "modifier", "option" removed - these are handled as sub-entities within product phases
+            // Note: "image", "modifier", "option" removed - these are handled as sub-entities within product phases
             _ => normalized
         };
     }
-} 
+}

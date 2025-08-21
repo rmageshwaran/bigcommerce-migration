@@ -2,7 +2,7 @@ using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
 using Microsoft.Extensions.Logging;
 
-namespace BigCommerce.Migration.Activities.Strategies;
+namespace BigCommerce.Migration.Activities.Strategies.Transform;
 
 /// <summary>
 /// Transform strategy for variant entities
@@ -27,7 +27,7 @@ public class VariantTransformStrategy : IEntityTransformStrategy
         CategoryTreeContext? categoryTreeContext = null,
         CancellationToken cancellationToken = default)
     {
-        
+
         var transformed = new Dictionary<string, object>(entity);
 
         // Handle product mapping if available
@@ -50,4 +50,4 @@ public class VariantTransformStrategy : IEntityTransformStrategy
 
         return await Task.FromResult(transformed);
     }
-} 
+}

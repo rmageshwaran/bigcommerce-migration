@@ -133,7 +133,7 @@ public class MigrationQueueFunctions
                 {
                     migrationEntry.Status = Core.Models.MigrationStatus.InProgress;
                     migrationEntry.UpdatedAt = DateTime.UtcNow;
-                    await _migrationStorageService.UpdateMigrationAsync(migrationEntry).ConfigureAwait(false);
+                    await _migrationStorageService.UpdateMigrationAsync(migrationEntry);
                     
                     _logger.LogInformation("Updated migration status to InProgress for MigrationId: {MigrationId}", migrationId);
                 }
@@ -160,7 +160,7 @@ public class MigrationQueueFunctions
                 { 
                     InstanceId = $"migration-{migrationId}",
                     StartAt = DateTime.UtcNow
-                }).ConfigureAwait(false);
+                });
 
             _logger.LogInformation("Started migration orchestrator for MigrationId: {MigrationId}, InstanceId: {InstanceId}", 
                 migrationId, instanceId);
@@ -214,134 +214,6 @@ public class MigrationQueueFunctions
                 deadLetterMessage.MessageId);
         }
     }
-
-    /// <summary>
-    /// Processes entity batch messages from the queue
-    /// NOTE: This function may be deprecated as batching is now handled by the entity orchestrator
-    /// </summary>
-    /// <param name="azureQueueMessage">Entity batch message from Azure Storage Queue trigger</param>
-    /// <param name="cancellationToken">Cancellation token</param>
-    [Function("ProcessEntityBatchMessage")]
-    public async Task ProcessEntityBatchMessage(
-        [QueueTrigger("%EntityBatchQueueName%", Connection = "AzureWebJobsStorage")] AzureQueueMessage azureQueueMessage,
-        CancellationToken cancellationToken = default)
-    {
-        // Convert Azure Queue Message to our custom QueueMessage model
-        var queueMessage = ConvertAzureQueueMessage(azureQueueMessage);
-                    await ProcessEntityBatchMessageInternal(queueMessage, cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Processes entity batch messages from the queue
-    /// Internal implementation that accepts the interface for testability
-    /// </summary>
-    /// <param name="queueMessage">Entity batch message from queue trigger</param>
-    /// <param name="cancellationToken">Cancellation token</param>
-    public async Task ProcessEntityBatchMessageInternal(
-        Core.Models.QueueMessage queueMessage,
-        CancellationToken cancellationToken = default)
-    {
-        var migrationId = "unknown";
-        var entityType = "unknown";
-        
-        try
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            
-            _logger.LogInformation("Processing entity batch message. MessageId: {MessageId}", queueMessage.MessageId);
-
-            // Validate and parse the queue message
-            var validationResult = await _queueService.ValidateQueueMessageAsync(queueMessage);
-            if (!validationResult.IsValid)
-            {
-                _logger.LogWarning("Invalid entity batch message. MessageId: {MessageId}, Validation: {ValidationError}", 
-                    queueMessage.MessageId, validationResult.ValidationError);
-                
-                var deadLetterMessage = _queueService.CreateDeadLetterMessage(queueMessage, 
-                    $"Invalid message format: {validationResult.ValidationError}");
-                
-                _logger.LogWarning("Created dead letter message for invalid batch message: {DeadLetterMessageId}", 
-                    deadLetterMessage.MessageId);
-                return;
-            }
-
-            // Check for migration cancellation before processing
-            var batchData = await ExtractBatchFromMessage(queueMessage);
-            if (batchData != null)
-            {
-                migrationId = batchData.MigrationId;
-                entityType = batchData.EntityType;
-                
-                var cancellationTokenEntry = await _migrationStorageService.GetCancellationTokenAsync(migrationId);
-                if (cancellationTokenEntry != null && !cancellationTokenEntry.IsProcessed)
-                {
-                    _logger.LogInformation("Migration {MigrationId} is cancelled, skipping batch processing", migrationId);
-                    return;
-                }
-            }
-
-            // Process the entity batch message
-            var processingResult = await _queueService.ProcessEntityBatchMessageAsync(queueMessage);
-            
-            if (!processingResult.IsSuccess)
-            {
-                _logger.LogError("Failed to process entity batch message. MessageId: {MessageId}, MigrationId: {MigrationId}, Error: {Error}", 
-                    queueMessage.MessageId, migrationId, processingResult.ErrorDetails);
-                
-                if (processingResult.ShouldRetry)
-                {
-                    throw new InvalidOperationException($"Entity batch processing failed: {processingResult.ErrorDetails}");
-                }
-                else
-                {
-                    var deadLetterMessage = _queueService.CreateDeadLetterMessage(queueMessage, 
-                        $"Processing failed: {processingResult.ErrorDetails}");
-                    
-                    _logger.LogError("Created dead letter message for batch processing failure: {DeadLetterMessageId}", 
-                        deadLetterMessage.MessageId);
-                    return;
-                }
-            }
-
-            // Log successful processing
-            await _openSearchService.LogMigrationEventAsync("EntityBatchProcessed", migrationId, new
-            {
-                messageId = queueMessage.MessageId,
-                entityType = entityType,
-                batchNumber = batchData?.BatchNumber ?? 0,
-                processingDuration = processingResult.ProcessingDuration.TotalMilliseconds,
-                successCount = processingResult.Metadata.GetValueOrDefault("SuccessCount", 0),
-                failureCount = processingResult.Metadata.GetValueOrDefault("FailureCount", 0),
-                skippedCount = processingResult.Metadata.GetValueOrDefault("SkippedCount", 0),  // 🚨 FIX: Include SkippedCount
-                cancelledCount = processingResult.Metadata.GetValueOrDefault("CancelledCount", 0)  // 🚨 CANCELLATION FIX: Include CancelledCount
-            }, cancellationToken);
-
-            _logger.LogInformation("Successfully processed entity batch message. MessageId: {MessageId}, MigrationId: {MigrationId}, EntityType: {EntityType}", 
-                queueMessage.MessageId, migrationId, entityType);
-        }
-        catch (OperationCanceledException)
-        {
-            _logger.LogInformation("Entity batch processing was cancelled. MessageId: {MessageId}, MigrationId: {MigrationId}", 
-                queueMessage.MessageId, migrationId);
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Unexpected error processing entity batch message. MessageId: {MessageId}, MigrationId: {MigrationId}", 
-                queueMessage.MessageId, migrationId);
-            
-            var deadLetterMessage = _queueService.CreateDeadLetterMessage(queueMessage, 
-                $"Unexpected error: {ex.Message}");
-            
-            _logger.LogError("Created dead letter message for unexpected batch error: {DeadLetterMessageId}", 
-                deadLetterMessage.MessageId);
-        }
-    }
-
-    // TODO: Implement native Durable Functions cancellation in Phase 1
-    // Complex queue-based cancellation functions removed during Phase 0 cleanup
-
-
 
     #region Helper Methods
 
@@ -430,42 +302,6 @@ public class MigrationQueueFunctions
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to extract migration data from message. MessageId: {MessageId}", queueMessage.MessageId);
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Extracts migration request from queue message
-    /// </summary>
-    /// <param name="queueMessage">Queue message</param>
-    /// <returns>Migration request or null</returns>
-    private async Task<dynamic?> ExtractMigrationFromMessage(Core.Models.QueueMessage queueMessage)
-    {
-        try
-        {
-            return await _queueService.ParseQueueMessageAsync<dynamic>(queueMessage);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to extract migration from message. MessageId: {MessageId}", queueMessage.MessageId);
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Extracts entity batch data from queue message
-    /// </summary>
-    /// <param name="queueMessage">Queue message</param>
-    /// <returns>Entity batch message or null</returns>
-    private async Task<EntityBatchMessage?> ExtractBatchFromMessage(Core.Models.QueueMessage queueMessage)
-    {
-        try
-        {
-            return await _queueService.ParseQueueMessageAsync<EntityBatchMessage>(queueMessage);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to extract batch from message. MessageId: {MessageId}", queueMessage.MessageId);
             return null;
         }
     }

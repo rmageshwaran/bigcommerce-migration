@@ -3,7 +3,7 @@ using BigCommerce.Migration.Core.Models;
 using Microsoft.Extensions.Logging;
 using System.Threading;
 
-namespace BigCommerce.Migration.Activities.Strategies;
+namespace BigCommerce.Migration.Activities.Strategies.Transform;
 
 /// <summary>
 /// Transform strategy for brand entities
@@ -33,18 +33,18 @@ public class BrandTransformStrategy : IEntityTransformStrategy
         var originalId = entity.TryGetValue("_original_entity_id", out var origId) ? origId?.ToString() : "unknown";
         var threadId = Thread.CurrentThread.ManagedThreadId;
         var transformId = Guid.NewGuid().ToString("N")[..8];
-        
+
         _logger.LogInformation("🔄 [TRANSFORM-{TransformId}] 🚀 STARTING: Brand transformation for SourceId={SourceId}, " +
-                              "OriginalId={OriginalId}, ThreadId={ThreadId}, MigrationId={MigrationId}", 
+                              "OriginalId={OriginalId}, ThreadId={ThreadId}, MigrationId={MigrationId}",
             transformId, brandId, originalId, threadId, migrationId);
-        
+
         var transformed = new Dictionary<string, object>();
 
         // Required field: name
         var brandName = GetStringValue(entity, "name") ?? GetStringValue(entity, "brand_name") ?? "Unnamed Brand";
         transformed["name"] = brandName;
-        
-        _logger.LogInformation("🔄 [TRANSFORM-{TransformId}] BRAND NAME: '{BrandName}' (SourceId={SourceId}, ThreadId={ThreadId})", 
+
+        _logger.LogInformation("🔄 [TRANSFORM-{TransformId}] BRAND NAME: '{BrandName}' (SourceId={SourceId}, ThreadId={ThreadId})",
             transformId, brandName, brandId, threadId);
 
         if (brandName == "Unnamed Brand")
@@ -53,7 +53,7 @@ public class BrandTransformStrategy : IEntityTransformStrategy
         }
 
         // Optional fields with proper mapping to BigCommerce API format
-        
+
         // Page title (falls back to name if not provided)
         var pageTitle = GetStringValue(entity, "page_title") ?? GetStringValue(entity, "seo_title") ?? brandName;
         if (!string.IsNullOrWhiteSpace(pageTitle))
@@ -114,10 +114,10 @@ public class BrandTransformStrategy : IEntityTransformStrategy
         {
             transformed["_original_entity_id"] = origEntityId;
         }
-        
+
         _logger.LogInformation("🔄 [TRANSFORM-{TransformId}] ✅ COMPLETED: Brand '{BrandName}' transformed with {FieldCount} fields " +
-                              "CHUNK={ChunkNumber}, API_PAGE={ApiPage} (SourceId={SourceId}, ThreadId={ThreadId}, MigrationId={MigrationId})", 
-            transformId, brandName, transformed.Count, chunkNumber?.ToString() ?? "unknown", 
+                              "CHUNK={ChunkNumber}, API_PAGE={ApiPage} (SourceId={SourceId}, ThreadId={ThreadId}, MigrationId={MigrationId})",
+            transformId, brandName, transformed.Count, chunkNumber?.ToString() ?? "unknown",
             apiPage?.ToString() ?? "unknown", brandId, threadId, migrationId);
 
         return await Task.FromResult(transformed);
@@ -225,7 +225,7 @@ public class BrandTransformStrategy : IEntityTransformStrategy
                 if (jsonElement.ValueKind == System.Text.Json.JsonValueKind.Object)
                 {
                     var customUrl = new Dictionary<string, object>();
-                    
+
                     if (jsonElement.TryGetProperty("url", out var urlElement))
                     {
                         var urlValue = urlElement.GetString();
@@ -234,7 +234,7 @@ public class BrandTransformStrategy : IEntityTransformStrategy
                             customUrl["url"] = urlValue;
                         }
                     }
-                    
+
                     if (jsonElement.TryGetProperty("is_customized", out var isCustomizedElement))
                     {
                         customUrl["is_customized"] = isCustomizedElement.GetBoolean();
@@ -243,7 +243,7 @@ public class BrandTransformStrategy : IEntityTransformStrategy
                     {
                         customUrl["is_customized"] = true; // Default for migrated URLs
                     }
-                    
+
                     return customUrl.ContainsKey("url") ? customUrl : null;
                 }
                 else if (jsonElement.ValueKind == System.Text.Json.JsonValueKind.String)
@@ -261,8 +261,8 @@ public class BrandTransformStrategy : IEntityTransformStrategy
             }
             // Handle native Dictionary<string, object>
             else if (customUrlObj is Dictionary<string, object> existingCustomUrl)
-        {
-            return existingCustomUrl;
+            {
+                return existingCustomUrl;
             }
             // Handle other dictionary types
             else if (customUrlObj is IDictionary<string, object> dictCustomUrl)
@@ -290,4 +290,4 @@ public class BrandTransformStrategy : IEntityTransformStrategy
 
         return null;
     }
-} 
+}

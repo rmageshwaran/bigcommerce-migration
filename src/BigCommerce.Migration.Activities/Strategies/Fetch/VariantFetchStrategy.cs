@@ -2,7 +2,7 @@ using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
 using Microsoft.Extensions.Logging;
 
-namespace BigCommerce.Migration.Activities.Strategies;
+namespace BigCommerce.Migration.Activities.Strategies.Fetch;
 
 /// <summary>
 /// Fetch strategy for product variant entities
@@ -68,7 +68,7 @@ public class VariantFetchStrategy : IEntityFetchStrategy
 
                 // Filter to get only the requested variants
                 var filteredVariants = response.Data
-                    .Where(variant => 
+                    .Where(variant =>
                     {
                         var variantId = variant.TryGetValue("id", out var id) ? id.ToString() : null;
                         return variantId != null && entityIds.Contains(variantId);
@@ -97,7 +97,7 @@ public class VariantFetchStrategy : IEntityFetchStrategy
                 paginationRequest.Page++;
             }
 
-            _logger.LogInformation("Successfully fetched {FetchedCount}/{RequestedCount} variants for migration {MigrationId}", 
+            _logger.LogInformation("Successfully fetched {FetchedCount}/{RequestedCount} variants for migration {MigrationId}",
                 fetchedVariants.Count, entityIds.Count, migrationId);
 
             return fetchedVariants;
@@ -109,9 +109,9 @@ public class VariantFetchStrategy : IEntityFetchStrategy
                             "Store: {StoreId}, RequestedVariantIds: {VariantCount}, RequestedIds: [{VariantIds}], " +
                             "ErrorType: {ErrorType}, Category: Error",
                 migrationId, sourceStore.StoreId, entityIds.Count, string.Join(",", entityIds), ex.GetType().Name);
-            
+
             // Return empty list to allow migration to continue with other batches
             return new List<Dictionary<string, object>>();
         }
     }
-} 
+}

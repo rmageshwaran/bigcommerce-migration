@@ -3,7 +3,7 @@ using BigCommerce.Migration.Core.Models;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
 
-namespace BigCommerce.Migration.Activities.Strategies;
+namespace BigCommerce.Migration.Activities.Strategies.Transform;
 
 /// <summary>
 /// Transform strategy for modifier entities
@@ -43,7 +43,7 @@ public class ModifierTransformStrategy : IEntityTransformStrategy
         // 🧹 CLEANUP: Remove null values and source-specific fields
         CleanupModifierData(transformed);
 
-        _logger.LogDebug("✅ [MODIFIERS-TRANSFORM] Transformed modifier entity for migration {MigrationId}: type={Type}, name={Name}", 
+        _logger.LogDebug("✅ [MODIFIERS-TRANSFORM] Transformed modifier entity for migration {MigrationId}: type={Type}, name={Name}",
             migrationId, transformed.TryGetValue("type", out var type) ? type : "unknown",
             transformed.TryGetValue("name", out var modifierName) ? modifierName : "unknown");
 
@@ -54,8 +54,8 @@ public class ModifierTransformStrategy : IEntityTransformStrategy
     /// Ensures product_id is properly mapped from source to destination product ID
     /// </summary>
     private async Task EnsureProductIdMappingAsync(
-        Dictionary<string, object> transformed, 
-        string migrationId, 
+        Dictionary<string, object> transformed,
+        string migrationId,
         CancellationToken cancellationToken)
     {
         if (!transformed.TryGetValue("product_id", out var productIdValue) || productIdValue == null)
@@ -79,12 +79,12 @@ public class ModifierTransformStrategy : IEntityTransformStrategy
             {
                 // Update to destination product ID
                 transformed["product_id"] = productMapping.DestinationId;
-                _logger.LogDebug("🔗 [MODIFIERS-TRANSFORM] Mapped product_id: {SourceProductId} → {DestinationProductId}", 
+                _logger.LogDebug("🔗 [MODIFIERS-TRANSFORM] Mapped product_id: {SourceProductId} → {DestinationProductId}",
                     sourceProductId, productMapping.DestinationId);
             }
             else
             {
-                _logger.LogWarning("⚠️ [MODIFIERS-TRANSFORM] No product mapping found for product {SourceProductId} in migration {MigrationId}", 
+                _logger.LogWarning("⚠️ [MODIFIERS-TRANSFORM] No product mapping found for product {SourceProductId} in migration {MigrationId}",
                     sourceProductId, migrationId);
             }
         }
@@ -151,7 +151,7 @@ public class ModifierTransformStrategy : IEntityTransformStrategy
                         optionValueData.Remove("id");
                         optionValueData.Remove("modifier_id");
                     }
-                    
+
                     // Replace the JsonElement with the cleaned List
                     transformed["option_values"] = optionValuesList;
                     _logger.LogDebug("✅ [MODIFIER-TRANSFORM] Removed ID fields from {Count} option values (JsonElement type)", optionValuesList.Count);
@@ -169,4 +169,4 @@ public class ModifierTransformStrategy : IEntityTransformStrategy
             }
         }
     }
-} 
+}

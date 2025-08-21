@@ -2,7 +2,7 @@ using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
 using Microsoft.Extensions.Logging;
 
-namespace BigCommerce.Migration.Activities.Strategies;
+namespace BigCommerce.Migration.Activities.Strategies.Fetch;
 
 /// <summary>
 /// Fetch strategy for category entities
@@ -38,29 +38,29 @@ public class CategoryFetchStrategy : IEntityFetchStrategy
         {
             return new List<Dictionary<string, object>>();
         }
-        
-        _logger.LogInformation("Fetching {Count} specific categories for migration {MigrationId}", 
+
+        _logger.LogInformation("Fetching {Count} specific categories for migration {MigrationId}",
             entityIds.Count, migrationId);
-        
+
         // Log requested entity IDs for debugging
         _logger.LogDebug("Requested category IDs: [{EntityIds}] for migration {MigrationId}",
             string.Join(", ", entityIds), migrationId);
 
         // Determine category tree ID for fetching
         var categoryTreeId = categoryTreeContext?.SourceCategoryTreeId ?? "1"; // Default to tree 1
-        
+
         _logger.LogDebug("Using category tree ID {CategoryTreeId} for fetching categories", categoryTreeId);
 
         // ✅ FIX: Implement proper pagination to get ALL categories from the tree
         var allCategories = new List<Dictionary<string, object>>();
         var currentPage = 1;
-        
+
         try
         {
             do
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                
+
                 var paginationRequest = new BigCommercePaginationRequest
                 {
                     Page = currentPage,
@@ -77,47 +77,47 @@ public class CategoryFetchStrategy : IEntityFetchStrategy
                     cancellationToken);
 
                 var pageCategories = response.Data ?? new List<Dictionary<string, object>>();
-            
-            if (pageCategories.Any())
-            {
-                allCategories.AddRange(pageCategories);
-                _logger.LogDebug("Fetched {PageCount} categories from page {Page} (total so far: {Total})",
-                    pageCategories.Count, currentPage, allCategories.Count);
-            }
-            
-            // ✅ ROBUST PAGINATION: Use multiple exit conditions for reliability
-            // 1. No more data returned
-            if (!pageCategories.Any())
-            {
-                _logger.LogDebug("No more categories returned from page {Page}, ending pagination", currentPage);
-                break;
-            }
-            
-            // 2. API metadata indicates last page (if available)
-            if (response.TotalPages.HasValue && currentPage >= response.TotalPages.Value)
-            {
-                _logger.LogDebug("Reached API-indicated last page {TotalPages}", response.TotalPages.Value);
-                break;
-            }
-            
-            // 3. Returned fewer items than limit (indicates last page)
-            if (pageCategories.Count < paginationRequest.Limit)
-            {
-                _logger.LogDebug("Page {Page} returned {Count} items (less than limit {Limit}), ending pagination",
-                    currentPage, pageCategories.Count, paginationRequest.Limit);
-                break;
-            }
-            
-            currentPage++;
-            
-            // 4. Safety check - prevent infinite loops
-            if (currentPage > 50)
-            {
-                _logger.LogWarning("Breaking pagination loop after 50 pages for categories to prevent infinite loop");
-                break;
-            }
-            
-        } while (true);
+
+                if (pageCategories.Any())
+                {
+                    allCategories.AddRange(pageCategories);
+                    _logger.LogDebug("Fetched {PageCount} categories from page {Page} (total so far: {Total})",
+                        pageCategories.Count, currentPage, allCategories.Count);
+                }
+
+                // ✅ ROBUST PAGINATION: Use multiple exit conditions for reliability
+                // 1. No more data returned
+                if (!pageCategories.Any())
+                {
+                    _logger.LogDebug("No more categories returned from page {Page}, ending pagination", currentPage);
+                    break;
+                }
+
+                // 2. API metadata indicates last page (if available)
+                if (response.TotalPages.HasValue && currentPage >= response.TotalPages.Value)
+                {
+                    _logger.LogDebug("Reached API-indicated last page {TotalPages}", response.TotalPages.Value);
+                    break;
+                }
+
+                // 3. Returned fewer items than limit (indicates last page)
+                if (pageCategories.Count < paginationRequest.Limit)
+                {
+                    _logger.LogDebug("Page {Page} returned {Count} items (less than limit {Limit}), ending pagination",
+                        currentPage, pageCategories.Count, paginationRequest.Limit);
+                    break;
+                }
+
+                currentPage++;
+
+                // 4. Safety check - prevent infinite loops
+                if (currentPage > 50)
+                {
+                    _logger.LogWarning("Breaking pagination loop after 50 pages for categories to prevent infinite loop");
+                    break;
+                }
+
+            } while (true);
 
             _logger.LogInformation("✅ Pagination completed: Retrieved {TotalCount} categories from {Pages} pages for tree {TreeId}",
                 allCategories.Count, currentPage, categoryTreeId);
@@ -131,7 +131,7 @@ public class CategoryFetchStrategy : IEntityFetchStrategy
                             "ErrorType: {ErrorType}, Category: Error",
                 migrationId, sourceStore.StoreId, categoryTreeId, currentPage,
                 entityIds.Count, string.Join(",", entityIds), ex.GetType().Name);
-            
+
             // Return empty list to allow migration to continue with other entity types
             return new List<Dictionary<string, object>>();
         }
@@ -152,21 +152,21 @@ public class CategoryFetchStrategy : IEntityFetchStrategy
 
         // ✅ HIERARCHICAL SORTING: Sort categories so parents come before children
         var sortedCategories = SortCategoriesHierarchically(allCategories, cancellationToken);
-        
+
         _logger.LogDebug("Hierarchical sorting completed: {SortedCount} categories sorted from {OriginalCount} total",
             sortedCategories.Count, allCategories.Count);
-        
+
         // ✅ VALIDATION: Check if any categories were dropped during sorting
         if (sortedCategories.Count != allCategories.Count)
         {
             var droppedCount = allCategories.Count - sortedCategories.Count;
             _logger.LogWarning("⚠️ Hierarchical sorting dropped {DroppedCount} categories! Original: {OriginalCount}, Sorted: {SortedCount}",
                 droppedCount, allCategories.Count, sortedCategories.Count);
-            
+
             // Find which categories were dropped
             var sortedIds = new HashSet<string>(sortedCategories.Select(c => c.GetValueOrDefault("id")?.ToString() ?? ""));
             var droppedCategories = allCategories.Where(c => !sortedIds.Contains(c.GetValueOrDefault("id")?.ToString() ?? ""));
-            
+
             foreach (var dropped in droppedCategories)
             {
                 var id = dropped.GetValueOrDefault("id")?.ToString() ?? "unknown";
@@ -175,7 +175,7 @@ public class CategoryFetchStrategy : IEntityFetchStrategy
                 _logger.LogWarning("⚠️ Dropped category: ID={Id}, Name='{Name}', ParentId={ParentId}", id, name, parentId);
             }
         }
-        
+
         // Filter to only the requested categories while preserving hierarchical order
         var requestedEntityIdsSet = new HashSet<string>(entityIds);
         var filteredCategories = sortedCategories
@@ -188,7 +188,7 @@ public class CategoryFetchStrategy : IEntityFetchStrategy
         // ✅ VALIDATION: Check for missing requested categories
         var foundIds = new HashSet<string>(filteredCategories.Select(c => c.GetValueOrDefault("id")?.ToString() ?? ""));
         var missingIds = entityIds.Where(id => !foundIds.Contains(id)).ToList();
-        
+
         if (missingIds.Any())
         {
             _logger.LogWarning("⚠️ Missing {MissingCount} requested categories from fetch results: [{MissingIds}]",
@@ -212,10 +212,10 @@ public class CategoryFetchStrategy : IEntityFetchStrategy
             category["_original_entity_id"] = categoryId;
         }
 
-        _logger.LogInformation("Found {FoundCount}/{RequestedCount} categories from {TotalCount} total categories", 
+        _logger.LogInformation("Found {FoundCount}/{RequestedCount} categories from {TotalCount} total categories",
             filteredCategories.Count, entityIds.Count, allCategories.Count);
 
-        _logger.LogInformation("✅ Successfully fetched {Count} of {Total} categories for migration {MigrationId}", 
+        _logger.LogInformation("✅ Successfully fetched {Count} of {Total} categories for migration {MigrationId}",
             filteredCategories.Count, entityIds.Count, migrationId);
 
         return filteredCategories;
@@ -227,7 +227,7 @@ public class CategoryFetchStrategy : IEntityFetchStrategy
     private static List<Dictionary<string, object>> SortCategoriesHierarchically(List<Dictionary<string, object>> categories, CancellationToken cancellationToken = default)
     {
         var sortedCategories = new List<Dictionary<string, object>>();
-        
+
         // Create a mapping with proper ID handling to avoid duplicate key issues
         var categoryMap = new Dictionary<string, Dictionary<string, object>>();
         foreach (var category in categories)
@@ -238,7 +238,7 @@ public class CategoryFetchStrategy : IEntityFetchStrategy
                 categoryMap[id] = category;
             }
         }
-        
+
         var processedIds = new HashSet<string>();
 
         // Process categories level by level (breadth-first)
@@ -248,7 +248,7 @@ public class CategoryFetchStrategy : IEntityFetchStrategy
         {
             // Check for cancellation between processing levels (for large category trees)
             cancellationToken.ThrowIfCancellationRequested();
-            
+
             var nextLevelParentIds = new HashSet<string>();
 
             foreach (var category in categories)
@@ -270,4 +270,4 @@ public class CategoryFetchStrategy : IEntityFetchStrategy
 
         return sortedCategories;
     }
-} 
+}

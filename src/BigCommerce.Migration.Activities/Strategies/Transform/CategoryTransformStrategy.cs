@@ -4,7 +4,7 @@ using BigCommerce.Migration.Core.Models;
 using BigCommerce.Migration.Activities.Services;
 using Microsoft.Extensions.Logging;
 
-namespace BigCommerce.Migration.Activities.Strategies;
+namespace BigCommerce.Migration.Activities.Strategies.Transform;
 
 /// <summary>
 /// Transform strategy for category entities
@@ -26,29 +26,29 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
     }
 
     public async Task<Dictionary<string, object>> TransformEntityAsync(
-        Dictionary<string, object> entity, 
-        string migrationId, 
-        StoreConfiguration sourceStore, 
-        StoreConfiguration destinationStore, 
+        Dictionary<string, object> entity,
+        string migrationId,
+        StoreConfiguration sourceStore,
+        StoreConfiguration destinationStore,
         CategoryTreeContext? categoryTreeContext = null,
         CancellationToken cancellationToken = default)
     {
         var entityId = entity.GetValueOrDefault("id")?.ToString() ?? "unknown";
         var entityName = entity.GetValueOrDefault("name")?.ToString() ?? "unknown";
-        
-        _logger.LogDebug("🔧 [TRANSFORM] ⭐ STARTING: Transforming category {EntityId} ('{EntityName}') for migration {MigrationId}", 
+
+        _logger.LogDebug("🔧 [TRANSFORM] ⭐ STARTING: Transforming category {EntityId} ('{EntityName}') for migration {MigrationId}",
             entityId, entityName, migrationId);
-            
+
         // 🚨 CRITICAL DEBUG: Log CategoryTreeContext details
         if (categoryTreeContext == null)
         {
-            _logger.LogError("🚨 [TRANSFORM] ❌ CRITICAL: CategoryTreeContext is NULL for category {EntityId} in migration {MigrationId}", 
+            _logger.LogError("🚨 [TRANSFORM] ❌ CRITICAL: CategoryTreeContext is NULL for category {EntityId} in migration {MigrationId}",
                 entityId, migrationId);
         }
         else
         {
-            _logger.LogInformation("🔧 [TRANSFORM] 📋 CategoryTreeContext: SourceTreeId='{SourceTreeId}', DestinationTreeId='{DestinationTreeId}', SourceChannelId='{SourceChannelId}', DestinationChannelId='{DestinationChannelId}' for migration {MigrationId}", 
-                categoryTreeContext.SourceCategoryTreeId ?? "NULL", 
+            _logger.LogInformation("🔧 [TRANSFORM] 📋 CategoryTreeContext: SourceTreeId='{SourceTreeId}', DestinationTreeId='{DestinationTreeId}', SourceChannelId='{SourceChannelId}', DestinationChannelId='{DestinationChannelId}' for migration {MigrationId}",
+                categoryTreeContext.SourceCategoryTreeId ?? "NULL",
                 categoryTreeContext.DestinationCategoryTreeId ?? "NULL",
                 categoryTreeContext.SourceChannelId ?? "NULL",
                 categoryTreeContext.DestinationChannelId ?? "NULL",
@@ -56,10 +56,10 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
         }
 
         _logger.LogDebug("Transforming category for migration {MigrationId}", migrationId);
-        
+
         // Start with a clean dictionary and copy only valid BigCommerce fields
         var transformed = new Dictionary<string, object>();
-        
+
         // Copy valid BigCommerce category fields from source
         CopyValidBigCommerceFields(entity, transformed, migrationId);
 
@@ -103,7 +103,7 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
             "name", "parent_id", "is_visible", "sort_order", "tree_id",
             
             // Content fields  
-            "description", "page_title", "meta_keywords", "meta_description", 
+            "description", "page_title", "meta_keywords", "meta_description",
             "search_keywords", "layout_file",
             
             // Display fields
@@ -120,8 +120,8 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
                 destination[field] = source[field];
             }
         }
-        
-        _logger.LogDebug("Copied {Count} valid BigCommerce fields for migration {MigrationId}", 
+
+        _logger.LogDebug("Copied {Count} valid BigCommerce fields for migration {MigrationId}",
             destination.Count, migrationId);
     }
 
@@ -151,10 +151,10 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
                 removedFields.Add(invalidField);
             }
         }
-        
+
         if (removedFields.Any())
         {
-            _logger.LogDebug("Removed invalid fields: {InvalidFields} for migration {MigrationId}", 
+            _logger.LogDebug("Removed invalid fields: {InvalidFields} for migration {MigrationId}",
                 string.Join(", ", removedFields), migrationId);
         }
     }
@@ -168,7 +168,7 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
                 if (!string.IsNullOrWhiteSpace(categoryTreeContext.DestinationCategoryTreeId))
                 {
                     transformed["category_tree_id"] = categoryTreeContext.DestinationCategoryTreeId;
-                    _logger.LogDebug("Mapped category tree ID from {SourceTreeId} to {DestinationTreeId} for migration {MigrationId}", 
+                    _logger.LogDebug("Mapped category tree ID from {SourceTreeId} to {DestinationTreeId} for migration {MigrationId}",
                         sourceTreeId, categoryTreeContext.DestinationCategoryTreeId, migrationId);
                 }
                 else
@@ -188,8 +188,8 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
                 try
                 {
                     // Handle common malformed cases
-                    if (string.IsNullOrWhiteSpace(metaKeywordsString) || 
-                        metaKeywordsString == "[]" || 
+                    if (string.IsNullOrWhiteSpace(metaKeywordsString) ||
+                        metaKeywordsString == "[]" ||
                         metaKeywordsString == "[\"\"]" ||
                         metaKeywordsString == "[\"[]\"]")
                     {
@@ -199,19 +199,19 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
                     else
                     {
                         // Try to parse as JSON array
-                        var parsedKeywords = System.Text.Json.JsonSerializer.Deserialize<List<string>>(metaKeywordsString);
+                        var parsedKeywords = JsonSerializer.Deserialize<List<string>>(metaKeywordsString);
                         transformed["meta_keywords"] = parsedKeywords ?? new List<string>();
                         _logger.LogDebug("Successfully parsed meta_keywords JSON for migration {MigrationId}", migrationId);
                     }
                 }
-                catch (System.Text.Json.JsonException ex)
+                catch (JsonException ex)
                 {
                     // If parsing fails, try to split as comma-separated values
                     var keywords = metaKeywordsString.Split(',', StringSplitOptions.RemoveEmptyEntries)
                         .Select(k => k.Trim())
                         .Where(k => !string.IsNullOrWhiteSpace(k))
                         .ToList();
-                    
+
                     transformed["meta_keywords"] = keywords;
                     _logger.LogWarning(ex, "Failed to parse meta_keywords as JSON, split as CSV instead for migration {MigrationId}", migrationId);
                 }
@@ -303,7 +303,7 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
     {
         // BigCommerce V3 API expects 'url' structure with 'path' field as an object
         string? existingUrlPath = null;
-        
+
         // Check if there's already a URL field and extract the path
         if (transformed.ContainsKey("url"))
         {
@@ -311,22 +311,22 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
             if (existingUrl is string urlString && !string.IsNullOrWhiteSpace(urlString))
             {
                 existingUrlPath = urlString;
-                _logger.LogDebug("Found existing string URL '{ExistingUrl}' - converting to object structure for migration {MigrationId}", 
+                _logger.LogDebug("Found existing string URL '{ExistingUrl}' - converting to object structure for migration {MigrationId}",
                     urlString, migrationId);
             }
-            else if (existingUrl is Dictionary<string, object> existingUrlDict && 
-                     existingUrlDict.TryGetValue("path", out var pathValue) && 
+            else if (existingUrl is Dictionary<string, object> existingUrlDict &&
+                     existingUrlDict.TryGetValue("path", out var pathValue) &&
                      !string.IsNullOrWhiteSpace(pathValue?.ToString()))
             {
                 existingUrlPath = pathValue.ToString();
-                _logger.LogDebug("Found existing URL object with path '{ExistingPath}' for migration {MigrationId}", 
+                _logger.LogDebug("Found existing URL object with path '{ExistingPath}' for migration {MigrationId}",
                     existingUrlPath, migrationId);
             }
         }
 
         // Always create a new URL object structure (required by BigCommerce V3)
         var urlStructure = new Dictionary<string, object>();
-        
+
         // Set the path field
         if (!string.IsNullOrWhiteSpace(existingUrlPath))
         {
@@ -343,17 +343,17 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
             var categoryName = transformed["name"]?.ToString() ?? "category";
             var urlPath = GenerateUrlPath(categoryName);
             urlStructure["path"] = $"/{urlPath}/";
-            _logger.LogDebug("Generated URL path '{UrlPath}' from category name '{CategoryName}' for migration {MigrationId}", 
+            _logger.LogDebug("Generated URL path '{UrlPath}' from category name '{CategoryName}' for migration {MigrationId}",
                 urlPath, categoryName, migrationId);
         }
 
         // Always set is_customized to false (matches BigCommerce API documentation)
         urlStructure["is_customized"] = false;
-        
+
         // Replace the url field with the proper object structure
         transformed["url"] = urlStructure;
-        
-        _logger.LogDebug("Created URL object structure with path '{UrlPath}' for migration {MigrationId}", 
+
+        _logger.LogDebug("Created URL object structure with path '{UrlPath}' for migration {MigrationId}",
             urlStructure["path"], migrationId);
 
         // Also ensure tree_id is set as a direct field (required by BigCommerce V3)
@@ -364,27 +364,27 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
     {
         if (transformed.TryGetValue("parent_id", out var parentId))
         {
-            _logger.LogDebug("🔍 DEBUG: HandleParentIdConversionAsync - processing parent_id: {ParentId} (type: {ParentIdType}) for migration {MigrationId}", 
+            _logger.LogDebug("🔍 DEBUG: HandleParentIdConversionAsync - processing parent_id: {ParentId} (type: {ParentIdType}) for migration {MigrationId}",
                 parentId, parentId?.GetType().Name, migrationId);
-                
+
             if (parentId is string parentIdString)
             {
-                _logger.LogDebug("🔍 DEBUG: Looking up mapping for parent_id string '{ParentIdString}' in migration {MigrationId}", 
+                _logger.LogDebug("🔍 DEBUG: Looking up mapping for parent_id string '{ParentIdString}' in migration {MigrationId}",
                     parentIdString, migrationId);
-                    
+
                 var mappedParentId = await _entityMappingService.GetDestinationIdAsync(
                     migrationId,
                     "categories",
                     parentIdString,
                     cancellationToken);
 
-                _logger.LogDebug("🔍 DEBUG: Mapping lookup result for parent_id '{ParentIdString}': '{MappedParentId}' in migration {MigrationId}", 
+                _logger.LogDebug("🔍 DEBUG: Mapping lookup result for parent_id '{ParentIdString}': '{MappedParentId}' in migration {MigrationId}",
                     parentIdString, mappedParentId ?? "NULL", migrationId);
 
                 if (!string.IsNullOrEmpty(mappedParentId) && int.TryParse(mappedParentId, out var parsedMappedId))
                 {
                     transformed["parent_id"] = parsedMappedId;
-                    _logger.LogDebug("🔍 DEBUG: ✅ Successfully mapped parent_id {ParentIdString} to {MappedParentId} for migration {MigrationId}", 
+                    _logger.LogDebug("🔍 DEBUG: ✅ Successfully mapped parent_id {ParentIdString} to {MappedParentId} for migration {MigrationId}",
                         parentIdString, parsedMappedId, migrationId);
                 }
                 else if (int.TryParse(parentIdString, out var parsedOriginal))
@@ -402,9 +402,9 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
             }
             else if (parentId is int parentIdInt)
             {
-                _logger.LogDebug("🔍 DEBUG: Looking up mapping for parent_id int '{ParentIdInt}' in migration {MigrationId}", 
+                _logger.LogDebug("🔍 DEBUG: Looking up mapping for parent_id int '{ParentIdInt}' in migration {MigrationId}",
                     parentIdInt, migrationId);
-                    
+
                 // Try to map the integer parent_id to destination store
                 var mappedParentId = await _entityMappingService.GetDestinationIdAsync(
                     migrationId,
@@ -412,13 +412,13 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
                     parentIdInt.ToString(),
                     cancellationToken);
 
-                _logger.LogDebug("🔍 DEBUG: Mapping lookup result for parent_id '{ParentIdInt}': '{MappedParentId}' in migration {MigrationId}", 
+                _logger.LogDebug("🔍 DEBUG: Mapping lookup result for parent_id '{ParentIdInt}': '{MappedParentId}' in migration {MigrationId}",
                     parentIdInt, mappedParentId ?? "NULL", migrationId);
 
                 if (!string.IsNullOrEmpty(mappedParentId) && int.TryParse(mappedParentId, out var parsedMappedId))
                 {
                     transformed["parent_id"] = parsedMappedId;
-                    _logger.LogDebug("🔍 DEBUG: ✅ Successfully mapped parent_id {ParentIdInt} to {MappedParentId} for migration {MigrationId}", 
+                    _logger.LogDebug("🔍 DEBUG: ✅ Successfully mapped parent_id {ParentIdInt} to {MappedParentId} for migration {MigrationId}",
                         parentIdInt, parsedMappedId, migrationId);
                 }
                 else
@@ -441,9 +441,9 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
     private void EnsureTreeIdField(Dictionary<string, object> transformed, CategoryTreeContext? categoryTreeContext, string migrationId)
     {
         var entityId = transformed.GetValueOrDefault("id")?.ToString() ?? transformed.GetValueOrDefault("_original_entity_id")?.ToString() ?? "unknown";
-        
+
         _logger.LogDebug("🔧 [TREE-ID] ⭐ STARTING: Ensuring tree_id for entity {EntityId} in migration {MigrationId}", entityId, migrationId);
-        
+
         // 🚨 CRITICAL DEBUG: Log CategoryTreeContext validation
         if (categoryTreeContext == null)
         {
@@ -451,15 +451,15 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
         }
         else if (string.IsNullOrWhiteSpace(categoryTreeContext.DestinationCategoryTreeId))
         {
-            _logger.LogError("🚨 [TREE-ID] ❌ CRITICAL: DestinationCategoryTreeId is NULL/EMPTY for entity {EntityId} in migration {MigrationId}. CategoryTreeContext exists but DestinationTreeId='{DestinationTreeId}'", 
+            _logger.LogError("🚨 [TREE-ID] ❌ CRITICAL: DestinationCategoryTreeId is NULL/EMPTY for entity {EntityId} in migration {MigrationId}. CategoryTreeContext exists but DestinationTreeId='{DestinationTreeId}'",
                 entityId, migrationId, categoryTreeContext.DestinationCategoryTreeId ?? "NULL");
         }
         else
         {
-            _logger.LogInformation("🔧 [TREE-ID] ✅ VALID: CategoryTreeContext has DestinationTreeId='{DestinationTreeId}' for entity {EntityId} in migration {MigrationId}", 
+            _logger.LogInformation("🔧 [TREE-ID] ✅ VALID: CategoryTreeContext has DestinationTreeId='{DestinationTreeId}' for entity {EntityId} in migration {MigrationId}",
                 categoryTreeContext.DestinationCategoryTreeId, entityId, migrationId);
         }
-        
+
         // BigCommerce V3 API requires tree_id field
         // Use the resolved destination tree ID from the category tree context
         if (categoryTreeContext != null && !string.IsNullOrWhiteSpace(categoryTreeContext.DestinationCategoryTreeId))
@@ -467,13 +467,13 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
             if (int.TryParse(categoryTreeContext.DestinationCategoryTreeId, out var resolvedTreeId))
             {
                 transformed["tree_id"] = resolvedTreeId;
-                _logger.LogInformation("🔧 [TREE-ID] ✅ SUCCESS: Set tree_id {TreeId} from resolved destination category tree context for entity {EntityId} in migration {MigrationId}", 
+                _logger.LogInformation("🔧 [TREE-ID] ✅ SUCCESS: Set tree_id {TreeId} from resolved destination category tree context for entity {EntityId} in migration {MigrationId}",
                     resolvedTreeId, entityId, migrationId);
                 return;
             }
             else
             {
-                _logger.LogError("🚨 [TREE-ID] ❌ PARSE-ERROR: Failed to parse DestinationCategoryTreeId '{DestinationTreeId}' as integer for entity {EntityId} in migration {MigrationId}", 
+                _logger.LogError("🚨 [TREE-ID] ❌ PARSE-ERROR: Failed to parse DestinationCategoryTreeId '{DestinationTreeId}' as integer for entity {EntityId} in migration {MigrationId}",
                     categoryTreeContext.DestinationCategoryTreeId, entityId, migrationId);
             }
         }
@@ -496,31 +496,31 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
     {
         // Simple URL-friendly path generation using string operations only
         var result = categoryName.ToLowerInvariant();
-        
+
         // Replace spaces with dashes
         result = result.Replace(" ", "-");
-        
+
         // Replace common characters
         result = result.Replace("&", "and");
         result = result.Replace("+", "plus");
         result = result.Replace("@", "at");
-        
+
         // Remove problematic characters by using string operations
         var charsToRemove = new string[] { "'", "\"", "(", ")", ",", ".", ":", ";", "?", "!", "#", "$", "%", "^", "*", "=", "[", "]", "{", "}", "|", "\\", "/", "<", ">", "~", "`" };
         foreach (var charStr in charsToRemove)
         {
             result = result.Replace(charStr, "");
         }
-        
+
         // Clean up multiple dashes
         while (result.Contains("--"))
         {
             result = result.Replace("--", "-");
         }
-        
+
         // Trim dashes from start and end
         result = result.Trim('-');
-        
+
         return result;
     }
-} 
+}

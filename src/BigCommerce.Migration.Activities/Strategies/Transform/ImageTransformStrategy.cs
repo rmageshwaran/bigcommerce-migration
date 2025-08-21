@@ -2,7 +2,7 @@ using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
 using Microsoft.Extensions.Logging;
 
-namespace BigCommerce.Migration.Activities.Strategies;
+namespace BigCommerce.Migration.Activities.Strategies.Transform;
 
 /// <summary>
 /// Transform strategy for image entities
@@ -42,7 +42,7 @@ public class ImageTransformStrategy : IEntityTransformStrategy
         // 🧹 CLEANUP: Remove null values and source-specific fields
         CleanupImageData(transformed);
 
-        _logger.LogDebug("✅ [IMAGES-TRANSFORM] Transformed image entity for migration {MigrationId}: has_image_url={HasImageUrl}", 
+        _logger.LogDebug("✅ [IMAGES-TRANSFORM] Transformed image entity for migration {MigrationId}: has_image_url={HasImageUrl}",
             migrationId, transformed.ContainsKey("image_url"));
 
         return transformed;
@@ -52,8 +52,8 @@ public class ImageTransformStrategy : IEntityTransformStrategy
     /// Ensures product_id is properly mapped from source to destination product ID
     /// </summary>
     private async Task EnsureProductIdMappingAsync(
-        Dictionary<string, object> transformed, 
-        string migrationId, 
+        Dictionary<string, object> transformed,
+        string migrationId,
         CancellationToken cancellationToken)
     {
         if (!transformed.TryGetValue("product_id", out var productIdValue) || productIdValue == null)
@@ -77,12 +77,12 @@ public class ImageTransformStrategy : IEntityTransformStrategy
             {
                 // Update to destination product ID
                 transformed["product_id"] = productMapping.DestinationId;
-                _logger.LogDebug("🔗 [IMAGES-TRANSFORM] Mapped product_id: {SourceProductId} → {DestinationProductId}", 
+                _logger.LogDebug("🔗 [IMAGES-TRANSFORM] Mapped product_id: {SourceProductId} → {DestinationProductId}",
                     sourceProductId, productMapping.DestinationId);
             }
             else
             {
-                _logger.LogWarning("⚠️ [IMAGES-TRANSFORM] No product mapping found for product {SourceProductId} in migration {MigrationId}", 
+                _logger.LogWarning("⚠️ [IMAGES-TRANSFORM] No product mapping found for product {SourceProductId} in migration {MigrationId}",
                     sourceProductId, migrationId);
             }
         }
@@ -135,4 +135,4 @@ public class ImageTransformStrategy : IEntityTransformStrategy
             transformed.Remove(field);
         }
     }
-} 
+}

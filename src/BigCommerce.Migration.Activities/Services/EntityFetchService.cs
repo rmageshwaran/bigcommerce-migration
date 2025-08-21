@@ -399,7 +399,7 @@ public class EntityFetchService : IEntityFetchService
                     request.EntityType);
                 
                 actualEntityType = "products"; // Fetch products instead of the component type
-                paginationRequest.Include = "options,modifiers,images,reviews"; // Include all components
+                paginationRequest.Include = "options,modifiers,reviews"; // Include all components
                 paginationRequest.Limit = 10; // BigCommerce limitation with includes
                 
                 _logger.LogDebug("🔗 [COMPONENT-FETCH] Modified fetch: EntityType=products, Include={Include}, Limit={Limit}", 

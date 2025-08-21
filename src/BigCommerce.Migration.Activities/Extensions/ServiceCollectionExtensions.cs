@@ -10,6 +10,8 @@ using BigCommerce.Migration.Activities.Strategies;
 using BigCommerce.Migration.Activities.Services.EntityCreation;
 using BigCommerce.Migration.Activities.Activities;
 using System.Net.Http;
+using BigCommerce.Migration.Activities.Strategies.Transform;
+using BigCommerce.Migration.Activities.Strategies.Fetch;
 
 namespace BigCommerce.Migration.Activities.Extensions;
 

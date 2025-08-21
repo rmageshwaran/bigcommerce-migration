@@ -1,8 +1,6 @@
+using BigCommerce.Migration.Core.Interfaces;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Logging;
-using BigCommerce.Migration.Core.Interfaces;
-using BigCommerce.Migration.Core.Models;
-using BigCommerce.Migration.Activities.Models;
 
 namespace BigCommerce.Migration.Activities.Activities;
 
@@ -122,9 +120,6 @@ public class DiscoverEntitiesActivity
             }
         }
     }
-
-    // All legacy discovery methods have been replaced by Strategy Pattern implementations
-    // See: V2DirectPaginationStrategy, V3EfficientPaginationStrategy, V3HierarchicalStrategy
 
     /// <summary>
     /// Validates the entity discovery request

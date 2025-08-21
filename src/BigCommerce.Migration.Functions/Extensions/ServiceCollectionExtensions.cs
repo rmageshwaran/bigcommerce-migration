@@ -17,6 +17,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.Azure.SignalR.Management;
 using Microsoft.Extensions.Azure;
 using System.Net.Http;
+using BigCommerce.Migration.Core.CustomExceptions;
 
 namespace BigCommerce.Migration.Functions.Extensions;
 
@@ -426,9 +427,7 @@ public static class ServiceCollectionExtensions
             // Check if OpenSearch is disabled or has invalid configuration
             if (!openSearchConfig.IsValidEndpoint())
             {
-                var noOpLogger = serviceProvider.GetRequiredService<ILogger<NoOpOpenSearchService>>();
-                Console.WriteLine("OpenSearch disabled or invalid endpoint - using NoOpOpenSearchService");
-                return new NoOpOpenSearchService(noOpLogger);
+                throw new ServiceNotAvailableException("OpenSearch", $"OpenSearch Configuration:  Endpoint: {openSearchConfig.Endpoint}  Username: {openSearchConfig.Username} DefaultIndex: {openSearchConfig.DefaultIndex}");
             }
 
             Console.WriteLine("OpenSearch endpoint is valid - using real OpenSearchService");

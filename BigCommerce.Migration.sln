@@ -1,4 +1,5 @@
-﻿Microsoft Visual Studio Solution File, Format Version 12.00
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
@@ -20,9 +21,9 @@ EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "iac", "iac", "{D4B5F0C5-1A8F-4F4A-8F7D-8E4C3F2E1A9B}"
 	ProjectSection(SolutionItems) = preProject
 		iac\main.tf = iac\main.tf
-		iac\variables.tf = iac\variables.tf
 		iac\terraform.dev.tfvars = iac\terraform.dev.tfvars
 		iac\terraform.prod.tfvars = iac\terraform.prod.tfvars
+		iac\variables.tf = iac\variables.tf
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "cicd", "cicd", "{E7D6C4B3-2A1F-4E2A-9C8B-7F5E9D1C3A7E}"
@@ -40,9 +41,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{B8E5F2A1
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "BigCommerce.Migration.Tests.Unit", "src\BigCommerce.Migration.Tests.Unit\BigCommerce.Migration.Tests.Unit.csproj", "{F1A2B3C4-5D6E-7F8A-9B0C-1D2E3F4A5B6C}"
 EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "BigCommerce.Migration.Tests.Integration", "src\BigCommerce.Migration.Tests.Integration\BigCommerce.Migration.Tests.Integration.csproj", "{G2B3C4D5-6E7F-8A9B-0C1D-2E3F4A5B6C7D}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "BigCommerce.Migration.Tests.Integration", "src\BigCommerce.Migration.Tests.Integration\BigCommerce.Migration.Tests.Integration.csproj", "{47E93235-BC6E-4B9A-A888-CF220C32D0F2}"
 EndProject
-
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -73,11 +73,10 @@ Global
 		{F1A2B3C4-5D6E-7F8A-9B0C-1D2E3F4A5B6C}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{F1A2B3C4-5D6E-7F8A-9B0C-1D2E3F4A5B6C}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{F1A2B3C4-5D6E-7F8A-9B0C-1D2E3F4A5B6C}.Release|Any CPU.Build.0 = Release|Any CPU
-		{G2B3C4D5-6E7F-8A9B-0C1D-2E3F4A5B6C7D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{G2B3C4D5-6E7F-8A9B-0C1D-2E3F4A5B6C7D}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{G2B3C4D5-6E7F-8A9B-0C1D-2E3F4A5B6C7D}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{G2B3C4D5-6E7F-8A9B-0C1D-2E3F4A5B6C7D}.Release|Any CPU.Build.0 = Release|Any CPU
-
+		{47E93235-BC6E-4B9A-A888-CF220C32D0F2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{47E93235-BC6E-4B9A-A888-CF220C32D0F2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{47E93235-BC6E-4B9A-A888-CF220C32D0F2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{47E93235-BC6E-4B9A-A888-CF220C32D0F2}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -89,8 +88,6 @@ Global
 		{A4DD5E25-92A5-473E-BFD2-4530B7E5A8F8} = {8BB2217D-0F2D-4BB1-8E4B-CDD04ADCF3DF}
 		{8C5E7B2A-3F1E-4D2B-9A8F-7E6D5C4B3A9E} = {8BB2217D-0F2D-4BB1-8E4B-CDD04ADCF3DF}
 		{F1A2B3C4-5D6E-7F8A-9B0C-1D2E3F4A5B6C} = {B8E5F2A1-3C7D-4E9A-8F6B-1A2B3C4D5E6F}
-		{G2B3C4D5-6E7F-8A9B-0C1D-2E3F4A5B6C7D} = {B8E5F2A1-3C7D-4E9A-8F6B-1A2B3C4D5E6F}
-
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {8F7A9E2C-4B1D-4E3A-9F5B-2C8E7A1B9D4F}

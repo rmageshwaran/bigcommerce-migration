@@ -12,7 +12,7 @@ public class VariantTransformStrategy : IEntityTransformStrategy
 {
     private readonly ILogger<VariantTransformStrategy> _logger;
 
-    public string EntityType => "product-variants";  // 🔧 FIX: Match Phase 3 entity type
+    public string EntityType => "variants";  // ✅ FIXED: Match EntityCreationStrategy and dependencies
 
     public VariantTransformStrategy(ILogger<VariantTransformStrategy> logger)
     {

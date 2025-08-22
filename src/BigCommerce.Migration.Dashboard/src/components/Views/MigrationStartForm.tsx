@@ -63,8 +63,8 @@ const storeConfigurations = {
     displayName: "Development"
   },
   production: {
-    storeId: "production-store-id", // Placeholder - replace with actual production store ID
-    accessToken: "production-access-token",
+    storeId: "v6q95r5n91",
+    accessToken: "2jxzl0n457l7dbz9jgeo8tzbj6xw6ba",
     channelId: "1",
     displayName: "Production"
   }
@@ -346,11 +346,13 @@ export const MigrationStartForm: React.FC = () => {
                       minWidth: '180px',
                     }}
                   >
-                    {Object.entries(storeConfigurations).map(([key, config]) => (
-                      <MenuItem key={key} value={key}>
-                        {config.storeId} ({config.displayName})
-                      </MenuItem>
-                    ))}
+                    {Object.entries(storeConfigurations)
+                      .filter(([key]) => key !== 'staging')
+                      .map(([key, config]) => (
+                        <MenuItem key={key} value={key}>
+                          {config.storeId} ({config.displayName})
+                        </MenuItem>
+                      ))}
                   </Select>
                 </FormControl>
               </Box>
@@ -394,11 +396,13 @@ export const MigrationStartForm: React.FC = () => {
                       minWidth: '180px',
                     }}
                   >
-                    {Object.entries(storeConfigurations).map(([key, config]) => (
-                      <MenuItem key={key} value={key}>
-                        {config.storeId} ({config.displayName})
-                      </MenuItem>
-                    ))}
+                    {Object.entries(storeConfigurations)
+                      .filter(([key]) => key === 'staging')
+                      .map(([key, config]) => (
+                        <MenuItem key={key} value={key}>
+                          {config.storeId} ({config.displayName})
+                        </MenuItem>
+                      ))}
                   </Select>
                 </FormControl>
               </Box>

@@ -55,7 +55,8 @@ public class EntityFetchStrategyFactory : IEntityFetchStrategyFactory
     /// <summary>
     /// Normalizes entity type to handle various input formats
     /// Supports: categories, category, Categories, CATEGORIES, etc.
-    /// Note: Products and brands use direct pagination, not fetch strategies
+    /// Note: Products, brands, and variants use direct pagination, not fetch strategies
+    /// Note: Variants are routed to direct pagination in EntityFetchService to align with product workflow
     /// </summary>
     private static string NormalizeEntityType(string entityType)
     {

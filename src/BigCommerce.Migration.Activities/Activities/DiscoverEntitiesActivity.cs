@@ -68,6 +68,16 @@ public class DiscoverEntitiesActivity
             _logger.LogInformation("🔍 [DISCOVERY-DEBUG] Discovery completed for {EntityType}: {Count} entities found with {DataCount} entity data cached", 
                 request.EntityType, result.TotalCount, result.EntityData.Count);
             
+            // 🎯 VARIANT PIPELINE TRACKING: Add specific logging for variant discovery
+            if (request.EntityType.Equals("variants", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogInformation("🎯 [VARIANT-PIPELINE-DISCOVERY] ===== VARIANT DISCOVERY COMPLETED ===== " +
+                                      "MigrationId: {MigrationId}, TotalVariants: {TotalVariants}, Strategy: {Strategy}, " +
+                                      "UseDirectPagination: {UseDirectPagination}",
+                    request.MigrationId, result.TotalCount, strategy.GetType().Name, 
+                    result.PaginationMetadata?.ContainsKey("UseDirectPagination") == true);
+            }
+            
             _logger.LogDebug("🔍 [DISCOVERY-DEBUG] Discovery result details - IsSuccessful: {IsSuccessful}, Errors: [{Errors}], HasPaginationMetadata: {HasPaginationMetadata}", 
                 result.IsSuccessful, string.Join(", ", result.Errors), result.PaginationMetadata != null);
 

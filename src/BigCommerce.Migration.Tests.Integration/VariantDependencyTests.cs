@@ -45,11 +45,11 @@ public class VariantDependencyTests : IDisposable
             "modifiers", 
             "images", 
             "reviews", 
-            "product-variants"
+            "variants"
         );
 
         var optionsIndex = Array.IndexOf(resolvedEntities, "options");
-        var variantsIndex = Array.IndexOf(resolvedEntities, "product-variants");
+        var variantsIndex = Array.IndexOf(resolvedEntities, "variants");
         
         optionsIndex.Should().BeLessThan(variantsIndex, 
             "Options must be processed before variants to create necessary mappings");
@@ -88,14 +88,14 @@ public class VariantDependencyTests : IDisposable
         var optionMappingsExist = migrationWorkflow.Any(w => w.EntityType == "options" && w.ProcessedCount > 0);
         var variantSuccessRate = optionMappingsExist ? 0.95 : 0.0; // 95% success if mappings exist, 0% if not
 
-        migrationWorkflow.Add(("product-variants", HasRealCount: true, ProcessedCount: (int)(99584 * variantSuccessRate)));
+        migrationWorkflow.Add(("variants", HasRealCount: true, ProcessedCount: (int)(99584 * variantSuccessRate)));
 
         // Assert
         var optionsWorkflow = migrationWorkflow.FirstOrDefault(w => w.EntityType == "options");
         optionsWorkflow.ProcessedCount.Should().BeGreaterThan(0, 
             "Options should be extracted and processed from products");
 
-        var variantsWorkflow = migrationWorkflow.FirstOrDefault(w => w.EntityType == "product-variants");
+        var variantsWorkflow = migrationWorkflow.FirstOrDefault(w => w.EntityType == "variants");
         variantsWorkflow.ProcessedCount.Should().BeGreaterThan(90000, 
             "Variants should have high success rate when option mappings exist");
 
@@ -126,7 +126,7 @@ public class VariantDependencyTests : IDisposable
         var optionMappingsExist = brokenWorkflow.Any(w => w.EntityType == "options" && w.ProcessedCount > 0);
         var variantFailureRate = optionMappingsExist ? 0.0 : 1.0; // 100% failure if no mappings
 
-        brokenWorkflow.Add(("product-variants", 
+        brokenWorkflow.Add(("variants", 
             ProcessedCount: (int)(99584 * (1 - variantFailureRate)), 
             FailureReason: optionMappingsExist ? "" : "Missing option value mappings"));
 
@@ -135,7 +135,7 @@ public class VariantDependencyTests : IDisposable
         optionsResult.ProcessedCount.Should().Be(0, "Broken progressive discovery processes no options");
         optionsResult.FailureReason.Should().Be("ChunkSize=0");
 
-        var variantsResult = brokenWorkflow.FirstOrDefault(w => w.EntityType == "product-variants");
+        var variantsResult = brokenWorkflow.FirstOrDefault(w => w.EntityType == "variants");
         variantsResult.ProcessedCount.Should().Be(0, "Variants should fail when no option mappings exist");
         variantsResult.FailureReason.Should().Contain("Missing option value mappings");
 
@@ -171,7 +171,7 @@ public class VariantDependencyTests : IDisposable
         
         if (requestedEntities.Contains("products"))
         {
-            dependencies.AddRange(new[] { "options", "modifiers", "images", "reviews", "product-variants" });
+            dependencies.AddRange(new[] { "options", "modifiers", "images", "reviews", "variants" });
         }
         
         return dependencies.ToArray();

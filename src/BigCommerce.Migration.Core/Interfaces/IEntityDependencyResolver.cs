@@ -25,7 +25,7 @@ public interface IEntityDependencyResolver
 
     /// <summary>
     /// Gets the complete list of phases for an entity that requires phased processing.
-    /// For "products": ["products", "product-components", "product-variants", "product-related", "product-metafields", "product-channels"]
+    /// For "products": ["products", "product-components", "variants", "product-related", "product-metafields", "product-channels"]
     /// </summary>
     /// <param name="entityType">Entity type that requires phased processing</param>
     /// <returns>List of phase entity types in processing order</returns>

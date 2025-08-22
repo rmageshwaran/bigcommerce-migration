@@ -578,7 +578,7 @@ public class ProcessEntityChunkActivity
                         // - Variants are leaf entities with no dependents - no mapping storage needed
                         // Only create individual EntityMapping records for entities that have dependents
                         if (batchRequest.EntityType.ToLowerInvariant() != "options" && 
-                            batchRequest.EntityType.ToLowerInvariant() != "product-variants")
+                            batchRequest.EntityType.ToLowerInvariant() != "variants")
                         {
                             // Extract level from source entity for mapping differentiation
                             var processingLevel = sourceEntity.TryGetValue("_processing_level", out var level) ? JsonElementHelper.GetIntegerValue(level) : 0;
@@ -656,7 +656,7 @@ public class ProcessEntityChunkActivity
                             {
                                 _logger.LogDebug("🔗 [MAPPING-SKIP] Skipping individual EntityMapping for options - using hierarchical mapping instead");
                             }
-                            else if (entityType == "product-variants")
+                            else if (entityType == "variants")
                             {
                                 _logger.LogDebug("🔗 [MAPPING-SKIP] Skipping individual EntityMapping for variants - leaf entities with no dependents");
                             }
@@ -816,7 +816,6 @@ public class ProcessEntityChunkActivity
                 case "brands":
                 case "categories":
                 case "variants":
-                case "product-variants":
                 case "customers":
                 case "orders":
                 case "coupons":

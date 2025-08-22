@@ -435,14 +435,14 @@ public class SubBatchConfiguration
             ["variants"] = new SubBatchConfiguration
             {
                 EntityType = "variants",
-                PageSize = 100, // Variants are simpler, larger pages
-                ChunkSize = 100,
+                PageSize = 250, // ✅ ALIGNED: Match Docker configuration for consistency
+                ChunkSize = 250, // ✅ ALIGNED: Match Docker configuration for consistency
                 FetchBatchSize = 250,
-                SubBatchSize = 10,
-                MaxConcurrency = 8,
+                SubBatchSize = 50, // ✅ ALIGNED: Match Docker configuration for batch API efficiency
+                MaxConcurrency = 5, // ✅ ALIGNED: Match Docker configuration for stability
                 EnableSubBatching = true,
-                SubBatchDelayMs = 0,
-                ProcessSubBatchesSequentially = true
+                SubBatchDelayMs = 100, // ✅ ALIGNED: Match Docker configuration for rate limiting
+                ProcessSubBatchesSequentially = false // ✅ ALIGNED: Match Docker configuration for performance
             },
             ["customers"] = new SubBatchConfiguration
             {

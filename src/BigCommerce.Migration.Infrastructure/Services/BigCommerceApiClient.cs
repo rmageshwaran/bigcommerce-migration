@@ -627,11 +627,10 @@ public class BigCommerceApiClient : IBigCommerceApiClient
             "products" => "catalog/products",
             "categories" => "catalog/categories", 
             "brands" => "catalog/brands",
-            "variants" => "catalog/variants",
+            "variants" => "catalog/variants",              // Phase 3: Map to variants endpoint
             
             // 🚀 ENHANCED PRODUCT MIGRATION: Phase-specific entity type mappings
             "product-components" => "catalog/products",    // Phase 2: Fetch products with includes
-            "product-variants" => "catalog/variants",      // Phase 3: Map to variants endpoint
             "product-related" => "catalog/products",       // Phase 4: Fetch products for relationship updates
             "product-metafields" => "catalog/products",    // Phase 5: Fetch products for metafield updates  
             "product-channels" => "catalog/products",      // Phase 6: Fetch products for channel assignments
@@ -686,8 +685,7 @@ public class BigCommerceApiClient : IBigCommerceApiClient
                 // Brands API doesn't support channel_id or tree_id parameters
                 break;
                 
-            case "variants":
-            case "product-variants":      // 🔧 FIX: Phase 3 parameter handling
+            case "variants":              // ✅ FIXED: Phase 3 parameter handling
                 // Variants API doesn't require additional parameters
                 break;
         }

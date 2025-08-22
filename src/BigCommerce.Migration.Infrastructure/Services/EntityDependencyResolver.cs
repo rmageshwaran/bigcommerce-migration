@@ -100,7 +100,7 @@ public class EntityDependencyResolver : IEntityDependencyResolver
             {
                 "products",              // Phase 1: Core products (250/page)
                 "product-components",    // Phase 2: Options, modifiers, images, reviews (10/page)
-                "product-variants"       // Phase 3: Product variants ✅ ENABLED with SKU duplicate prevention
+                "variants"               // Phase 3: Product variants ✅ ENABLED with SKU duplicate prevention
                 // ❌ TEMPORARILY DISABLED: Phases 4-6 need transform strategies implementation
                 // "product-related",       // Phase 4: Related products updates
                 // "product-metafields",    // Phase 5: Product meta fields
@@ -168,9 +168,9 @@ public class EntityDependencyResolver : IEntityDependencyResolver
                 RequiresPreviousPhaseCompletion = true
             },
             
-            ["product-variants"] = new EntityPhaseConfiguration
-            {
-                PhaseType = "product-variants",
+                    ["variants"] = new EntityPhaseConfiguration
+        {
+            PhaseType = "variants",
                 PhaseName = "Product Variants",
                 PhaseNumber = 3,
                 PageSize = 250, // ✅ FIXED: Match appsettings.json for optimal API efficiency

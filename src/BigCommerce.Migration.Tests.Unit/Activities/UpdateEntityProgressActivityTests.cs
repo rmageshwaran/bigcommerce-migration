@@ -220,7 +220,7 @@ public class UpdateEntityProgressActivityTests
     [InlineData("options", 0, 3, 3, 0, 3)] // Progressive discovery options: 0 -> 3
     [InlineData("modifiers", 0, 1, 0, 1, 1)] // Progressive discovery modifiers: 0 -> 1
     [InlineData("images", 0, 2, 2, 0, 2)] // Progressive discovery images: 0 -> 2
-    [InlineData("product-variants", 12, 12, 12, 0, 12)] // Regular discovery: stays 12
+            [InlineData("variants", 12, 12, 12, 0, 12)] // Regular discovery: stays 12
     [InlineData("reviews", 0, 0, 0, 0, 0)] // No entities: stays 0
     public async Task UpdateEntityProgressAsync_VariousScenarios_ShouldHandleTotalCountCorrectly(
         string entityType,

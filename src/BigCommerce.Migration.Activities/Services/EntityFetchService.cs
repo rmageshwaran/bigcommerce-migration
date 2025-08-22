@@ -88,6 +88,16 @@ public class EntityFetchService : IEntityFetchService
                 return await FetchEntitiesWithDirectPaginationAsync(request, cancellationToken);
             }
             
+            // 🚨 CRITICAL VARIANT ROUTING: Variants MUST use direct pagination like products
+            if (request.EntityType.Equals("variants", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogInformation("🎯 [FETCH-ROUTING] ✅ VARIANTS: Using direct pagination for batch {BatchNumber} " +
+                                      "in migration {MigrationId} (API Page={ApiPage}) - aligned with product workflow", 
+                    request.BatchNumber, request.MigrationId, request.BatchNumber + 1);
+                
+                return await FetchEntitiesWithDirectPaginationAsync(request, cancellationToken);
+            }
+            
             // Handle direct pagination for other entities with efficient strategies
             if (request.UseDirectPagination && (!request.EntityIds.Any() || request.EntityIds.First().StartsWith("page-")))
             {

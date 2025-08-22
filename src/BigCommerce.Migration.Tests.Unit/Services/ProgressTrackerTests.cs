@@ -129,7 +129,7 @@ public class ProgressTrackerTests
             ("options", 3, 3, 0),    // 3 processed, 3 success, 0 failed
             ("modifiers", 1, 0, 1),  // 1 processed, 0 success, 1 failed  
             ("images", 2, 2, 0),     // 2 processed, 2 success, 0 failed
-            ("product-variants", 12, 12, 0) // 12 processed, 12 success, 0 failed
+            ("variants", 12, 12, 0) // 12 processed, 12 success, 0 failed
         };
 
         // Start all entities with TotalCount = 0 (progressive discovery)

@@ -163,7 +163,7 @@ public class V3EfficientPaginationStrategy : IEntityDiscoveryStrategy
         {
             "products" => "bulk_pricing_rules,custom_fields,channels,videos", // Default for products
             "product-components" => configuredInclude ?? "options,modifiers,reviews", // Use configured or default for components
-            "product-variants" => null, // Variants don't support include parameters
+            "variants" => null,         // Variants don't support include parameters
             "product-related" => configuredInclude,
             "product-metafields" => configuredInclude,
             "product-channels" => configuredInclude,

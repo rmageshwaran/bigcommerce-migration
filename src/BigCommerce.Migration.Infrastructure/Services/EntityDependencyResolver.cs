@@ -100,11 +100,10 @@ public class EntityDependencyResolver : IEntityDependencyResolver
             {
                 "products",              // Phase 1: Core products (250/page)
                 "product-components",    // Phase 2: Options, modifiers, images, reviews (10/page)
-                "variants"               // Phase 3: Product variants ✅ ENABLED with SKU duplicate prevention
-                // ❌ TEMPORARILY DISABLED: Phases 4-6 need transform strategies implementation
-                // "product-related",       // Phase 4: Related products updates
-                // "product-metafields",    // Phase 5: Product meta fields
-                // "product-channels"       // Phase 6: Channel assignments
+                "product-related",       // Phase 3: Related products updates (provides timing gap for option mappings)
+                "product-metafields",    // Phase 4: Product meta fields (provides timing gap for option mappings)
+                "product-channels",      // Phase 5: Channel assignments (provides timing gap for option mappings)
+                "variants"               // Phase 6: Product variants ✅ NOW with option mappings ready
             };
         }
 
@@ -172,7 +171,7 @@ public class EntityDependencyResolver : IEntityDependencyResolver
         {
             PhaseType = "variants",
                 PhaseName = "Product Variants",
-                PhaseNumber = 3,
+                PhaseNumber = 6, // Moved to phase 6 to allow option mappings to be stored
                 PageSize = 250, // ✅ FIXED: Match appsettings.json for optimal API efficiency
                 Include = string.Empty,
                 CreatesNewEntities = true,
@@ -233,7 +232,7 @@ public class EntityDependencyResolver : IEntityDependencyResolver
             {
                 PhaseType = "product-related",
                 PhaseName = "Related Products",
-                PhaseNumber = 4,
+                PhaseNumber = 3, // Moved to phase 3 (before variants)
                 PageSize = 50,
                 Include = "related_products",
                 CreatesNewEntities = false, // Updates existing products
@@ -245,7 +244,7 @@ public class EntityDependencyResolver : IEntityDependencyResolver
             {
                 PhaseType = "product-metafields",
                 PhaseName = "Product Meta Fields",
-                PhaseNumber = 5,
+                PhaseNumber = 4, // Moved to phase 4 (before variants)
                 PageSize = 50,
                 Include = "metafields",
                 CreatesNewEntities = true,
@@ -257,7 +256,7 @@ public class EntityDependencyResolver : IEntityDependencyResolver
             {
                 PhaseType = "product-channels",
                 PhaseName = "Channel Assignments",
-                PhaseNumber = 6,
+                PhaseNumber = 5, // Moved to phase 5 (before variants)
                 PageSize = 50,
                 Include = "channels",
                 CreatesNewEntities = false, // Updates existing channel assignments

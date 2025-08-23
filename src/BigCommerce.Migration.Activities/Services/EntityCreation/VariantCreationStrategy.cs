@@ -27,6 +27,77 @@ public class VariantCreationStrategy : IEntityCreationStrategy
     private readonly IEntityErrorHandlingService _errorHandlingService;
     private readonly ILogger<VariantCreationStrategy> _logger;
 
+    /// <summary>
+    /// Executes an operation with retry logic for "Too many simultaneous requests" errors
+    /// Implements smart retry to handle initial concurrent burst issues without over-engineering
+    /// Enhanced with comprehensive debug logging to analyze retry patterns
+    /// </summary>
+    private async Task<T> ExecuteWithRetry<T>(Func<Task<T>> operation, string operationName, CancellationToken cancellationToken = default)
+    {
+        const int maxRetries = 3;
+        const int baseDelayMs = 2000;
+        var startTime = DateTime.UtcNow;
+        
+        _logger.LogDebug("🔄 [RETRY-START] Starting {Operation} with retry logic (max {MaxRetries} attempts)", 
+            operationName, maxRetries);
+        
+        for (int attempt = 1; attempt <= maxRetries; attempt++)
+        {
+            var attemptStartTime = DateTime.UtcNow;
+            
+            try 
+            {
+                _logger.LogDebug("🚀 [RETRY-ATTEMPT-{Attempt}] Executing {Operation} (attempt {Attempt}/{MaxRetries})", 
+                    attempt, operationName, attempt, maxRetries);
+                    
+                var result = await operation();
+                
+                var attemptDuration = DateTime.UtcNow - attemptStartTime;
+                var totalDuration = DateTime.UtcNow - startTime;
+                
+                if (attempt == 1)
+                {
+                    _logger.LogDebug("✅ [RETRY-SUCCESS-FIRST] {Operation} succeeded on first attempt in {Duration}ms", 
+                        operationName, attemptDuration.TotalMilliseconds);
+                }
+                else
+                {
+                    _logger.LogInformation("✅ [RETRY-SUCCESS-AFTER-{PreviousAttempts}] {Operation} succeeded on attempt {Attempt}/{MaxRetries} after {TotalDuration}ms total (this attempt: {AttemptDuration}ms)", 
+                        attempt - 1, operationName, attempt, maxRetries, totalDuration.TotalMilliseconds, attemptDuration.TotalMilliseconds);
+                }
+                
+                return result;
+            }
+            catch (Exception ex) when (
+                ex.Message.Contains("Too many simultaneous requests", StringComparison.OrdinalIgnoreCase) && 
+                attempt < maxRetries)
+            {
+                var attemptDuration = DateTime.UtcNow - attemptStartTime;
+                var delay = baseDelayMs * attempt; // 2s, 4s, 6s exponential backoff
+                
+                _logger.LogWarning("🚨 [RETRY-FAILED-{Attempt}] {Operation} failed on attempt {Attempt}/{MaxRetries} after {AttemptDuration}ms due to rate limit: {Error}. Retrying in {Delay}ms", 
+                    attempt, operationName, attempt, maxRetries, attemptDuration.TotalMilliseconds, ex.Message, delay);
+                    
+                await Task.Delay(delay, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                var attemptDuration = DateTime.UtcNow - attemptStartTime;
+                var totalDuration = DateTime.UtcNow - startTime;
+                
+                _logger.LogError("❌ [RETRY-FAILED-FINAL] {Operation} failed on attempt {Attempt}/{MaxRetries} after {AttemptDuration}ms with non-retryable error (total time: {TotalDuration}ms): {Error}", 
+                    operationName, attempt, maxRetries, attemptDuration.TotalMilliseconds, totalDuration.TotalMilliseconds, ex.Message);
+                throw;
+            }
+        }
+        
+        var finalTotalDuration = DateTime.UtcNow - startTime;
+        _logger.LogError("❌ [RETRY-EXHAUSTED] {Operation} exhausted all {MaxRetries} retry attempts after {TotalDuration}ms", 
+            operationName, maxRetries, finalTotalDuration.TotalMilliseconds);
+            
+        throw new InvalidOperationException($"All {maxRetries} retry attempts exhausted for {operationName}");
+    }
+
     public VariantCreationStrategy(
         IApiRequestHandler apiRequestHandler,
         IMigrationStorageService migrationStorageService,
@@ -93,6 +164,11 @@ public class VariantCreationStrategy : IEntityCreationStrategy
             {
                 string? requestPayload = null;
                 string? responsePayload = null;
+                var batchId = Guid.NewGuid().ToString("N")[..8]; // Short batch ID for tracking
+                var outerBatchStartTime = DateTime.UtcNow;
+                
+                _logger.LogInformation("🎯 [BATCH-{BatchId}] Starting processing of {Count} variants at {StartTime} for migration {MigrationId}", 
+                    batchId, batch50Variants.Count, outerBatchStartTime.ToString("HH:mm:ss.fff"), migrationId);
                 
                 try
                 {
@@ -123,17 +199,37 @@ public class VariantCreationStrategy : IEntityCreationStrategy
                     var url = $"{destinationStore.GetApiBaseUrl()}/catalog/variants";
                     requestPayload = JsonSerializer.Serialize(transformedVariants);
                     
-                    _logger.LogInformation("🚀 Batch API Call: PUT {Url} with {Count} variants (out of {OriginalCount} after skipping duplicates)", 
-                        url, transformedVariants.Count, batch50Variants.Count);
+                    var apiCallStartTime = DateTime.UtcNow;
+                    _logger.LogInformation("🚀 [BATCH-START] PUT {Url} with {Count} variants (out of {OriginalCount} after skipping duplicates) at {StartTime}", 
+                        url, transformedVariants.Count, batch50Variants.Count, apiCallStartTime.ToString("HH:mm:ss.fff"));
                     
-                    var response = await _apiRequestHandler.ExecuteRequestAsync<Dictionary<string, object>>(
-                        ApiRequest.CreatePut(url, requestPayload, destinationStore), 
+                    // 🔄 SMART RETRY: Wrap API call with retry logic for "Too many simultaneous requests"
+                    var response = await ExecuteWithRetry(
+                        async () => {
+                            var apiCallStart = DateTime.UtcNow;
+                            _logger.LogDebug("🌐 [API-CALL-START] Making BigCommerce API call for {Count} variants at {ApiStartTime}", 
+                                transformedVariants.Count, apiCallStart.ToString("HH:mm:ss.fff"));
+                                
+                            var result = await _apiRequestHandler.ExecuteRequestAsync<Dictionary<string, object>>(
+                                ApiRequest.CreatePut(url, requestPayload, destinationStore), 
+                                ct);
+                                
+                            var apiCallDuration = DateTime.UtcNow - apiCallStart;
+                            _logger.LogDebug("✅ [API-CALL-SUCCESS] BigCommerce API call completed in {Duration}ms for {Count} variants", 
+                                apiCallDuration.TotalMilliseconds, transformedVariants.Count);
+                                
+                            return result;
+                        },
+                        $"Variant batch creation [BATCH-{batchId}] ({transformedVariants.Count} variants) - Started at {outerBatchStartTime:HH:mm:ss.fff}",
                         ct);
                     
                     // 🔧 FIX: Extract variants from BigCommerce API response wrapper
                     var createdVariants = ExtractVariantsFromResponse(response);
                     
-                    _logger.LogInformation("✅ Successfully created {Count} variants via batch API", createdVariants.Count);
+                    var batchCompletionTime = DateTime.UtcNow;
+                    var totalBatchDuration = batchCompletionTime - outerBatchStartTime;
+                    _logger.LogInformation("✅ [BATCH-{BatchId}] Successfully created {Count} variants via batch API in {Duration}ms (started at {StartTime})", 
+                        batchId, createdVariants.Count, totalBatchDuration.TotalMilliseconds, outerBatchStartTime.ToString("HH:mm:ss.fff"));
                     
                     // 🚨 STATUS FIX: Include skipped entities in the result for proper counting
                     var allResults = new List<Dictionary<string, object>>(createdVariants);
@@ -158,6 +254,11 @@ public class VariantCreationStrategy : IEntityCreationStrategy
                 }
                 catch (Exception ex)
                 {
+                    var batchFailureTime = DateTime.UtcNow;
+                    var failureDuration = batchFailureTime - outerBatchStartTime;
+                    _logger.LogError("❌ [BATCH-{BatchId}] Batch failed after {Duration}ms (started at {StartTime}): {Error}", 
+                        batchId, failureDuration.TotalMilliseconds, outerBatchStartTime.ToString("HH:mm:ss.fff"), ex.Message);
+                    
                     // 🚫 CANCELLATION FIX: Distinguish between actual failures and cancellation-induced failures
                     bool isCancellationError = ex.Message.Contains("Migration cancelled", StringComparison.OrdinalIgnoreCase) ||
                                              ex.Message.Contains("User requested cancellation", StringComparison.OrdinalIgnoreCase) ||

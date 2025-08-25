@@ -142,10 +142,8 @@ public class VariantCreationStrategy : IEntityCreationStrategy
             return new List<Dictionary<string, object>>();
         }
 
-        // 🚀 PERFORMANCE: Clear single-item cache at the start of each batch
-        _cachedProductId = null;
-        _cachedProductMapping = null;
-        //_logger.LogDebug("🗑️ [CACHE-CLEAR] Cleared single-item product mapping cache for new batch");
+        // 🔧 MULTI-INSTANCE SAFE: No longer need to clear instance-level cache as we use method-scoped caching
+        //_logger.LogDebug("🗑️ [CACHE-STRATEGY] Using method-scoped caching for multi-instance safety");
 
         _logger.LogInformation("🚀 Creating {Count} variants using optimized cached lookups for migration {MigrationId}", 
             entities.Count, migrationId);
@@ -359,8 +357,13 @@ public class VariantCreationStrategy : IEntityCreationStrategy
         // 🎯 TASK 4 FIX: Track unique option combinations instead of SKUs
         var uniqueVariantCombinations = new Dictionary<string, Dictionary<string, object>>();
         var skippedDuplicates = 0;
+        var skippedProductSku = 0;
         var skippedNoOptions = 0;
         var skippedErrors = 0;
+        
+        // 🔧 MULTI-INSTANCE SAFE: Method-scoped cache for product mappings within this batch
+        // Prevents cross-migration contamination while maintaining performance for variants of same product
+        var productMappingCache = new Dictionary<string, ProductMappingData>();
         
         // 🔍 DEBUG: Transformation input
         _logger.LogInformation("🔍 [VARIANT-TRANSFORM-DEBUG] Starting transformation of {InputCount} variants for migration {MigrationId}", 
@@ -373,12 +376,16 @@ public class VariantCreationStrategy : IEntityCreationStrategy
                 // 🔧 Create clean variant payload with only required/allowed fields
                 var transformedVariant = new Dictionary<string, object>();
                 
-                // 1. REQUIRED: Map product_id from Phase 1 entity mappings  
+                // 1. REQUIRED: Map product_id from Phase 1 entity mappings (also used later for SKU conflict detection)
+                ProductMappingData? productMapping = null;
+                string sourceProductIdString = "";
+                
                 if (variant.TryGetValue("product_id", out var sourceProductId) && sourceProductId != null)
                 {
-                    var destinationProductId = await GetDestinationProductIdAsync(sourceProductId.ToString()!, migrationId);
-                    transformedVariant["product_id"] = int.Parse(destinationProductId);
-                    //_logger.LogDebug("🔗 Mapped product_id: {SourceId} → {DestinationId}", sourceProductId, destinationProductId);
+                    sourceProductIdString = sourceProductId.ToString()!;
+                    productMapping = await GetProductMappingDataAsync(sourceProductIdString, migrationId, productMappingCache);
+                    transformedVariant["product_id"] = int.Parse(productMapping.DestinationProductId);
+                    //_logger.LogDebug("🔗 Mapped product_id: {SourceId} → {DestinationId}", sourceProductIdString, productMapping.DestinationProductId);
                 }
                 else
                 {
@@ -543,6 +550,18 @@ public class VariantCreationStrategy : IEntityCreationStrategy
                 // Generate unique key based on option combinations, not SKU
                 var variantSku = variant.TryGetValue("sku", out var skuValue) ? skuValue?.ToString() : "no-sku";
                 
+                // 🚨 CRITICAL FIX: Skip variants that have the same SKU as their parent product
+                // This prevents BigCommerce 422 "Sku X is not unique" errors when product itself has a variant with same SKU
+                // (reusing productMapping from earlier to avoid duplicate database calls)
+                if (!string.IsNullOrEmpty(productMapping?.ProductSku) && 
+                    string.Equals(variantSku, productMapping.ProductSku, StringComparison.OrdinalIgnoreCase))
+                {
+                    skippedProductSku++;
+                    _logger.LogInformation("🚫 [PRODUCT-SKU-EXCLUSION] Skipping variant with SKU '{VariantSku}' - matches parent product SKU from entity mapping metadata", 
+                        variantSku);
+                    continue; // Skip this variant entirely
+                }
+                
                 if (transformedVariant.TryGetValue("option_values", out var optionValuesObj) && 
                     optionValuesObj is List<Dictionary<string, object>> transformedOptionValuesList && 
                     transformedOptionValuesList.Any())
@@ -604,28 +623,28 @@ public class VariantCreationStrategy : IEntityCreationStrategy
         }
 
         // 🎯 TASK 4 FIX: Enhanced transformation results with detailed uniqueness tracking
-        var totalSkipped = skippedDuplicates + skippedNoOptions + skippedErrors;
+        var totalSkipped = skippedDuplicates + skippedProductSku + skippedNoOptions + skippedErrors;
         _logger.LogInformation("🔍 [VARIANT-TRANSFORM-DEBUG] ===== TRANSFORMATION COMPLETED ===== " +
                               "InputCount: {InputCount}, TransformedCount: {OutputCount}, TotalSkipped: {TotalSkipped} " +
-                              "(DuplicateOptions: {DuplicateOptions}, DuplicateNoOptions: {DuplicateNoOptions}, Errors: {Errors}) " +
+                              "(DuplicateOptions: {DuplicateOptions}, ProductSKU: {ProductSKU}, DuplicateNoOptions: {DuplicateNoOptions}, Errors: {Errors}) " +
                               "for migration {MigrationId}", 
             variants.Count, transformedVariants.Count, totalSkipped, 
-            skippedDuplicates, skippedNoOptions, skippedErrors, migrationId);
+            skippedDuplicates, skippedProductSku, skippedNoOptions, skippedErrors, migrationId);
 
-        // 🎯 TASK 4 SUCCESS: Log the improvement from SKU-based to option-combination-based logic
-        _logger.LogInformation("✅ [TASK-4-SUCCESS] Option-combination-based uniqueness implemented successfully. " +
-                              "Processed {UniqueCount} unique option combinations, skipped {DuplicateCount} true duplicates", 
-            uniqueVariantCombinations.Count, skippedDuplicates + skippedNoOptions);
+        // 🎯 CRITICAL FIX SUCCESS: Log the product SKU exclusion and option-combination logic improvements
+        _logger.LogInformation("✅ [PRODUCT-SKU-EXCLUSION-SUCCESS] Fixed BigCommerce SKU uniqueness issue. " +
+                              "Processed {UniqueCount} unique variants, skipped {ProductSkuCount} product SKU conflicts, " +
+                              "skipped {DuplicateCount} true duplicates", 
+            uniqueVariantCombinations.Count, skippedProductSku, skippedDuplicates + skippedNoOptions);
 
         return transformedVariants;
     }
 
     /// <summary>
-    /// Single-item cache for current product mapping to avoid repeated database calls for variants of the same product
-    /// Only holds one product's mapping data at a time to minimize memory usage
+    /// 🔧 MULTI-INSTANCE SAFE: Method-scoped cache for product mappings within single variant batch processing
+    /// Avoids cross-migration contamination while maintaining performance benefits for variant batches
+    /// Cache is scoped to individual method calls, not instance lifecycle
     /// </summary>
-    private string? _cachedProductId = null;
-    private ProductMappingData? _cachedProductMapping = null;
 
     /// <summary>
     /// Extracts variant data from BigCommerce API response wrapper
@@ -700,13 +719,13 @@ public class VariantCreationStrategy : IEntityCreationStrategy
     /// Uses single-item cache to hold only current product's data (not all products)
     /// Uses specific rowkey (products_{sourceProductId}) instead of loading all products
     /// </summary>
-    private async Task<ProductMappingData> GetProductMappingDataAsync(string sourceProductId, string migrationId)
+    private async Task<ProductMappingData> GetProductMappingDataAsync(string sourceProductId, string migrationId, Dictionary<string, ProductMappingData> cache)
     {
-        // Check single-item cache first - avoid repeated database calls for same product
-        if (_cachedProductId == sourceProductId && _cachedProductMapping != null)
+        // 🔧 MULTI-INSTANCE SAFE: Check method-scoped cache first - avoid repeated database calls for same product
+        if (cache.TryGetValue(sourceProductId, out var cachedMapping))
         {
             //_logger.LogDebug("📋 [CACHE-HIT] Using cached mapping data for product {ProductId}", sourceProductId);
-            return _cachedProductMapping;
+            return cachedMapping;
         }
 
         //_logger.LogDebug("🔍 [CACHE-MISS] Fetching mapping data for product {ProductId} with specific rowkey", sourceProductId);
@@ -818,9 +837,8 @@ public class VariantCreationStrategy : IEntityCreationStrategy
             }
         }
 
-        // Cache the result in single-item cache for subsequent variants of the same product
-        _cachedProductId = sourceProductId;
-        _cachedProductMapping = productData;
+        // 🔧 MULTI-INSTANCE SAFE: Cache the result in method-scoped cache for subsequent variants of the same product
+        cache[sourceProductId] = productData;
         
         //_logger.LogDebug("✅ [CACHE-STORE] Cached mapping data for product {ProductId}: destinationId={DestId}, sku={ProductSku}, optionMappings={OptionCount}, optionValueMappings={ValueCount}", 
         //    sourceProductId, productData.DestinationProductId, productData.ProductSku,
@@ -830,14 +848,7 @@ public class VariantCreationStrategy : IEntityCreationStrategy
         return productData;
     }
 
-    /// <summary>
-    /// Gets destination product ID from consolidated mapping data
-    /// </summary>
-    private async Task<string> GetDestinationProductIdAsync(string sourceProductId, string migrationId)
-    {
-        var mappingData = await GetProductMappingDataAsync(sourceProductId, migrationId);
-        return mappingData.DestinationProductId;
-    }
+    // 🔧 REMOVED: GetDestinationProductIdAsync - no longer needed as we use GetProductMappingDataAsync directly
 
     /// <summary>
     /// 🚀 PERFORMANCE OPTIMIZED: Transforms option values using consolidated mapping data
@@ -865,8 +876,11 @@ public class VariantCreationStrategy : IEntityCreationStrategy
             
             try
             {
+                // 🔧 MULTI-INSTANCE SAFE: Create method-scoped cache for this operation
+                var localCache = new Dictionary<string, ProductMappingData>();
+                
                 // 🚀 PERFORMANCE OPTIMIZED: Use consolidated mapping lookup instead of 2 separate database calls
-                var mappingData = await GetProductMappingDataAsync(sourceProductId, migrationId);
+                var mappingData = await GetProductMappingDataAsync(sourceProductId, migrationId, localCache);
                 
                 var destinationOptionId = LookupDestinationOptionIdFromCache(sourceOptionId.ToString()!, mappingData);
                 var destinationOptionValueId = LookupDestinationOptionValueIdFromCache(

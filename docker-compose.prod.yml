@@ -169,6 +169,18 @@ services:
       - ParallelProcessing__subBatchConfigurations__variants__processSubBatchesSequentially=false
       - ParallelProcessing__subBatchConfigurations__variants__include=
       
+      # ✅ Product-Related Configuration - Phase 3: Batch API with 10 products per call (Production)
+      - ParallelProcessing__subBatchConfigurations__product-related__entityType=product-related
+      - ParallelProcessing__subBatchConfigurations__product-related__fetchBatchSize=250
+      - ParallelProcessing__subBatchConfigurations__product-related__chunkSize=250
+      - ParallelProcessing__subBatchConfigurations__product-related__pageSize=250
+      - ParallelProcessing__subBatchConfigurations__product-related__subBatchSize=10
+      - ParallelProcessing__subBatchConfigurations__product-related__maxConcurrency=3
+      - ParallelProcessing__subBatchConfigurations__product-related__enableSubBatching=true
+      - ParallelProcessing__subBatchConfigurations__product-related__subBatchDelayMs=50
+      - ParallelProcessing__subBatchConfigurations__product-related__processSubBatchesSequentially=false
+      - ParallelProcessing__subBatchConfigurations__product-related__include=
+      
       # ✅ Enhanced Product Configuration (Production - Phase 2 comprehensive entity migration)
 
       

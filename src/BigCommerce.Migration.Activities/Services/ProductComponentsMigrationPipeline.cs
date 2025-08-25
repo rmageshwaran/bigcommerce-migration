@@ -11,7 +11,7 @@ namespace BigCommerce.Migration.Activities.Services;
 
 /// <summary>
 /// Product Components Migration Pipeline for Enhanced Product Migration Phase 2
-/// Handles product components (options, modifiers, images, reviews) for existing products
+/// Handles product components (options, modifiers, reviews) for existing products
 /// Fetches products 10/page with comprehensive includes and creates only component entities
 /// Implements dual-tier progress aggregation for real-time dashboard updates
 /// </summary>
@@ -47,7 +47,7 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
     }
 
     /// <summary>
-    /// Processes product components (options, modifiers, images, reviews) for existing products
+    /// Processes product components (options, modifiers, reviews) for existing products
     /// Fetches products 10/page with comprehensive includes and creates only the component entities
     /// Implements dual-tier progress aggregation for real-time dashboard updates
     /// </summary>
@@ -230,7 +230,7 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
     }
 
     /// <summary>
-    /// Processes components (options, modifiers, images, reviews) for a single product
+    /// Processes components (options, modifiers, reviews) for a single product
     /// IMPORTANT: Does NOT create the product - only creates component entities for existing products
     /// </summary>
     private async Task ProcessProductComponentsForSingleProduct(
@@ -323,7 +323,7 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
                     
                     if (createdComponents != null && createdComponents.Any())
                     {
-                        // 🔗 NO ENTITY MAPPING: Components (options, modifiers, images, reviews) don't need individual EntityMapping records
+                        // 🔗 NO ENTITY MAPPING: Components (options, modifiers, reviews) don't need individual EntityMapping records
                         // - Options: Use hierarchical mapping in OptionsCreationStrategy for variant migration
                         // - Modifiers/Images/Reviews: No dependents, no mapping needed
                         
@@ -561,7 +561,7 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
     }
 
     /// <summary>
-    /// Extracts all components (options, modifiers, images, reviews) from products
+    /// Extracts all components (options, modifiers, reviews) from products
     /// Returns components organized by type for parallel processing
     /// Phase 3.2.2: Enhanced with periodic cancellation checks during extraction (every 5-10 products)
     /// </summary>
@@ -868,7 +868,7 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
     }
 
     /// <summary>
-    /// Processes a specific component type (options, modifiers, images, reviews) in parallel
+    /// Processes a specific component type (options, modifiers, reviews) in parallel
     /// Uses appropriate transform and creation strategies for each component type
     /// </summary>
     private async Task ProcessComponentTypeInParallel(
@@ -997,7 +997,7 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
                         if (createdComponents?.Any() == true)
                         {
                             // 🔗 STORE MAPPING: Only for options (needed for Phase 3 variants)
-                            // Modifiers, images, reviews don't need mappings as they're not referenced by variants
+                            // Modifiers, reviews don't need mappings as they're not referenced by variants
                             _logger.LogDebug("🔍 [MAPPING-CHECK] ComponentType='{ComponentType}', CreatedComponents={Count}", 
                                 componentType, createdComponents.Count);
                                 
@@ -1038,7 +1038,7 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
     /// <summary>
     /// ❌ REMOVED: This method created conflicting OptionsMappingData format that overwrote correct data
     /// Options mapping is now handled exclusively by HierarchicalOptionMappingService to avoid conflicts
-    /// Components like modifiers, images, reviews don't need mappings (not referenced by variants)
+    /// Components like modifiers, reviews don't need mappings (not referenced by variants)
     /// </summary>
     /// <remarks>
     /// Previously this method created entity mappings with wrong JSON format for options:
@@ -1064,7 +1064,7 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
             return; // Options mappings are handled by HierarchicalOptionMappingService only
         }
 
-        // For non-option components (modifiers, images, reviews), we don't need mappings
+        // For non-option components (modifiers, reviews), we don't need mappings
         // These are not referenced by variants, so no mapping storage is required
         _logger.LogDebug("🔗 [MAPPING-{ComponentType}] No mapping required for component type", componentType.ToUpper());
     }

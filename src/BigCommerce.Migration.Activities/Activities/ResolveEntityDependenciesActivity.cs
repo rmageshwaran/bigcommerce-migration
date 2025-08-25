@@ -47,7 +47,7 @@ public class ResolveEntityDependenciesActivity
             //{
             //    if (entity.Equals("product-components", StringComparison.OrdinalIgnoreCase))
             //    {
-            //        _logger.LogInformation("🔗 [EXPAND-COMPONENTS] Expanding 'product-components' into individual component types: options, modifiers, images, reviews");
+            //        _logger.LogInformation("🔗 [EXPAND-COMPONENTS] Expanding 'product-components' into individual component types: options, modifiers, reviews");
             //        expandedSequence.AddRange(new[] { "options", "modifiers", "reviews" });
             //    }
             //    else

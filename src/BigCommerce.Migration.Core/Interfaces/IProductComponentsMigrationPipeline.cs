@@ -4,16 +4,16 @@ namespace BigCommerce.Migration.Core.Interfaces;
 
 /// <summary>
 /// Interface for product components migration pipeline that handles Phase 2 product component migration
-/// (options, modifiers, images, reviews) for existing products with parallel processing and progress aggregation.
+/// (options, modifiers, reviews) for existing products with parallel processing and progress aggregation.
 /// </summary>
 public interface IProductComponentsMigrationPipeline
 {
     /// <summary>
-    /// Processes product components (options, modifiers, images, reviews) for existing products
+    /// Processes product components (options, modifiers, reviews) for existing products
     /// Fetches products 10/page with comprehensive includes and creates only the component entities
     /// Implements dual-tier progress aggregation for real-time dashboard updates
     /// </summary>
-    /// <param name="productsWithComponents">List of products with comprehensive include data (options, modifiers, images, reviews)</param>
+    /// <param name="productsWithComponents">List of products with comprehensive include data (options, modifiers, reviews)</param>
     /// <param name="migrationId">Migration identifier</param>
     /// <param name="sourceStore">Source store configuration</param>
     /// <param name="destinationStore">Destination store configuration</param>

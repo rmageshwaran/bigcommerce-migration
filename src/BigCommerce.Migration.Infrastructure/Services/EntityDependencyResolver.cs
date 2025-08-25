@@ -99,10 +99,11 @@ public class EntityDependencyResolver : IEntityDependencyResolver
             return new List<string>
             {
                 "products",              // Phase 1: Core products (250/page)
-                "product-components",    // Phase 2: Options, modifiers, images, reviews (10/page)
+                "product-components",    // Phase 2: Options, modifiers, reviews (10/page)
                 "product-related",       // Phase 3: Related products updates (provides timing gap for option mappings)
-                "product-metafields",    // Phase 4: Product meta fields (provides timing gap for option mappings)
-                "product-channels",      // Phase 5: Channel assignments (provides timing gap for option mappings)
+                // ❌ NOT IMPLEMENTED YET - Commented out until implementation is complete
+                // "product-metafields",    // Phase 4: Product meta fields (provides timing gap for option mappings)
+                // "product-channels",      // Phase 5: Channel assignments (provides timing gap for option mappings)
                 "variants"               // Phase 6: Product variants ✅ NOW with option mappings ready
             };
         }

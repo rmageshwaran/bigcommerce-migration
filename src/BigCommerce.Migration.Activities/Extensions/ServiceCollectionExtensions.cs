@@ -7,7 +7,9 @@ using BigCommerce.Migration.Core.Models;
 using BigCommerce.Migration.Infrastructure.Services;
 using BigCommerce.Migration.Activities.Services;
 using BigCommerce.Migration.Activities.Strategies;
+using BigCommerce.Migration.Activities.Strategies.Discovery;
 using BigCommerce.Migration.Activities.Services.EntityCreation;
+using BigCommerce.Migration.Activities.Strategies.Creation;
 using BigCommerce.Migration.Activities.Activities;
 using System.Net.Http;
 using BigCommerce.Migration.Activities.Strategies.Transform;
@@ -104,12 +106,14 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<V2DirectPaginationStrategy>();
         services.AddSingleton<V3EfficientPaginationStrategy>();
         services.AddSingleton<V3HierarchicalStrategy>();
+        services.AddSingleton<ProductRelatedDiscoveryStrategy>();
         
         // 🎯 Register entity creation strategy pattern implementations (Task 3.1 - COMPLETED)
         // Strategy Pattern for Open/Closed Principle compliance
         services.AddScoped<IEntityCreationStrategyFactory, EntityCreationStrategyFactory>();
         services.AddScoped<IEntityCreationStrategy, CategoryCreationStrategy>();
         services.AddScoped<IEntityCreationStrategy, ProductCreationStrategy>();
+        services.AddScoped<IEntityCreationStrategy, ProductRelatedCreationStrategy>();
         services.AddScoped<IEntityCreationStrategy, BrandCreationStrategy>();
         services.AddScoped<IEntityCreationStrategy, VariantCreationStrategy>();
         services.AddScoped<IEntityCreationStrategy, ImageCreationStrategy>();
@@ -128,6 +132,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IEntityTransformStrategy, ModifierTransformStrategy>();
         services.AddScoped<IEntityTransformStrategy, OptionsTransformStrategy>();
         services.AddScoped<IEntityTransformStrategy, ReviewsTransformStrategy>();
+        services.AddScoped<IEntityTransformStrategy, ProductRelatedTransformStrategy>();
         
         // 🔽 Register entity fetch strategy pattern implementations (Task 3.3 - COMPLETED)
         services.AddScoped<IEntityFetchStrategyFactory, EntityFetchStrategyFactory>();

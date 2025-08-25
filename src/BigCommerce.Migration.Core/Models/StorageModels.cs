@@ -73,6 +73,47 @@ public class EntityMapping
 }
 
 /// <summary>
+/// Result of paginated entity mappings query
+/// </summary>
+public class EntityMappingsPageResult
+{
+    /// <summary>
+    /// List of entity mappings for this page
+    /// </summary>
+    public List<EntityMapping> Mappings { get; set; } = new();
+
+    /// <summary>
+    /// Continuation token for next page (null if this is the last page)
+    /// </summary>
+    public string? ContinuationToken { get; set; }
+
+    /// <summary>
+    /// Whether there are more pages available
+    /// </summary>
+    public bool HasMorePages => !string.IsNullOrEmpty(ContinuationToken);
+
+    /// <summary>
+    /// Number of mappings in this page
+    /// </summary>
+    public int Count => Mappings.Count;
+
+    /// <summary>
+    /// Page size used for this query
+    /// </summary>
+    public int PageSize { get; set; }
+
+    /// <summary>
+    /// Migration ID this page belongs to
+    /// </summary>
+    public string MigrationId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Entity type filtered for this page
+    /// </summary>
+    public string EntityType { get; set; } = string.Empty;
+}
+
+/// <summary>
 /// API call tracking entry for rate limiting and monitoring
 /// </summary>
 public class ApiCallTracking

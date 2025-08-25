@@ -388,7 +388,7 @@ public class SubBatchConfiguration
     public string? Include { get; set; }
 
     /// <summary>
-    /// Whether to enable parallel processing of sub-entities (options, modifiers, images, reviews)
+    /// Whether to enable parallel processing of sub-entities (options, modifiers, reviews)
     /// Used for Enhanced Product Migration Phase 2 comprehensive entity processing
     /// </summary>
     [JsonPropertyName("enableParallelSubEntities")]

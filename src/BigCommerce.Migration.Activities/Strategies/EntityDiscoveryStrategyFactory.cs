@@ -1,5 +1,6 @@
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
+using BigCommerce.Migration.Activities.Strategies.Discovery;
 using Microsoft.Extensions.Logging;
 
 namespace BigCommerce.Migration.Activities.Strategies;
@@ -16,8 +17,10 @@ public class EntityDiscoveryStrategyFactory : IEntityDiscoveryStrategyFactory
     private readonly ILogger<V2DirectPaginationStrategy> _v2Logger;
     private readonly ILogger<V3EfficientPaginationStrategy> _v3EfficientLogger;
     private readonly ILogger<V3HierarchicalStrategy> _v3HierarchicalLogger;
+    private readonly ILogger<ProductRelatedDiscoveryStrategy> _productRelatedLogger;
     //private readonly ILogger<V3ProductComponentsDiscoveryStrategy> _v3ProductComponentsLogger;
     private readonly ICancellationStore _cancellationStore;
+    private readonly IMigrationStorageService _storageService;
 
     /// <summary>
     /// Initializes a new instance of EntityDiscoveryStrategyFactory
@@ -27,24 +30,27 @@ public class EntityDiscoveryStrategyFactory : IEntityDiscoveryStrategyFactory
     /// <param name="v2Logger">Logger for V2 strategy</param>
     /// <param name="v3EfficientLogger">Logger for V3 efficient strategy</param>
     /// <param name="v3HierarchicalLogger">Logger for V3 hierarchical strategy</param>
-    /// <param name="v3ProductComponentsLogger">Logger for V3 product components strategy</param>
+    /// <param name="productRelatedLogger">Logger for ProductRelated discovery strategy</param>
     /// <param name="cancellationStore">Cancellation store for blob-based cancellation</param>
+    /// <param name="storageService">Migration storage service for EntityProgress queries</param>
     public EntityDiscoveryStrategyFactory(
         IBigCommerceApiClient apiClient,
         ILogger<EntityDiscoveryStrategyFactory> logger,
         ILogger<V2DirectPaginationStrategy> v2Logger,
         ILogger<V3EfficientPaginationStrategy> v3EfficientLogger,
         ILogger<V3HierarchicalStrategy> v3HierarchicalLogger,
-        //ILogger<V3ProductComponentsDiscoveryStrategy> v3ProductComponentsLogger,
-        ICancellationStore cancellationStore)
+        ILogger<ProductRelatedDiscoveryStrategy> productRelatedLogger,
+        ICancellationStore cancellationStore,
+        IMigrationStorageService storageService)
     {
         _apiClient = apiClient ?? throw new ArgumentNullException(nameof(apiClient));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _v2Logger = v2Logger ?? throw new ArgumentNullException(nameof(v2Logger));
         _v3EfficientLogger = v3EfficientLogger ?? throw new ArgumentNullException(nameof(v3EfficientLogger));
         _v3HierarchicalLogger = v3HierarchicalLogger ?? throw new ArgumentNullException(nameof(v3HierarchicalLogger));
-        //_v3ProductComponentsLogger = v3ProductComponentsLogger ?? throw new ArgumentNullException(nameof(v3ProductComponentsLogger));
+        _productRelatedLogger = productRelatedLogger ?? throw new ArgumentNullException(nameof(productRelatedLogger));
         _cancellationStore = cancellationStore ?? throw new ArgumentNullException(nameof(cancellationStore));
+        _storageService = storageService ?? throw new ArgumentNullException(nameof(storageService));
     }
 
     /// <summary>
@@ -104,9 +110,16 @@ public class EntityDiscoveryStrategyFactory : IEntityDiscoveryStrategyFactory
     {
         _logger.LogInformation("🏭 [STRATEGY-FACTORY-DEBUG] Selecting V3 strategy for EntityType: {EntityType}", entityType);
         
+        // 🔧 SPECIAL CASE: product-related uses EntityProgress table instead of BigCommerce API
+        if (entityType.Equals("product-related", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogInformation("🏭 [STRATEGY-FACTORY-DEBUG] ✅ Creating ProductRelatedDiscoveryStrategy for {EntityType} - will query EntityProgress table", entityType);
+            return new ProductRelatedDiscoveryStrategy(_storageService, _productRelatedLogger);
+        }
+        
         // 🔧 SPECIAL CASE: product-components and individual component types are not real BigCommerce API endpoints
-        // They are logical entities that represent components within products (options, modifiers, images, reviews)
-        //var componentTypes = new[] { "product-components", "options", "modifiers", "images", "reviews" };
+        // They are logical entities that represent components within products (options, modifiers, reviews)
+        //var componentTypes = new[] { "product-components", "options", "modifiers", "reviews" };
         //if (componentTypes.Contains(entityType, StringComparer.OrdinalIgnoreCase))
         //{
         //    _logger.LogInformation("🏭 [STRATEGY-FACTORY-DEBUG] ✅ Creating V3 product-components strategy for {EntityType} - will extract components from products", entityType);

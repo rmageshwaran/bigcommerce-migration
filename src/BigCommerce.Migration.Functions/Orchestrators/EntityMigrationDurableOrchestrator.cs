@@ -293,7 +293,7 @@ public static class EntityMigrationDurableOrchestrator
             }
             
             // 🎯 PERFORMANCE OPTIMIZATION: Use configuration-driven chunking  
-            var chunkingThreshold = 100; // TODO: Make this configurable too
+            var chunkingThreshold = 0; // 🔧 FORCE ALL ENTITIES THROUGH NORMAL PIPELINE: No fast workflow bypass
             var chunkSize = entityConfig.ChunkSize; // ✅ NOW CONFIGURABLE!
             
             logger.LogError("🎯 [ORCHESTRATOR-CHUNKING-DEBUG] ===== CHUNKING CONFIGURATION =====");

@@ -18,6 +18,7 @@ public class EntityFetchService : IEntityFetchService
     private readonly IBigCommerceApiClient _apiClient;
     private readonly IEntityFetchStrategyFactory _strategyFactory;
     private readonly ISubBatchConfigurationService _configService;
+    private readonly IEntityMappingsPaginationService _entityMappingsPaginationService;
     private readonly ILogger<EntityFetchService> _logger;
     
     // All configuration values are now loaded dynamically from SubBatchConfigurationService
@@ -26,11 +27,13 @@ public class EntityFetchService : IEntityFetchService
         IBigCommerceApiClient apiClient, 
         IEntityFetchStrategyFactory strategyFactory,
         ISubBatchConfigurationService configService,
+        IEntityMappingsPaginationService entityMappingsPaginationService,
         ILogger<EntityFetchService> logger)
     {
         _apiClient = apiClient ?? throw new ArgumentNullException(nameof(apiClient));
         _strategyFactory = strategyFactory ?? throw new ArgumentNullException(nameof(strategyFactory));
         _configService = configService ?? throw new ArgumentNullException(nameof(configService));
+        _entityMappingsPaginationService = entityMappingsPaginationService ?? throw new ArgumentNullException(nameof(entityMappingsPaginationService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -86,6 +89,16 @@ public class EntityFetchService : IEntityFetchService
                     request.BatchNumber, request.MigrationId, request.BatchNumber + 1);
                 
                 return await FetchEntitiesWithDirectPaginationAsync(request, cancellationToken);
+            }
+            
+            // 🔧 PRODUCT-RELATED ROUTING: Fetch from EntityMappings table instead of BigCommerce API
+            if (request.EntityType.Equals("product-related", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogInformation("📊 [FETCH-ROUTING] ✅ PRODUCT-RELATED: Using EntityMappings pagination for batch {BatchNumber} " +
+                                      "in migration {MigrationId} (EntityMappings query instead of BigCommerce API)", 
+                    request.BatchNumber, request.MigrationId);
+                
+                return await FetchEntitiesFromEntityMappingsAsync(request, cancellationToken);
             }
             
             // 🚨 CRITICAL VARIANT ROUTING: Variants MUST use direct pagination like products
@@ -817,6 +830,164 @@ public class EntityFetchService : IEntityFetchService
         {
             _logger.LogError(ex, "Failed to fetch modifiers for product {ProductId} in migration {MigrationId}", 
                 productId, migrationId);
+        }
+    }
+
+    /// <summary>
+    /// Fetches product-related entities from EntityMappings table using efficient stream-based pagination
+    /// This method uses async enumerable streaming with Skip/Take for memory efficiency
+    /// instead of calling non-existent BigCommerce API (/product-related endpoint)
+    /// 
+    /// DESIGN: Works like FetchEntitiesWithDirectPaginationAsync but for EntityMappings instead of BigCommerce API
+    /// - Batch 0: Skip 0, Take pageSize (entities 0-249)  
+    /// - Batch 1: Skip pageSize, Take pageSize (entities 250-499)
+    /// - Batch 2: Skip 2*pageSize, Take pageSize (entities 500-749)
+    /// 
+    /// MEMORY EFFICIENCY: Uses async enumerable streaming instead of loading all pages into memory
+    /// </summary>
+    private async Task<List<Dictionary<string, object>>> FetchEntitiesFromEntityMappingsAsync(
+        BatchProcessingRequest request, 
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            // 🚫 CANCELLATION: Check at start of fetch operation
+            cancellationToken.ThrowIfCancellationRequested();
+
+            _logger.LogInformation("📊 [ENTITY-MAPPINGS-FETCH] Starting EntityMappings direct pagination for product-related batch {BatchNumber} in migration {MigrationId}", 
+                request.BatchNumber, request.MigrationId);
+
+            // Get configuration for batch size
+            var config = _configService.GetConfiguration("product-related");
+            var pageSize = config.FetchBatchSize; // Use configured batch size
+            
+            _logger.LogDebug("📊 [ENTITY-MAPPINGS-FETCH] Direct Pagination: BatchNumber={BatchNumber}, PageSize={PageSize}", 
+                request.BatchNumber, pageSize);
+
+            // Calculate skip count based on batch number (similar to API pagination)
+            var skipCount = request.BatchNumber * pageSize;
+            
+            _logger.LogInformation("📊 [ENTITY-MAPPINGS-FETCH] Direct pagination parameters: Skip={SkipCount}, Take={PageSize} for batch {BatchNumber}", 
+                skipCount, pageSize, request.BatchNumber);
+
+            // 🚀 MEMORY-EFFICIENT APPROACH: Use async enumerable with Skip/Take (like variants use BigCommerce API pagination)
+            // This approach streams through records without loading everything into memory
+            _logger.LogInformation("📊 [ENTITY-MAPPINGS-FETCH] Using stream-based Skip/Take approach for memory efficiency");
+
+            var allMappings = _entityMappingsPaginationService.GetAllEntityMappingsAsync(
+                request.MigrationId, 
+                "products", 
+                250, // Internal streaming page size for Azure Table Storage
+                cancellationToken);
+
+            var batchMappings = new List<EntityMapping>();
+            var skippedMappings = new List<EntityMapping>(); // ✅ NEW: Track skipped entities
+            var processedCount = 0;
+            var targetStart = skipCount;
+            var targetEnd = skipCount + pageSize;
+            
+            _logger.LogDebug("📊 [ENTITY-MAPPINGS-FETCH] Streaming target range: {TargetStart} to {TargetEnd} (BatchNumber={BatchNumber})", 
+                targetStart, targetEnd, request.BatchNumber);
+
+            // Stream through entities efficiently using Skip/Take pattern
+            await foreach (var mapping in allMappings.WithCancellation(cancellationToken))
+            {
+                // Skip entities until we reach our batch start
+                if (processedCount < targetStart)
+                {
+                    processedCount++;
+                    continue;
+                }
+                
+                // Collect entities within our batch range  
+                if (processedCount < targetEnd)
+                {
+                    // 🚫 CANCELLATION: Periodic check during streaming (every 100 records)
+                    if (processedCount % 100 == 0)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                    }
+
+                    // ✅ FIXED: Track both entities with data AND skipped entities
+                    if (!string.IsNullOrWhiteSpace(mapping.RelatedProductsData))
+                    {
+                        batchMappings.Add(mapping);
+                        _logger.LogDebug("📊 [ENTITY-MAPPINGS-FETCH] Collected entity {SourceId}→{DestinationId} (position {Position})", 
+                            mapping.SourceId, mapping.DestinationId, processedCount);
+                    }
+                    else
+                    {
+                        // 🚨 FIXED BUG: Track skipped entities so orchestrator gets correct total count
+                        skippedMappings.Add(mapping);
+                        _logger.LogDebug("📊 [ENTITY-MAPPINGS-FETCH] Skipped entity {SourceId}→{DestinationId} - no RelatedProductsData", 
+                            mapping.SourceId, mapping.DestinationId);
+                    }
+                    processedCount++;
+                }
+                else
+                {
+                    // We've passed our target range - stop streaming
+                    _logger.LogDebug("📊 [ENTITY-MAPPINGS-FETCH] Reached end of target range at position {Position}", processedCount);
+                    break;
+                }
+            }
+
+            _logger.LogInformation("📊 [ENTITY-MAPPINGS-FETCH] Stream completed: Processed={ProcessedCount}, CollectedWithData={CollectedCount}, Skipped={SkippedCount} for batch {BatchNumber}", 
+                processedCount, batchMappings.Count, skippedMappings.Count, request.BatchNumber);
+
+            // Convert EntityMappings to Dictionary format expected by transform pipeline
+            var entities = new List<Dictionary<string, object>>();
+            
+            // ✅ FIXED: Include entities with RelatedProductsData for processing
+            foreach (var mapping in batchMappings)
+            {
+                var entity = new Dictionary<string, object>
+                {
+                    ["SourceId"] = mapping.SourceId ?? "",
+                    ["DestinationId"] = mapping.DestinationId ?? "",
+                    ["EntityType"] = mapping.EntityType ?? "",
+                    ["MigrationId"] = mapping.MigrationId ?? "",
+                    ["RelatedProductsData"] = mapping.RelatedProductsData ?? ""
+                };
+
+                entities.Add(entity);
+            }
+
+            // ✅ FIXED BUG: Include skipped entities so orchestrator accounts for all entities
+            foreach (var mapping in skippedMappings)
+            {
+                var skippedEntity = new Dictionary<string, object>
+                {
+                    ["SourceId"] = mapping.SourceId ?? "",
+                    ["DestinationId"] = mapping.DestinationId ?? "",
+                    ["EntityType"] = mapping.EntityType ?? "",
+                    ["MigrationId"] = mapping.MigrationId ?? "",
+                    ["RelatedProductsData"] = "", // Empty for skipped entities
+                    ["status"] = "skipped", // ✅ NEW: Mark as skipped for orchestrator counting
+                    ["reason"] = "no_related_products_data" // ✅ NEW: Reason for skipping
+                };
+
+                entities.Add(skippedEntity);
+            }
+
+            _logger.LogInformation("✅ [ENTITY-MAPPINGS-FETCH] Successfully converted {TotalCount} EntityMappings: {ProcessableCount} processable + {SkippedCount} skipped", 
+                entities.Count, batchMappings.Count, skippedMappings.Count);
+
+            return entities;
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("🚫 [ENTITY-MAPPINGS-FETCH-CANCEL] EntityMappings fetch cancelled for batch {BatchNumber} in migration {MigrationId}", 
+                request.BatchNumber, request.MigrationId);
+            throw; // Re-throw to propagate cancellation
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "🔥 [ENTITY-MAPPINGS-FETCH-ERROR] Failed to fetch entities from EntityMappings for product-related batch {BatchNumber} in migration {MigrationId}", 
+                request.BatchNumber, request.MigrationId);
+            
+            // Return empty list to allow pipeline to continue
+            return new List<Dictionary<string, object>>();
         }
     }
 

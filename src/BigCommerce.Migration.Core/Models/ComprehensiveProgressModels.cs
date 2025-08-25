@@ -12,7 +12,7 @@ namespace BigCommerce.Migration.Core.Models;
 public class ComprehensiveEntityProcessingResult : BatchProcessingResult
 {
     /// <summary>
-    /// Statistics for sub-entity processing (options, modifiers, images, reviews)
+    /// Statistics for sub-entity processing (options, modifiers, reviews)
     /// </summary>
     [JsonPropertyName("subEntityStatistics")]
     public Dictionary<string, SubEntityStatistics> SubEntityStatistics { get; set; } = new();
@@ -59,12 +59,12 @@ public class ComprehensiveEntityProcessingResult : BatchProcessingResult
 }
 
 /// <summary>
-/// Statistics for individual sub-entity type processing (options, modifiers, images, reviews)
+/// Statistics for individual sub-entity type processing (options, modifiers, reviews)
 /// </summary>
 public class SubEntityStatistics
 {
     /// <summary>
-    /// Sub-entity type (e.g., "options", "modifiers", "images", "reviews")
+    /// Sub-entity type (e.g., "options", "modifiers", "reviews")
     /// </summary>
     [JsonPropertyName("entityType")]
     public string EntityType { get; set; } = string.Empty;

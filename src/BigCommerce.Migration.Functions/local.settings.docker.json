@@ -164,15 +164,28 @@
         "subBatchDelayMs": 2000,
         "processSubBatchesSequentially": true,
         "include": ""
+      },
+      "product-related": {
+        "entityType": "product-related",
+        "chunkSize": 10,
+        "fetchBatchSize": 10,
+        "pageSize": 10,
+        "subBatchSize": 5,
+        "maxConcurrency": 1,
+        "enableSubBatching": true,
+        "subBatchDelayMs": 1000,
+        "processSubBatchesSequentially": true,
+        "include": ""
       }
     }
   },
   "Logging": {
     "LogLevel": {
-      "Default": "Information",
+      "Default": "Trace",
       "Microsoft": "Warning",
       "Microsoft.Hosting.Lifetime": "Information",
-      "BigCommerce.Migration": "Debug"
+      "BigCommerce.Migration": "Trace",
+      "BigCommerce.Migration.Activities.Strategies.Transform.ProductRelatedTransformStrategy": "Trace"
     }
   },
   "Host": {

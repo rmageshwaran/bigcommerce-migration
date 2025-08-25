@@ -438,6 +438,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IBlobService, BlobService>();
         services.AddSingleton<IQueueService, QueueService>();
         services.AddScoped<IMigrationStorageService, MigrationStorageService>();
+        services.AddScoped<IEntityMappingsPaginationService, EntityMappingsPaginationService>();
         services.AddSingleton<ICancellationStore, CancellationStore>();
 
         // Register API request handler for HTTP concerns (delegation pattern)

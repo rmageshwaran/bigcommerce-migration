@@ -104,14 +104,27 @@ public class UpdateEntityProgressActivity
                         entityType, realEntityProgress.SuccessCount, realEntityProgress.FailureCount, 
                         realEntityProgress.SkippedCount, realEntityProgress.CancelledCount);
                     
+                    // 🎯 DYNAMIC DISCOVERY FIX: For phases without proper discovery, set TotalCount = actual entities processed
+                    var isDynamicDiscoveryPhase = entityType.Equals("product-components", StringComparison.OrdinalIgnoreCase) ||
+                                                  entityType.Equals("product-images", StringComparison.OrdinalIgnoreCase);
+                    
+                    var finalTotalCount = realEntityProgress.TotalCount;
+                    if (isDynamicDiscoveryPhase)
+                    {
+                        // 🎯 DYNAMIC-DISCOVERY FIX: For dynamic discovery phases, TotalCount = Success + Failed + Skipped (actual entities processed)
+                        // This fixes the dashboard showing input product count instead of actual component/image counts
+                        finalTotalCount = realEntityProgress.SuccessCount + realEntityProgress.FailureCount + realEntityProgress.SkippedCount;
+                        _logger.LogInformation("🎯 [DYNAMIC-DISCOVERY] Fixed TotalCount for {EntityType}: {OriginalTotal} → {NewTotal} (Success={Success} + Failed={Failed} + Skipped={Skipped}) for migration {MigrationId}",
+                            entityType, realEntityProgress.TotalCount, finalTotalCount, realEntityProgress.SuccessCount, realEntityProgress.FailureCount, realEntityProgress.SkippedCount, migrationId);
+                    }
+                    
                     // Create enhanced update with real counts
                     var enhancedUpdate = new ProgressUpdate
                     {
                         MigrationId = migrationId,
                         EntityType = entityType,
                         Phase = "Completed",
-                        // 🎯 PROGRESSIVE DISCOVERY FIX: For component entities, use ProcessedCount as TotalCount if TotalCount is 0
-                        TotalCount = realEntityProgress.TotalCount > 0 ? realEntityProgress.TotalCount : realEntityProgress.ProcessedCount,
+                        TotalCount = finalTotalCount,
                         ProcessedCount = realEntityProgress.ProcessedCount,
                         SuccessCount = realEntityProgress.SuccessCount,
                         FailureCount = realEntityProgress.FailureCount,

@@ -479,7 +479,7 @@ public class VariantCreationStrategy : IEntityCreationStrategy
                             
                             try
                             {
-                                var transformedOV = await TransformOptionValueAsync(ovDict, sourceProductId.ToString()!, migrationId);
+                                var transformedOV = await TransformOptionValueAsync(ovDict, sourceProductId.ToString()!, migrationId, productMappingCache);
                                 
                                 // Ensure we have the required fields after transformation
                                 if (transformedOV.ContainsKey("id") && transformedOV.ContainsKey("option_id"))
@@ -737,7 +737,10 @@ public class VariantCreationStrategy : IEntityCreationStrategy
         
         if (mapping == null)
         {
-            throw new InvalidOperationException($"Product mapping not found for source ID: {sourceProductId}. Ensure Phase 1 (Products) completed successfully.");
+            _logger.LogError("❌ [MAPPING-FAILURE] Product mapping not found for source ID: {SourceProductId} in migration {MigrationId}", 
+                sourceProductId, migrationId);
+            throw new InvalidOperationException($"CRITICAL: Product mapping not found for source ID: {sourceProductId}. " +
+                $"Ensure Phase 1 (Products) completed successfully and created entity mappings for migration {migrationId}.");
         }
 
                     var productData = new ProductMappingData
@@ -861,7 +864,8 @@ public class VariantCreationStrategy : IEntityCreationStrategy
         private async Task<Dictionary<string, object>> TransformOptionValueAsync(
         Dictionary<string, object> sourceOptionValue, 
         string sourceProductId,
-        string migrationId)
+        string migrationId,
+        Dictionary<string, ProductMappingData> sharedCache)
     {
         //_logger.LogDebug("🔍 [OPTION-TRANSFORM] Input source option_value: {SourceOptionValue}", JsonSerializer.Serialize(sourceOptionValue));
         
@@ -876,11 +880,9 @@ public class VariantCreationStrategy : IEntityCreationStrategy
             
             try
             {
-                // 🔧 MULTI-INSTANCE SAFE: Create method-scoped cache for this operation
-                var localCache = new Dictionary<string, ProductMappingData>();
-                
-                // 🚀 PERFORMANCE OPTIMIZED: Use consolidated mapping lookup instead of 2 separate database calls
-                var mappingData = await GetProductMappingDataAsync(sourceProductId, migrationId, localCache);
+                // 🚨 RACE CONDITION FIX: Use shared batch-level cache instead of creating isolated local cache
+                // This ensures consistent mapping data across all option transformations in the batch
+                var mappingData = await GetProductMappingDataAsync(sourceProductId, migrationId, sharedCache);
                 
                 var destinationOptionId = LookupDestinationOptionIdFromCache(sourceOptionId.ToString()!, mappingData);
                 var destinationOptionValueId = LookupDestinationOptionValueIdFromCache(
@@ -928,12 +930,17 @@ public class VariantCreationStrategy : IEntityCreationStrategy
     {
         if (mappingData.OptionIdMappings.TryGetValue(sourceOptionId, out var destinationOptionId))
         {
-            //_logger.LogDebug("✅ [CACHE-LOOKUP] Found option ID mapping: {SourceId} → {DestinationId}", sourceOptionId, destinationOptionId);
+            _logger.LogDebug("✅ [CACHE-LOOKUP] Found option ID mapping: {SourceId} → {DestinationId}", sourceOptionId, destinationOptionId);
             return destinationOptionId;
         }
 
-        _logger.LogWarning("⚠️ [CACHE-LOOKUP] Option ID mapping not found for {SourceOptionId}", sourceOptionId);
-        throw new InvalidOperationException($"Option mapping not found for source option ID: {sourceOptionId}");
+        // 🚨 CRITICAL: Enhanced error logging to identify mapping failures
+        _logger.LogError("❌ [MAPPING-FAILURE] Option ID mapping not found for {SourceOptionId}. Available mappings: [{AvailableMappings}]", 
+            sourceOptionId, string.Join(", ", mappingData.OptionIdMappings.Keys));
+        
+        throw new InvalidOperationException($"CRITICAL: Option mapping not found for source option ID: {sourceOptionId}. " +
+            $"Available option mappings: [{string.Join(", ", mappingData.OptionIdMappings.Keys)}]. " +
+            $"This indicates product-components phase did not complete successfully or option mappings were not stored properly.");
     }
 
     /// <summary>
@@ -945,14 +952,24 @@ public class VariantCreationStrategy : IEntityCreationStrategy
         if (mappingData.OptionValueMappings.TryGetValue(sourceOptionId, out var optionValueMappings) &&
             optionValueMappings.TryGetValue(sourceOptionValueId, out var destinationOptionValueId))
         {
-            // _logger.LogDebug("✅ [CACHE-LOOKUP] Found option value ID mapping: {SourceOptionId}.{SourceValueId} → {DestinationValueId}", 
-            //    sourceOptionId, sourceOptionValueId, destinationOptionValueId);
+            _logger.LogDebug("✅ [CACHE-LOOKUP] Found option value ID mapping: {SourceOptionId}.{SourceValueId} → {DestinationValueId}", 
+               sourceOptionId, sourceOptionValueId, destinationOptionValueId);
             return destinationOptionValueId;
         }
 
-        _logger.LogWarning("⚠️ [CACHE-LOOKUP] Option value ID mapping not found for {SourceOptionId}.{SourceValueId}", 
-            sourceOptionId, sourceOptionValueId);
-        throw new InvalidOperationException($"Option value mapping not found for source option ID: {sourceOptionId}, option value ID: {sourceOptionValueId}");
+        // 🚨 CRITICAL: Enhanced error logging to identify mapping failures
+        var availableOptions = string.Join(", ", mappingData.OptionValueMappings.Keys);
+        var availableValuesForOption = mappingData.OptionValueMappings.TryGetValue(sourceOptionId, out var values) 
+            ? string.Join(", ", values.Keys) 
+            : "NONE";
+            
+        _logger.LogError("❌ [MAPPING-FAILURE] Option value ID mapping not found for {SourceOptionId}.{SourceValueId}. " +
+            "Available option IDs: [{AvailableOptions}]. Available values for option {SourceOptionId}: [{AvailableValues}]", 
+            sourceOptionId, sourceOptionValueId, availableOptions, sourceOptionId, availableValuesForOption);
+        
+        throw new InvalidOperationException($"CRITICAL: Option value mapping not found for source option ID: {sourceOptionId}, option value ID: {sourceOptionValueId}. " +
+            $"Available option IDs: [{availableOptions}]. Available values for option {sourceOptionId}: [{availableValuesForOption}]. " +
+            $"This indicates product-components phase did not create proper option value mappings.");
     }
 
     /// <summary>

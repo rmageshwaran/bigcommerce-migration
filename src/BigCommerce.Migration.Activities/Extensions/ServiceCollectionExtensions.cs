@@ -107,6 +107,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<V3EfficientPaginationStrategy>();
         services.AddSingleton<V3HierarchicalStrategy>();
         services.AddSingleton<ProductRelatedDiscoveryStrategy>();
+        services.AddSingleton<ProductImagesDiscoveryStrategy>();
         
         // 🎯 Register entity creation strategy pattern implementations (Task 3.1 - COMPLETED)
         // Strategy Pattern for Open/Closed Principle compliance
@@ -120,6 +121,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IEntityCreationStrategy, ModifierCreationStrategy>();
         services.AddScoped<IEntityCreationStrategy, OptionsCreationStrategy>();
         services.AddScoped<IEntityCreationStrategy, ReviewsCreationStrategy>();
+        services.AddScoped<IEntityCreationStrategy, ProductImagesCreationStrategy>();
         
         // 🔄 Register entity transform strategy pattern implementations (Task 3.2 - COMPLETED)
         services.AddScoped<IEntityTransformStrategyFactory, EntityTransformStrategyFactory>();
@@ -133,10 +135,17 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IEntityTransformStrategy, OptionsTransformStrategy>();
         services.AddScoped<IEntityTransformStrategy, ReviewsTransformStrategy>();
         services.AddScoped<IEntityTransformStrategy, ProductRelatedTransformStrategy>();
+        services.AddScoped<IEntityTransformStrategy, ProductImagesTransformStrategy>();
+        
+        // 🖼️ Register entity creation strategies for Product-Images phase
+        services.AddScoped<IEntityCreationStrategy, ProductImagesCreationStrategy>();
         
         // 🔽 Register entity fetch strategy pattern implementations (Task 3.3 - COMPLETED)
         services.AddScoped<IEntityFetchStrategyFactory, EntityFetchStrategyFactory>();
         services.AddScoped<IEntityFetchStrategy, CategoryFetchStrategy>();
+        
+        // 🖼️ Register specialized fetch services for Product-Images phase
+        services.AddScoped<IProductImagesFetchService, ProductImagesFetchService>();
 
         // Note: ProductFetchStrategy and BrandFetchStrategy removed - these entities use direct pagination
         

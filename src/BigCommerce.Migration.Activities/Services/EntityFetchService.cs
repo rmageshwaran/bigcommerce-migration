@@ -101,6 +101,16 @@ public class EntityFetchService : IEntityFetchService
                 return await FetchEntitiesFromEntityMappingsAsync(request, cancellationToken);
             }
             
+            // 🖼️ PRODUCT-IMAGES ROUTING: Fetch from EntityMappings table like product-related
+            if (request.EntityType.Equals("product-images", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogInformation("🖼️ [FETCH-ROUTING] ✅ PRODUCT-IMAGES: Using EntityMappings pagination for batch {BatchNumber} " +
+                                      "in migration {MigrationId} (EntityMappings query instead of BigCommerce API)", 
+                    request.BatchNumber, request.MigrationId);
+                
+                return await FetchEntitiesFromEntityMappingsAsync(request, cancellationToken);
+            }
+            
             // 🚨 CRITICAL VARIANT ROUTING: Variants MUST use direct pagination like products
             if (request.EntityType.Equals("variants", StringComparison.OrdinalIgnoreCase))
             {
@@ -415,7 +425,7 @@ public class EntityFetchService : IEntityFetchService
             
             // ✅ COMPONENT HANDLING: Individual component types fetch products with includes
             string actualEntityType = request.EntityType;
-            var componentTypes = new[] { "images", "options", "modifiers", "reviews" };
+            var componentTypes = new[] {"options", "modifiers", "reviews" };
             if (componentTypes.Contains(request.EntityType.ToLowerInvariant()))
             {
                 _logger.LogInformation("🔗 [COMPONENT-FETCH] Individual component '{ComponentType}' - fetching products with includes", 
@@ -854,11 +864,11 @@ public class EntityFetchService : IEntityFetchService
             // 🚫 CANCELLATION: Check at start of fetch operation
             cancellationToken.ThrowIfCancellationRequested();
 
-            _logger.LogInformation("📊 [ENTITY-MAPPINGS-FETCH] Starting EntityMappings direct pagination for product-related batch {BatchNumber} in migration {MigrationId}", 
-                request.BatchNumber, request.MigrationId);
+            _logger.LogInformation("📊 [ENTITY-MAPPINGS-FETCH] Starting EntityMappings direct pagination for {EntityType} batch {BatchNumber} in migration {MigrationId}", 
+                request.EntityType, request.BatchNumber, request.MigrationId);
 
             // Get configuration for batch size
-            var config = _configService.GetConfiguration("product-related");
+            var config = _configService.GetConfiguration(request.EntityType);
             var pageSize = config.FetchBatchSize; // Use configured batch size
             
             _logger.LogDebug("📊 [ENTITY-MAPPINGS-FETCH] Direct Pagination: BatchNumber={BatchNumber}, PageSize={PageSize}", 

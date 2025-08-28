@@ -288,17 +288,6 @@ public class BigCommercePaginationConfig
             MaxPagesLimit = 5000, // Up to 500K variants
             EstimateTotalsForV2 = false
         },
-        ["images"] = new BigCommercePaginationStrategy
-        {
-            EntityType = "images",
-            PreferredPageSize = 25,
-            MaxPageSize = 100,
-            AllowParallelFetching = false,
-            MaxParallelRequests = 1,
-            DelayBetweenPages = 150,
-            MaxPagesLimit = 10000, // Up to 1M images
-            EstimateTotalsForV2 = false
-        },
         ["modifiers"] = new BigCommercePaginationStrategy
         {
             EntityType = "modifiers",

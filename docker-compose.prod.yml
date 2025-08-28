@@ -181,6 +181,22 @@ services:
       - ParallelProcessing__subBatchConfigurations__product-related__processSubBatchesSequentially=false
       - ParallelProcessing__subBatchConfigurations__product-related__include=
       
+      # ✅ Product-Images Configuration - Phase 4: Individual product image updates (Production)
+      - ParallelProcessing__subBatchConfigurations__product-images__entityType=product-images
+      - ParallelProcessing__subBatchConfigurations__product-images__chunkSize=20
+      - ParallelProcessing__subBatchConfigurations__product-images__fetchBatchSize=20
+      - ParallelProcessing__subBatchConfigurations__product-images__pageSize=20
+      - ParallelProcessing__subBatchConfigurations__product-images__subBatchSize=1
+      - ParallelProcessing__subBatchConfigurations__product-images__maxConcurrency=5
+      - ParallelProcessing__subBatchConfigurations__product-images__enableSubBatching=true
+      - ParallelProcessing__subBatchConfigurations__product-images__subBatchDelayMs=0
+      - ParallelProcessing__subBatchConfigurations__product-images__processSubBatchesSequentially=false
+      - ParallelProcessing__subBatchConfigurations__product-images__imageChunkSize=50
+      - ParallelProcessing__subBatchConfigurations__product-images__imageChunkDelayMs=300
+      - ParallelProcessing__subBatchConfigurations__product-images__maxImagesPerProduct=1000
+      - ParallelProcessing__subBatchConfigurations__product-images__cancellationCheckInterval=5
+      - ParallelProcessing__subBatchConfigurations__product-images__include=
+      
       # ✅ Enhanced Product Configuration (Production - Phase 2 comprehensive entity migration)
 
       

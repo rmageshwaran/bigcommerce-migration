@@ -65,7 +65,6 @@ public class BatchSizeCalculator : IBatchSizeCalculator
             "products" => 10,
             "brands" => 50,
             "variants" => 20,
-            "images" => 15,
             "modifiers" => 30,
             _ => 10
         };
@@ -83,7 +82,6 @@ public class BatchSizeCalculator : IBatchSizeCalculator
             "products" => 50,
             "brands" => 200,
             "variants" => 100,
-            "images" => 75,
             "modifiers" => 150,
             _ => 50
         };

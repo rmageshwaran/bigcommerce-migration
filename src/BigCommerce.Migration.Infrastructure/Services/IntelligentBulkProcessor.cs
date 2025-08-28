@@ -586,7 +586,6 @@ namespace BigCommerce.Migration.Infrastructure.Services
                 "brands" => 3 * 1024,       // 3KB
                 "variants" => 15 * 1024,    // 15KB
                 "products" => 50 * 1024,    // 50KB
-                "images" => 30 * 1024,      // 30KB
                 _ => 10 * 1024               // 10KB default
             };
 
@@ -604,7 +603,7 @@ namespace BigCommerce.Migration.Infrastructure.Services
         }
 
         private bool CheckForDependencies(string entityType) =>
-            entityType.ToLowerInvariant() is "variants" or "images" or "modifiers";
+            entityType.ToLowerInvariant() is "variants" or "modifiers";
 
         private bool CheckIfTimeSeriesData(string entityType) => false; // Most BigCommerce entities are not time-series
 

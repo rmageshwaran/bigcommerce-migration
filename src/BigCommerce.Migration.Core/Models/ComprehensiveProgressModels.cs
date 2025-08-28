@@ -199,7 +199,7 @@ public class PipelineProgressUpdate
 public class SubEntityProgress
 {
     /// <summary>
-    /// Sub-entity type (e.g., "options", "modifiers", "images", "reviews")
+    /// Sub-entity type (e.g., "options", "modifiers", "reviews")
     /// </summary>
     [JsonPropertyName("entityType")]
     public string EntityType { get; set; } = string.Empty;

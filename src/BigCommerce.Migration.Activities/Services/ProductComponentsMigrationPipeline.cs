@@ -88,9 +88,8 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
             // Phase 3.2.2: Enhanced with periodic cancellation checks during extraction
             var allComponents = await ExtractAllComponentsFromProductsAsync(productsWithComponents, migrationId);
             
-            _logger.LogInformation("🔍 [PRODUCT-COMPONENTS-PIPELINE] Extracted components: Options={OptionsCount}, Modifiers={ModifiersCount}, Images={ImagesCount}, Reviews={ReviewsCount}", 
-                allComponents["options"].Count, allComponents["modifiers"].Count, 
-                allComponents["images"].Count, allComponents["reviews"].Count);
+            _logger.LogInformation("🔍 [PRODUCT-COMPONENTS-PIPELINE] Extracted components: Options={OptionsCount}, Modifiers={ModifiersCount}, Reviews={ReviewsCount}", 
+                allComponents["options"].Count, allComponents["modifiers"].Count, allComponents["reviews"].Count);
 
             // Phase 3.2.1: Check for cancellation after component extraction
             await CheckCancellationAsync(migrationId);
@@ -101,7 +100,7 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
                 $"Extracted {totalComponents} components from {productsWithComponents.Count} products", 25);
 
             // Initialize component statistics with actual counts
-            var componentTypes = new[] { "options", "modifiers", "images", "reviews" };
+            var componentTypes = new[] { "options", "modifiers", "reviews" };
             foreach (var componentType in componentTypes)
             {
                 result.SubEntityStatistics[componentType] = new SubEntityStatistics
@@ -159,7 +158,6 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
                 productsWithComponents.Count,
                 result.SubEntityStatistics["options"].SuccessfulCount,
                 result.SubEntityStatistics["modifiers"].SuccessfulCount,
-                result.SubEntityStatistics["images"].SuccessfulCount,
                 result.SubEntityStatistics["reviews"].SuccessfulCount,
                 stopwatch.ElapsedMilliseconds);
 
@@ -258,14 +256,6 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
             await ProcessComponentType("modifiers", modifiers.Cast<Dictionary<string, object>>().ToList(),
                 productId, migrationId, sourceStore, destinationStore, result, cancellationToken);
         }
-
-        // Process Images
-        if (product.ContainsKey("images") && product["images"] is List<object> images)
-        {
-            await ProcessComponentType("images", images.Cast<Dictionary<string, object>>().ToList(),
-                productId, migrationId, sourceStore, destinationStore, result, cancellationToken);
-        }
-
         // Process Reviews
         if (product.ContainsKey("reviews") && product["reviews"] is List<object> reviews)
         {
@@ -575,7 +565,6 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
         {
             ["options"] = new List<ComponentWithContext>(),
             ["modifiers"] = new List<ComponentWithContext>(),
-            ["images"] = new List<ComponentWithContext>(),
             ["reviews"] = new List<ComponentWithContext>()
         };
 
@@ -598,11 +587,10 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
             // Log specific component field presence
             var hasOptions = product.ContainsKey("options");
             var hasModifiers = product.ContainsKey("modifiers");
-            var hasImages = product.ContainsKey("images");
             var hasReviews = product.ContainsKey("reviews");
             
-            _logger.LogInformation("🔍 [EXTRACTION-DEBUG] Product {ProductId} component fields: Options={HasOptions}, Modifiers={HasModifiers}, Images={HasImages}, Reviews={HasReviews}", 
-                productId, hasOptions, hasModifiers, hasImages, hasReviews);
+            _logger.LogInformation("🔍 [EXTRACTION-DEBUG] Product {ProductId} component fields: Options={HasOptions}, Modifiers={HasModifiers}, Reviews={HasReviews}", 
+                productId, hasOptions, hasModifiers, hasReviews);
             
             // Extract options
             if (product.TryGetValue("options", out var optionsValue) && optionsValue != null)
@@ -748,60 +736,6 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
                 }
             }
 
-            // Extract images
-            if (product.TryGetValue("images", out var imagesValue) && imagesValue != null)
-            {
-                // Handle both JsonElement and already-deserialized collections
-                List<Dictionary<string, object>>? imagesList = null;
-                
-                if (imagesValue is JsonElement imagesElement && imagesElement.ValueKind == JsonValueKind.Array)
-                {
-                    // Handle JsonElement case (from JSON parsing)
-                    imagesList = new List<Dictionary<string, object>>();
-                    foreach (var imageElement in imagesElement.EnumerateArray())
-                    {
-                        var imageDict = JsonSerializer.Deserialize<Dictionary<string, object>>(imageElement.GetRawText());
-                        if (imageDict != null) imagesList.Add(imageDict);
-                    }
-                }
-                else if (imagesValue is List<object> objectList)
-                {
-                    // Handle already-deserialized List<object> case (from API client)
-                    imagesList = objectList.Cast<Dictionary<string, object>>().ToList();
-                }
-                else if (imagesValue is string imagesJsonString && !string.IsNullOrEmpty(imagesJsonString))
-                {
-                    try
-                    {
-                        // Handle JSON string case (from API client returning serialized JSON)
-                        var parsedImages = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(imagesJsonString);
-                        if (parsedImages != null)
-                        {
-                            imagesList = parsedImages;
-                        }
-                    }
-                    catch (JsonException ex)
-                    {
-                        _logger.LogWarning("🔍 [EXTRACTION-DEBUG] Product {ProductId} - Failed to parse images JSON string: {Error}", 
-                            productId, ex.Message);
-                    }
-                }
-                
-                // Add extracted images to components
-                if (imagesList != null)
-                {
-                    foreach (var imageDict in imagesList)
-                    {
-                        allComponents["images"].Add(new ComponentWithContext
-                        {
-                            Component = imageDict,
-                            ProductId = productId,
-                            ComponentType = "images"
-                        });
-                    }
-                }
-            }
-
             // Extract reviews
             if (product.TryGetValue("reviews", out var reviewsValue) && reviewsValue != null)
             {
@@ -857,9 +791,8 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
             }
         }
 
-        _logger.LogInformation("🔍 [EXTRACTION-DEBUG] ✅ EXTRACTION COMPLETE: {OptionsCount} options, {ModifiersCount} modifiers, {ImagesCount} images, {ReviewsCount} reviews from {ProductCount} products",
-            allComponents["options"].Count, allComponents["modifiers"].Count, 
-            allComponents["images"].Count, allComponents["reviews"].Count, products.Count);
+        _logger.LogInformation("🔍 [EXTRACTION-DEBUG] ✅ EXTRACTION COMPLETE: {OptionsCount} options, {ModifiersCount} modifiers, {ReviewsCount} reviews from {ProductCount} products",
+            allComponents["options"].Count, allComponents["modifiers"].Count, allComponents["reviews"].Count, products.Count);
 
         // Phase 3.2.2: Final cancellation check before returning extraction results
         await CheckCancellationAsync(migrationId);

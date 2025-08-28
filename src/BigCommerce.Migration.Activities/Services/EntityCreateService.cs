@@ -61,6 +61,27 @@ public class EntityCreateService : IEntityCreateService
                 executionId, strategy.GetType().Name, request.EntityType, request.MigrationId);
 
             // Delegate to strategy implementation
+            // For product-images, we need to include source store information in the entities
+            if (request.EntityType.Equals("product-images", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogInformation("🔧 [ENTITY-CREATE-DEBUG] Adding source store info to {EntityCount} product-images entities. SourceStore: {StoreId} (migration: {MigrationId})", 
+                    entities.Count, request.SourceStore?.StoreId ?? "NULL", request.MigrationId);
+                
+                // Add source store information to each entity for product-images processing
+                foreach (var entity in entities)
+                {
+                    entity["_source_store_id"] = request.SourceStore?.StoreId ?? "";
+                    entity["_source_store_token"] = request.SourceStore?.AccessToken ?? "";
+                    entity["_source_store_channel_id"] = request.SourceStore?.ChannelId ?? "1"; // Default to "1" if not specified
+                    
+                    _logger.LogDebug("🔧 [ENTITY-CREATE-DEBUG] Entity keys after adding source store: [{Keys}] (migration: {MigrationId})", 
+                        string.Join(", ", entity.Keys), request.MigrationId);
+                }
+                
+                _logger.LogInformation("✅ [ENTITY-CREATE-DEBUG] Successfully added source store info to all {EntityCount} entities (migration: {MigrationId})", 
+                    entities.Count, request.MigrationId);
+            }
+            
             var result = await strategy.CreateEntitiesAsync(
                 entities, 
                 request.MigrationId, 

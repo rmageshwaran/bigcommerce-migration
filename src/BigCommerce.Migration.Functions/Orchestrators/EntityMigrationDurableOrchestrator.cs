@@ -41,7 +41,7 @@ public static class EntityMigrationDurableOrchestrator
         {
             logger.LogInformation("🔧 Product-components phase starting - broadcasting entity-started events for all component types (progressive discovery)");
             
-            var componentTypes = new[] { "options", "modifiers", "images", "reviews" };
+            var componentTypes = new[] { "options", "modifiers", "reviews" };
             
             foreach (var componentType in componentTypes)
             {

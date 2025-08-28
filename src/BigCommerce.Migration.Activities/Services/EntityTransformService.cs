@@ -63,6 +63,17 @@ public class EntityTransformService : IEntityTransformService
             // Phase 3.3.1: Check for cancellation before strategy execution
             await CheckCancellationAsync(request.MigrationId);
 
+            // 🖼️ PRODUCT-IMAGES OPTIMIZATION: Skip transform for EntityMappings data
+            if (request.EntityType.Equals("product-images", StringComparison.OrdinalIgnoreCase))
+            {
+                // For product-images, EntityMappings data should go directly to Creation strategy
+                // The Creation strategy will fetch images and handle transformation internally
+                _logger.LogInformation("🖼️ [PRODUCT-IMAGES-TRANSFORM] Skipping transform for EntityMappings data - passing directly to Creation strategy (ExecutionId: {ExecutionId})", 
+                    executionId);
+                
+                return transformedEntity; // Return EntityMappings data unchanged
+            }
+
             // 🎯 STRATEGY PATTERN: Use factory to get appropriate strategy (replaces switch statement)
             var strategy = _strategyFactory.GetStrategy(request.EntityType);
             

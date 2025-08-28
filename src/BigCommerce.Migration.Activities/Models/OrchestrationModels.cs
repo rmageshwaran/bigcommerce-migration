@@ -216,7 +216,7 @@ public class EntityMigrationRequest
     
     private static readonly string[] ValidEntityTypes = 
     {
-        "categories", "products", "brands", "variants", "images", "modifiers"
+        "categories", "products", "brands", "variants", "modifiers"
     };
     
     /// <summary>

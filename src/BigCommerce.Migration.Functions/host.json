@@ -6,6 +6,18 @@
         "isEnabled": true,
         "excludedTypes": "Request"
       }
+    },
+    "logLevel": {
+      "default": "Information",
+      "Microsoft": "Warning",
+      "Microsoft.Hosting.Lifetime": "Information",
+      "BigCommerce.Migration": "Information",
+      "BigCommerce.Migration.Activities": "Information",
+      "DurableTask": "Warning",
+      "Microsoft.Azure.WebJobs": "Warning"
+    },
+    "console": {
+      "isEnabled": true
     }
   },
   "extensions": {

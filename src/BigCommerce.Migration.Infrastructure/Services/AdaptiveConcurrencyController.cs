@@ -340,7 +340,6 @@ namespace BigCommerce.Migration.Infrastructure.Services
                 "products" => 6,
                 "brands" => 8,
                 "variants" => 5,
-                "images" => 3, // Images tend to be more resource intensive
                 "modifiers" => 7,
                 _ => 5 // Default fallback
             };

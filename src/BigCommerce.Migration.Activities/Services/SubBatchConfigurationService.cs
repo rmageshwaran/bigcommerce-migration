@@ -98,7 +98,8 @@ public class SubBatchConfigurationService : ISubBatchConfigurationService
                         SubBatchDelayMs = entitySection.GetValue<int>("subBatchDelayMs", 0),
                         ProcessSubBatchesSequentially = entitySection.GetValue<bool>("processSubBatchesSequentially", true),
                         Include = entitySection.GetValue<string>("include"), // ✅ Enhanced Product Migration: Load include parameter
-                        EnableParallelSubEntities = entitySection.GetValue<bool>("enableParallelSubEntities", false) // ✅ Phase 2: Parallel sub-entity processing
+                        EnableParallelSubEntities = entitySection.GetValue<bool>("enableParallelSubEntities", false), // ✅ Phase 2: Parallel sub-entity processing
+                        CustomSettings = LoadCustomSettings(entitySection) // ✅ Product-Images Phase: Load custom settings
                     };
 
                     configurations[entityType] = config;
@@ -146,6 +147,35 @@ public class SubBatchConfigurationService : ISubBatchConfigurationService
         }
 
         return configurations;
+    }
+
+    /// <summary>
+    /// Loads custom settings for specific entity types (e.g., product-images)
+    /// </summary>
+    private Dictionary<string, object> LoadCustomSettings(IConfigurationSection entitySection)
+    {
+        var customSettings = new Dictionary<string, object>();
+
+        // Load custom settings for product-images phase
+        if (entitySection.GetValue<string>("entityType")?.ToLowerInvariant() == "product-images")
+        {
+            var imageChunkSize = entitySection.GetValue<int>("imageChunkSize", 50);
+            var imageChunkDelayMs = entitySection.GetValue<int>("imageChunkDelayMs", 300);
+            var maxImagesPerProduct = entitySection.GetValue<int>("maxImagesPerProduct", 1000);
+            var cancellationCheckInterval = entitySection.GetValue<int>("cancellationCheckInterval", 5);
+
+            customSettings["imageChunkSize"] = imageChunkSize;
+            customSettings["imageChunkDelayMs"] = imageChunkDelayMs;
+            customSettings["maxImagesPerProduct"] = maxImagesPerProduct;
+            customSettings["cancellationCheckInterval"] = cancellationCheckInterval;
+
+            _logger.LogDebug("📋 [SUB-BATCH] Loaded product-images custom settings: " +
+                           "imageChunkSize={ImageChunkSize}, imageChunkDelayMs={ImageChunkDelayMs}, " +
+                           "maxImagesPerProduct={MaxImagesPerProduct}, cancellationCheckInterval={CancellationCheckInterval}",
+                imageChunkSize, imageChunkDelayMs, maxImagesPerProduct, cancellationCheckInterval);
+        }
+
+        return customSettings;
     }
 
     /// <summary>

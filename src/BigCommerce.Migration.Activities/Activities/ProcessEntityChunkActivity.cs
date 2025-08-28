@@ -796,7 +796,6 @@ public class ProcessEntityChunkActivity
             switch (entityType)
             {
                 case "product-components":
-                case "images":
                 case "options":
                 case "modifiers":
                 case "reviews":
@@ -820,6 +819,7 @@ public class ProcessEntityChunkActivity
                 case "orders":
                 case "coupons":
                 case "product-related":
+                case "product-images":
                 case "product-metafields":
                 case "product-channels":
                 default:

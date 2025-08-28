@@ -176,6 +176,22 @@
         "subBatchDelayMs": 1000,
         "processSubBatchesSequentially": true,
         "include": ""
+      },
+      "product-images": {
+        "entityType": "product-images",
+        "chunkSize": 20,
+        "fetchBatchSize": 20,
+        "pageSize": 20,
+        "subBatchSize": 1,
+        "maxConcurrency": 5,
+        "enableSubBatching": true,
+        "subBatchDelayMs": 0,
+        "processSubBatchesSequentially": false,
+        "imageChunkSize": 50,
+        "imageChunkDelayMs": 300,
+        "maxImagesPerProduct": 1000,
+        "cancellationCheckInterval": 5,
+        "include": ""
       }
     }
   },
@@ -185,7 +201,12 @@
       "Microsoft": "Warning",
       "Microsoft.Hosting.Lifetime": "Information",
       "BigCommerce.Migration": "Trace",
-      "BigCommerce.Migration.Activities.Strategies.Transform.ProductRelatedTransformStrategy": "Trace"
+      "BigCommerce.Migration.Activities": "Trace",
+      "BigCommerce.Migration.Activities.Strategies": "Trace",
+      "BigCommerce.Migration.Activities.Services": "Trace",
+      "BigCommerce.Migration.Activities.Strategies.Creation.ProductImagesCreationStrategy": "Trace",
+      "BigCommerce.Migration.Activities.Strategies.Transform.ProductImagesTransformStrategy": "Trace",
+      "BigCommerce.Migration.Activities.Services.ProductImagesFetchService": "Trace"
     }
   },
   "Host": {

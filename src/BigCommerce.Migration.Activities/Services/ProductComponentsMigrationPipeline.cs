@@ -153,7 +153,7 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
 
 
             _logger.LogInformation("✅ [PRODUCT-COMPONENTS-PIPELINE] Completed product components migration for {ProductCount} products. " +
-                                 "Options: {OptionsCount}, Modifiers: {ModifiersCount}, Images: {ImagesCount}, Reviews: {ReviewsCount}. " +
+                                 "Options: {OptionsCount}, Modifiers: {ModifiersCount}, Reviews: {ReviewsCount}. " +
                                  "Duration: {Duration}ms",
                 productsWithComponents.Count,
                 result.SubEntityStatistics["options"].SuccessfulCount,
@@ -265,7 +265,7 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
     }
 
     /// <summary>
-    /// Processes a specific component type (options, modifiers, images, or reviews) for a product
+    /// Processes a specific component type (options, modifiers, or reviews) for a product
     /// </summary>
     private async Task ProcessComponentType(
         string componentType,
@@ -315,7 +315,7 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
                     {
                         // 🔗 NO ENTITY MAPPING: Components (options, modifiers, reviews) don't need individual EntityMapping records
                         // - Options: Use hierarchical mapping in OptionsCreationStrategy for variant migration
-                        // - Modifiers/Images/Reviews: No dependents, no mapping needed
+                        // - Modifiers/Reviews: No dependents, no mapping needed
                         
                         stats.TotalProcessed++;
                         stats.SuccessfulCount++;
@@ -380,7 +380,7 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
         // - 10 products per batch (configured)
         // - Average 5 components per type per product
         // - 100ms per component creation
-        var averageComponentsPerProduct = 20; // 5 options + 5 modifiers + 5 images + 5 reviews
+        var averageComponentsPerProduct = 15; // 5 options + 5 modifiers + 5 reviews
         var totalComponents = productCount * averageComponentsPerProduct;
         var estimatedSeconds = totalComponents * 0.1; // 100ms per component
 

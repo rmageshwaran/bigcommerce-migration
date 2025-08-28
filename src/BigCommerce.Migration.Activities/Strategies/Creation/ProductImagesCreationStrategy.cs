@@ -157,29 +157,36 @@ public class ProductImagesCreationStrategy : IEntityCreationStrategy
                         }
 
                         // Process individual product images
-                        var result = await ProcessSingleProductImagesAsync(
+                        var productImageResults = await ProcessSingleProductImagesAsync(
                             productEntity, migrationId, destinationStore, batchId, ct);
 
-                        if (result != null)
+                        if (productImageResults != null && productImageResults.Any())
                         {
-                            batchResults.Add(result);
+                            // 🎯 PROGRESS TRACKING FIX: ProcessSingleProductImagesAsync now returns List<Dictionary> for individual images
+                            batchResults.AddRange(productImageResults);
                             
-                            // Track image counts and product skip status
-                            if (result.TryGetValue("images_processed", out var processed))
+                            // Track image counts from individual image results
+                            foreach (var imageResult in productImageResults)
                             {
-                                totalImageCount += Convert.ToInt32(processed);
-                            }
-                            if (result.TryGetValue("images_successful", out var successful))
-                            {
-                                successfulImageCount += Convert.ToInt32(successful);
-                            }
-                            if (result.TryGetValue("images_skipped", out var skipped))
-                            {
-                                skippedImageCount += Convert.ToInt32(skipped);
-                            }
-                            if (result.GetValueOrDefault("status")?.ToString() == "skipped_no_images")
-                            {
-                                skippedProductCount++;
+                                var status = imageResult.GetValueOrDefault("status")?.ToString();
+                                var type = imageResult.GetValueOrDefault("type")?.ToString();
+                                
+                                if (type == "image")
+                                {
+                                    totalImageCount++;
+                                    if (status == "success")
+                                    {
+                                        successfulImageCount++;
+                                    }
+                                    else if (status == "skipped")
+                                    {
+                                        skippedImageCount++;
+                                    }
+                                }
+                                else if (status == "skipped_no_images")
+                                {
+                                    skippedProductCount++;
+                                }
                             }
                         }
                     }
@@ -220,12 +227,15 @@ public class ProductImagesCreationStrategy : IEntityCreationStrategy
                 migrationId,
                 cancellationToken);
 
-            var totalImages = results?.Sum(r => Convert.ToInt32(r.GetValueOrDefault("images_processed", 0))) ?? 0;
-            var successfulImages = results?.Sum(r => Convert.ToInt32(r.GetValueOrDefault("images_successful", 0))) ?? 0;
-            var skippedImages = results?.Sum(r => Convert.ToInt32(r.GetValueOrDefault("images_skipped", 0))) ?? 0;
+            // 🎯 PROGRESS TRACKING FIX: Count individual images from the new result format
+            var totalImages = results?.Count(r => r.GetValueOrDefault("type")?.ToString() == "image") ?? 0;
+            var successfulImages = results?.Count(r => r.GetValueOrDefault("type")?.ToString() == "image" && 
+                                                       r.GetValueOrDefault("status")?.ToString() == "success") ?? 0;
+            var skippedImages = results?.Count(r => r.GetValueOrDefault("type")?.ToString() == "image" && 
+                                                    r.GetValueOrDefault("status")?.ToString() == "skipped") ?? 0;
             var skippedProducts = results?.Count(r => r.GetValueOrDefault("status")?.ToString() == "skipped" || 
                                                       r.GetValueOrDefault("status")?.ToString() == "skipped_no_images") ?? 0;
-            var processedProducts = (results?.Count ?? 0) - skippedProducts;
+            var processedProducts = entities.Count - skippedProducts;
 
             _logger.LogInformation("🎉 [PRODUCT-IMAGES-CREATE] ===== PRODUCT-IMAGES UPDATE COMPLETED ===== " +
                                   "MigrationId: {MigrationId}, InputProducts: {InputCount}, ProcessedProducts: {ProcessedCount}, " +
@@ -251,7 +261,7 @@ public class ProductImagesCreationStrategy : IEntityCreationStrategy
     /// <summary>
     /// Processes images for a single product with chunked updates
     /// </summary>
-    private async Task<Dictionary<string, object>?> ProcessSingleProductImagesAsync(
+    private async Task<List<Dictionary<string, object>>?> ProcessSingleProductImagesAsync(
         Dictionary<string, object> productEntity,
         string migrationId,
         StoreConfiguration destinationStore,
@@ -274,7 +284,7 @@ public class ProductImagesCreationStrategy : IEntityCreationStrategy
         {
             _logger.LogWarning("🚨 [BATCH-{BatchId}] SKIP REASON 1: Missing product IDs - SourceId='{SourceId}', DestinationId='{DestinationId}' (migration: {MigrationId})", 
                 batchId, sourceProductId ?? "NULL", destinationProductId ?? "NULL", migrationId);
-            return null;
+            return new List<Dictionary<string, object>>();
         }
 
         _logger.LogDebug("🔄 [BATCH-{BatchId}] Processing images for product {SourceId} → {DestinationId} (migration: {MigrationId})", 
@@ -345,15 +355,17 @@ public class ProductImagesCreationStrategy : IEntityCreationStrategy
                 _logger.LogInformation("📋 [BATCH-{BatchId}] Product {DestinationId} has no images to migrate, skipping (migration: {MigrationId})", 
                     batchId, destinationProductId, migrationId);
                 
-                return new Dictionary<string, object>
+                return new List<Dictionary<string, object>>
                 {
-                    ["id"] = destinationProductId,
-                    ["source_id"] = sourceProductId,
-                    ["destination_id"] = destinationProductId,
-                    ["images_processed"] = 0,
-                    ["images_successful"] = 0,
-                    ["images_skipped"] = 0,
-                    ["status"] = "skipped_no_images"
+                    new Dictionary<string, object>
+                    {
+                        ["id"] = $"{destinationProductId}_no_images",
+                        ["product_id"] = destinationProductId,
+                        ["source_product_id"] = sourceProductId,
+                        ["status"] = "skipped_no_images",
+                        ["type"] = "product",
+                        ["reason"] = "No images found for this product"
+                    }
                 };
             }
 
@@ -475,17 +487,54 @@ public class ProductImagesCreationStrategy : IEntityCreationStrategy
 
             // Errors are now logged individually in the catch blocks above
 
-            return new Dictionary<string, object>
+            // 🎯 PROGRESS TRACKING FIX: Return individual image results instead of product-level results
+            // This ensures the dashboard counts actual images migrated, not products processed
+            var imageResults = new List<Dictionary<string, object>>();
+            
+            // Create individual results for successful images
+            for (int i = 0; i < successfulImages; i++)
             {
-                ["id"] = destinationProductId,
-                ["source_id"] = sourceProductId,
-                ["destination_id"] = destinationProductId,
-                ["images_processed"] = totalImagesProcessed,
-                ["images_successful"] = successfulImages,
-                ["images_skipped"] = skippedImages,
-                ["status"] = successfulImages > 0 ? "updated" : "failed",
-                ["errors"] = errors
-            };
+                imageResults.Add(new Dictionary<string, object>
+                {
+                    ["id"] = $"{destinationProductId}_image_{i + 1}",
+                    ["product_id"] = destinationProductId,
+                    ["source_product_id"] = sourceProductId,
+                    ["status"] = "success",
+                    ["type"] = "image"
+                });
+            }
+            
+            // Create individual results for skipped images  
+            for (int i = 0; i < skippedImages; i++)
+            {
+                imageResults.Add(new Dictionary<string, object>
+                {
+                    ["id"] = $"{destinationProductId}_image_skipped_{i + 1}",
+                    ["product_id"] = destinationProductId,
+                    ["source_product_id"] = sourceProductId,
+                    ["status"] = "skipped",
+                    ["type"] = "image"
+                });
+            }
+            
+            // If no images were processed, return a single product-level result for tracking
+            if (imageResults.Count == 0)
+            {
+                imageResults.Add(new Dictionary<string, object>
+                {
+                    ["id"] = $"{destinationProductId}_no_images",
+                    ["product_id"] = destinationProductId,
+                    ["source_product_id"] = sourceProductId,
+                    ["status"] = "skipped_no_images",
+                    ["type"] = "product",
+                    ["reason"] = "No images found for this product"
+                });
+            }
+            
+            _logger.LogDebug("📊 [BATCH-{BatchId}] Returning {ResultCount} individual image results for product {DestinationId} (migration: {MigrationId})", 
+                batchId, imageResults.Count, destinationProductId, migrationId);
+            
+            return imageResults;
         }
         catch (Exception ex)
         {
@@ -496,16 +545,17 @@ public class ProductImagesCreationStrategy : IEntityCreationStrategy
             var errorRequest = new BatchProcessingRequest { MigrationId = migrationId, EntityType = "product-images" };
             await _errorHandlingService.LogStructuredMigrationErrorAsync(ex, new List<Dictionary<string, object>> { productEntity }, errorRequest, "product_processing_failure", cancellationToken);
 
-            return new Dictionary<string, object>
+            return new List<Dictionary<string, object>>
             {
-                ["id"] = destinationProductId,
-                ["source_id"] = sourceProductId,
-                ["destination_id"] = destinationProductId,
-                ["images_processed"] = totalImagesProcessed,
-                ["images_successful"] = 0,
-                ["images_skipped"] = totalImagesProcessed,
-                ["status"] = "error",
-                ["error"] = ex.Message
+                new Dictionary<string, object>
+                {
+                    ["id"] = $"{destinationProductId}_error",
+                    ["product_id"] = destinationProductId,
+                    ["source_product_id"] = sourceProductId,
+                    ["status"] = "failed",
+                    ["type"] = "product",
+                    ["error"] = ex.Message
+                }
             };
         }
     }

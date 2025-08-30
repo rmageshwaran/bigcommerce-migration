@@ -42,7 +42,7 @@ public class ProductImagesCreationStrategy : IEntityCreationStrategy
     private readonly IEntityErrorHandlingService _errorHandlingService;
     private readonly ICancellationStore _cancellationStore;
     private readonly IProductImagesFetchService _imagesFetchService;
-    private readonly IEntityTransformStrategy _transformStrategy;
+    private readonly IEntityTransformStrategyFactory _transformStrategyFactory;
     private readonly ILogger<ProductImagesCreationStrategy> _logger;
 
     public ProductImagesCreationStrategy(
@@ -52,7 +52,7 @@ public class ProductImagesCreationStrategy : IEntityCreationStrategy
         IEntityErrorHandlingService errorHandlingService,
         ICancellationStore cancellationStore,
         IProductImagesFetchService imagesFetchService,
-        IEntityTransformStrategy transformStrategy,
+        IEntityTransformStrategyFactory transformStrategyFactory,
         ILogger<ProductImagesCreationStrategy> logger)
     {
         _apiRequestHandler = apiRequestHandler ?? throw new ArgumentNullException(nameof(apiRequestHandler));
@@ -61,7 +61,7 @@ public class ProductImagesCreationStrategy : IEntityCreationStrategy
         _errorHandlingService = errorHandlingService ?? throw new ArgumentNullException(nameof(errorHandlingService));
         _cancellationStore = cancellationStore ?? throw new ArgumentNullException(nameof(cancellationStore));
         _imagesFetchService = imagesFetchService ?? throw new ArgumentNullException(nameof(imagesFetchService));
-        _transformStrategy = transformStrategy ?? throw new ArgumentNullException(nameof(transformStrategy));
+        _transformStrategyFactory = transformStrategyFactory ?? throw new ArgumentNullException(nameof(transformStrategyFactory));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -108,8 +108,19 @@ public class ProductImagesCreationStrategy : IEntityCreationStrategy
                 _logger.LogInformation("🎯 [BATCH-{BatchId}] Starting image processing for {Count} products at {StartTime} for migration {MigrationId}", 
                     batchId, batchProducts.Count, batchStartTime, migrationId);
                 
-                _logger.LogInformation("🔍 [BATCH-{BatchId}] DEBUG: First product entity keys in batch: [{Keys}]", 
-                    batchId, batchProducts.FirstOrDefault()?.Keys != null ? string.Join(", ", batchProducts.First().Keys) : "NO_PRODUCTS");
+                        _logger.LogInformation("🔍 [BATCH-{BatchId}] DEBUG: First product entity keys in batch: [{Keys}]",
+            batchId, batchProducts.FirstOrDefault()?.Keys != null ? string.Join(", ", batchProducts.First().Keys) : "NO_PRODUCTS");
+
+        // 🔍 DEBUG: Log actual field values for first product
+        var firstProduct = batchProducts.FirstOrDefault();
+        if (firstProduct != null)
+        {
+            _logger.LogInformation("🔍 [BATCH-{BatchId}] DEBUG: First product field values - SourceId: '{SourceId}', DestinationId: '{DestinationId}', EntityType: '{EntityType}'",
+                batchId,
+                firstProduct.GetValueOrDefault("SourceId") ?? firstProduct.GetValueOrDefault("source_id") ?? "MISSING",
+                firstProduct.GetValueOrDefault("DestinationId") ?? firstProduct.GetValueOrDefault("destination_id") ?? "MISSING",
+                firstProduct.GetValueOrDefault("EntityType") ?? "MISSING");
+        }
 
                 var batchResults = new List<Dictionary<string, object>>();
                 var batchErrors = new List<string>();
@@ -268,8 +279,15 @@ public class ProductImagesCreationStrategy : IEntityCreationStrategy
         string batchId,
         CancellationToken cancellationToken)
     {
-        _logger.LogInformation("🔍 [BATCH-{BatchId}] DEBUG: Entity keys received: [{Keys}] (migration: {MigrationId})", 
+        _logger.LogInformation("🔍 [BATCH-{BatchId}] DEBUG: Entity keys received: [{Keys}] (migration: {MigrationId})",
             batchId, string.Join(", ", productEntity.Keys), migrationId);
+
+        // 🔍 DEBUG: Log all entity values
+        foreach (var kvp in productEntity)
+        {
+            _logger.LogDebug("🔍 [BATCH-{BatchId}] DEBUG: Entity field '{Key}' = '{Value}' (migration: {MigrationId})",
+                batchId, kvp.Key, kvp.Value ?? "NULL", migrationId);
+        }
         
         // Extract product information from EntityMappings format
         var sourceProductId = productEntity.GetValueOrDefault("SourceId")?.ToString() ?? 
@@ -324,14 +342,23 @@ public class ProductImagesCreationStrategy : IEntityCreationStrategy
                 ChannelId = sourceStoreChannelId ?? "1" // Default to "1" if not specified
             };
 
+            _logger.LogInformation("🔍 [BATCH-{BatchId}] DEBUG: About to call FetchProductImagesStreamingAsync for product {SourceProductId} (migration: {MigrationId})",
+                batchId, sourceProductId, migrationId);
+
             await _imagesFetchService.FetchProductImagesStreamingAsync(
                 sourceProductId,
                 sourceStoreConfig,
                 migrationId,
                 (imagesBatch) =>
                 {
+                    _logger.LogInformation("🔍 [BATCH-{BatchId}] DEBUG: Received imagesBatch with {Count} images for product {SourceProductId} (migration: {MigrationId})",
+                        batchId, imagesBatch.Count, sourceProductId, migrationId);
+
                     foreach (var image in imagesBatch)
                     {
+                        _logger.LogDebug("🔍 [BATCH-{BatchId}] DEBUG: Adding image to chunk - Image fields: [{Fields}] (migration: {MigrationId})",
+                            batchId, string.Join(", ", image.Keys), migrationId);
+
                         currentChunk.Add(image);
                         
                         // Split into chunks of imageChunkSize (default: 50)
@@ -347,8 +374,13 @@ public class ProductImagesCreationStrategy : IEntityCreationStrategy
             // Add remaining images as final chunk
             if (currentChunk.Any())
             {
+                _logger.LogInformation("🔍 [BATCH-{BatchId}] DEBUG: Adding final chunk with {Count} images (migration: {MigrationId})",
+                    batchId, currentChunk.Count, migrationId);
                 imageChunks.Add(currentChunk);
             }
+
+            _logger.LogInformation("🔍 [BATCH-{BatchId}] DEBUG: After image fetching - imageChunks.Count={ChunkCount}, totalImages={TotalImages} for product {DestinationId} (migration: {MigrationId})",
+                batchId, imageChunks.Count, imageChunks.Sum(c => c.Count), destinationProductId, migrationId);
 
             if (!imageChunks.Any())
             {
@@ -372,9 +404,15 @@ public class ProductImagesCreationStrategy : IEntityCreationStrategy
             _logger.LogInformation("📸 [BATCH-{BatchId}] Processing {TotalImages} images in {ChunkCount} chunks for product {DestinationId} (migration: {MigrationId})", 
                 batchId, imageChunks.Sum(c => c.Count), imageChunks.Count, destinationProductId, migrationId);
 
+            _logger.LogInformation("🔍 [BATCH-{BatchId}] DEBUG: About to enter chunk processing loop - imageChunks.Count={ChunkCount} (migration: {MigrationId})",
+                batchId, imageChunks.Count, migrationId);
+
             // Process each chunk sequentially to avoid overwhelming the API
             for (int chunkIndex = 0; chunkIndex < imageChunks.Count; chunkIndex++)
             {
+                _logger.LogInformation("🔍 [BATCH-{BatchId}] DEBUG: Entered chunk processing loop - chunkIndex={ChunkIndex}/{TotalChunks} (migration: {MigrationId})",
+                    batchId, chunkIndex, imageChunks.Count, migrationId);
+
                 var chunk = imageChunks[chunkIndex];
                 totalImagesProcessed += chunk.Count;
                 
@@ -394,7 +432,7 @@ public class ProductImagesCreationStrategy : IEntityCreationStrategy
                         ["images"] = chunk
                     };
 
-                    _logger.LogDebug("🔄 [BATCH-{BatchId}] Calling transform with {ImageCount} images for product {DestinationId} (migration: {MigrationId})", 
+                    _logger.LogInformation("🔄 [BATCH-{BatchId}] DEBUG: Calling transform with {ImageCount} images for product {DestinationId} (migration: {MigrationId})", 
                         batchId, chunk.Count, destinationProductId, migrationId);
 
                     var sourceStore = new StoreConfiguration { 
@@ -402,9 +440,13 @@ public class ProductImagesCreationStrategy : IEntityCreationStrategy
                         AccessToken = productEntity.GetValueOrDefault("_source_store_token")?.ToString() ?? "",
                         ChannelId = productEntity.GetValueOrDefault("_source_store_channel_id")?.ToString() ?? "1"
                     };
-                    transformedPayload = await _transformStrategy.TransformEntityAsync(transformData, migrationId, sourceStore, destinationStore, null, cancellationToken);
+                    var transformStrategy = _transformStrategyFactory.GetStrategy("product-images");
+                    _logger.LogInformation("🔍 [BATCH-{BatchId}] DEBUG: About to call transform strategy - Type: {StrategyType} (migration: {MigrationId})",
+                        batchId, transformStrategy.GetType().Name, migrationId);
+
+                    transformedPayload = await transformStrategy.TransformEntityAsync(transformData, migrationId, sourceStore, destinationStore, null, cancellationToken);
                     
-                    _logger.LogDebug("🔄 [BATCH-{BatchId}] Transform returned: {IsNull} for product {DestinationId} (migration: {MigrationId})", 
+                    _logger.LogInformation("🔄 [BATCH-{BatchId}] DEBUG: Transform returned: {IsNull} for product {DestinationId} (migration: {MigrationId})", 
                         batchId, transformedPayload == null ? "NULL" : "PAYLOAD", destinationProductId, migrationId);
 
                     if (transformedPayload != null && transformedPayload.ContainsKey("images"))
@@ -452,7 +494,7 @@ public class ProductImagesCreationStrategy : IEntityCreationStrategy
                     errors.Add(errorMsg);
                     skippedImages += chunk.Count;
                     
-                    _logger.LogError(ex, "❌ [BATCH-{BatchId}] {ErrorMessage} for product {DestinationId} (migration: {MigrationId})", 
+                    _logger.LogError(ex, "❌ [BATCH-{BatchId}] DEBUG: EXCEPTION in chunk processing - {ErrorMessage} for product {DestinationId} (migration: {MigrationId})", 
                         batchId, errorMsg, destinationProductId, migrationId);
 
                     // Store the actual API payload for error analysis (not the EntityMappings data)

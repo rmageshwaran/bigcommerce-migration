@@ -108,6 +108,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<V3HierarchicalStrategy>();
         services.AddSingleton<ProductRelatedDiscoveryStrategy>();
         services.AddSingleton<ProductImagesDiscoveryStrategy>();
+        services.AddSingleton<ProductChannelAssignDiscoveryStrategy>();
         
         // 🎯 Register entity creation strategy pattern implementations (Task 3.1 - COMPLETED)
         // Strategy Pattern for Open/Closed Principle compliance
@@ -122,6 +123,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IEntityCreationStrategy, OptionsCreationStrategy>();
         services.AddScoped<IEntityCreationStrategy, ReviewsCreationStrategy>();
         services.AddScoped<IEntityCreationStrategy, ProductImagesCreationStrategy>();
+        services.AddScoped<IEntityCreationStrategy, ProductChannelAssignCreationStrategy>();
         
         // 🔄 Register entity transform strategy pattern implementations (Task 3.2 - COMPLETED)
         services.AddScoped<IEntityTransformStrategyFactory, EntityTransformStrategyFactory>();
@@ -136,6 +138,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IEntityTransformStrategy, ReviewsTransformStrategy>();
         services.AddScoped<IEntityTransformStrategy, ProductRelatedTransformStrategy>();
         services.AddScoped<IEntityTransformStrategy, ProductImagesTransformStrategy>();
+        services.AddScoped<IEntityTransformStrategy, ProductChannelAssignTransformStrategy>();
         
         // 🖼️ Register entity creation strategies for Product-Images phase
         services.AddScoped<IEntityCreationStrategy, ProductImagesCreationStrategy>();

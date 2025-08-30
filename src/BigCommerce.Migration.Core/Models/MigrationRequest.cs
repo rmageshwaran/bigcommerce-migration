@@ -27,6 +27,12 @@ public class MigrationRequest
     public MigrationSettings? Settings { get; set; }
 
     /// <summary>
+    /// Channel mapping configuration for product-channel-assign phase
+    /// Maps source channel IDs to destination channel IDs
+    /// </summary>
+    public List<ChannelMapping>? ChannelMapping { get; set; }
+
+    /// <summary>
     /// Validates that the migration request has all required information
     /// </summary>
     /// <returns>True if request is valid, false otherwise</returns>
@@ -77,4 +83,39 @@ public class MigrationSettings
     /// Maximum number of retries for failed requests
     /// </summary>
     public int MaxRetries { get; set; } = 3;
+}
+
+/// <summary>
+/// Channel mapping configuration for product-channel-assign phase
+/// Maps a source channel ID to a destination channel ID
+/// </summary>
+public class ChannelMapping
+{
+    /// <summary>
+    /// Source channel ID from the source store
+    /// </summary>
+    public string SourceChannel { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Destination channel ID in the destination store
+    /// </summary>
+    public string DestinationChannel { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Validates that the channel mapping has required information
+    /// </summary>
+    /// <returns>True if mapping is valid, false otherwise</returns>
+    public bool IsValid()
+    {
+        return !string.IsNullOrEmpty(SourceChannel) && !string.IsNullOrEmpty(DestinationChannel);
+    }
+
+    /// <summary>
+    /// Gets a summary of the channel mapping for logging
+    /// </summary>
+    /// <returns>Channel mapping summary</returns>
+    public override string ToString()
+    {
+        return $"Channel {SourceChannel} → {DestinationChannel}";
+    }
 } 

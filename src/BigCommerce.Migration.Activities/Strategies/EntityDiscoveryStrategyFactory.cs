@@ -19,6 +19,7 @@ public class EntityDiscoveryStrategyFactory : IEntityDiscoveryStrategyFactory
     private readonly ILogger<V3HierarchicalStrategy> _v3HierarchicalLogger;
     private readonly ILogger<ProductRelatedDiscoveryStrategy> _productRelatedLogger;
     private readonly ILogger<ProductImagesDiscoveryStrategy> _productImagesLogger;
+    private readonly ILogger<ProductChannelAssignDiscoveryStrategy> _productChannelAssignLogger;
     //private readonly ILogger<V3ProductComponentsDiscoveryStrategy> _v3ProductComponentsLogger;
     private readonly ICancellationStore _cancellationStore;
     private readonly IMigrationStorageService _storageService;
@@ -33,6 +34,7 @@ public class EntityDiscoveryStrategyFactory : IEntityDiscoveryStrategyFactory
     /// <param name="v3HierarchicalLogger">Logger for V3 hierarchical strategy</param>
     /// <param name="productRelatedLogger">Logger for ProductRelated discovery strategy</param>
     /// <param name="productImagesLogger">Logger for ProductImages discovery strategy</param>
+    /// <param name="productChannelAssignLogger">Logger for ProductChannelAssign discovery strategy</param>
     /// <param name="cancellationStore">Cancellation store for blob-based cancellation</param>
     /// <param name="storageService">Migration storage service for EntityProgress queries</param>
     public EntityDiscoveryStrategyFactory(
@@ -43,6 +45,7 @@ public class EntityDiscoveryStrategyFactory : IEntityDiscoveryStrategyFactory
         ILogger<V3HierarchicalStrategy> v3HierarchicalLogger,
         ILogger<ProductRelatedDiscoveryStrategy> productRelatedLogger,
         ILogger<ProductImagesDiscoveryStrategy> productImagesLogger,
+        ILogger<ProductChannelAssignDiscoveryStrategy> productChannelAssignLogger,
         ICancellationStore cancellationStore,
         IMigrationStorageService storageService)
     {
@@ -53,6 +56,7 @@ public class EntityDiscoveryStrategyFactory : IEntityDiscoveryStrategyFactory
         _v3HierarchicalLogger = v3HierarchicalLogger ?? throw new ArgumentNullException(nameof(v3HierarchicalLogger));
         _productRelatedLogger = productRelatedLogger ?? throw new ArgumentNullException(nameof(productRelatedLogger));
         _productImagesLogger = productImagesLogger ?? throw new ArgumentNullException(nameof(productImagesLogger));
+        _productChannelAssignLogger = productChannelAssignLogger ?? throw new ArgumentNullException(nameof(productChannelAssignLogger));
         _cancellationStore = cancellationStore ?? throw new ArgumentNullException(nameof(cancellationStore));
         _storageService = storageService ?? throw new ArgumentNullException(nameof(storageService));
     }
@@ -126,6 +130,13 @@ public class EntityDiscoveryStrategyFactory : IEntityDiscoveryStrategyFactory
         {
             _logger.LogInformation("🏭 [STRATEGY-FACTORY-DEBUG] ✅ Creating ProductImagesDiscoveryStrategy for {EntityType} - will query EntityProgress table", entityType);
             return new ProductImagesDiscoveryStrategy(_storageService, _cancellationStore, _productImagesLogger);
+        }
+        
+        // 🔧 SPECIAL CASE: product-channel-assign uses EntityMappings table instead of BigCommerce API
+        if (entityType.Equals("product-channel-assign", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogInformation("🏭 [STRATEGY-FACTORY-DEBUG] ✅ Creating ProductChannelAssignDiscoveryStrategy for {EntityType} - will query EntityMappings table", entityType);
+            return new ProductChannelAssignDiscoveryStrategy(_storageService, _productChannelAssignLogger);
         }
         
         // 🔧 SPECIAL CASE: product-components and individual component types are not real BigCommerce API endpoints

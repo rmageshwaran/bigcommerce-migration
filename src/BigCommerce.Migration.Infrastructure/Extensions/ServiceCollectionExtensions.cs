@@ -45,6 +45,13 @@ public static class ServiceCollectionExtensions
         // 2. TableServiceClient is thread-safe and designed for reuse
         // 3. Better performance (avoid repeated initialization)
         services.AddSingleton<IIncrementEventsService, IncrementEventsService>();
+        
+        // Register RowNumber service for atomic counter operations
+        // Singleton is appropriate because:
+        // 1. Service is stateless and thread-safe
+        // 2. Uses internal caching for performance optimization
+        // 3. TableClient connections are designed for reuse
+        services.AddSingleton<IRowNumberService, RowNumberService>();
 
         return services;
     }

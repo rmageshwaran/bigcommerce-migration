@@ -132,12 +132,13 @@ public class ProductRelatedTransformStrategy : IEntityTransformStrategy
                 "🔍 [TRANSFORM-DEBUG] ENTRY: Processing product-related transform: SourceId={SourceId}, DestinationId={DestinationId}, RelatedProductsData='{RelatedProductsData}', IsNullOrWhiteSpace={IsNullOrWhiteSpace}",
                 sourceId, destinationId, relatedProductsData, string.IsNullOrWhiteSpace(relatedProductsData));
 
-            // Handle skip case: null or empty RelatedProductsData
+            // Handle skip case: null or empty RelatedProductsData  
+            // Note: Empty arrays "[]" are handled naturally by ParseRelatedProductIds → empty list → later skip
             if (string.IsNullOrWhiteSpace(relatedProductsData))
             {
                 _logger.LogDebug(
-                    "🚫 [TRANSFORM-DEBUG] SKIPPING: product with null/empty RelatedProductsData: DestinationId={DestinationId}",
-                    destinationId);
+                    "🚫 [TRANSFORM-DEBUG] SKIPPING: product with null/empty RelatedProductsData: '{Data}', DestinationId={DestinationId}",
+                    relatedProductsData, destinationId);
                 
                 // Return special marker to indicate skip (but count as processed)
                 return new Dictionary<string, object>
@@ -145,8 +146,9 @@ public class ProductRelatedTransformStrategy : IEntityTransformStrategy
                     ["_skip"] = true,
                     ["_skipReason"] = "null_or_empty_related_products_data",
                     ["id"] = destinationId,
-                    ["DestinationId"] = destinationId, // ✅ FIX: Add DestinationId for creation strategy
-                    ["SourceId"] = sourceId // ✅ FIX: Add SourceId for logging/tracking
+                    ["DestinationId"] = destinationId,
+                    ["SourceId"] = sourceId,
+                    ["status"] = "skipped"
                 };
             }
 

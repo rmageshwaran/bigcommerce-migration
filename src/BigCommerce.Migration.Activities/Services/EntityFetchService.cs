@@ -111,6 +111,16 @@ public class EntityFetchService : IEntityFetchService
                 return await FetchEntitiesFromEntityMappingsAsync(request, cancellationToken);
             }
             
+            // 🔗 PRODUCT-CHANNEL-ASSIGN ROUTING: Fetch from EntityMappings table like product-related
+            if (request.EntityType.Equals("product-channel-assign", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogInformation("🔗 [FETCH-ROUTING] ✅ PRODUCT-CHANNEL-ASSIGN: Using EntityMappings pagination for batch {BatchNumber} " +
+                                      "in migration {MigrationId} (EntityMappings query instead of BigCommerce API)", 
+                    request.BatchNumber, request.MigrationId);
+                
+                return await FetchEntitiesFromEntityMappingsAsync(request, cancellationToken);
+            }
+            
             // 🚨 CRITICAL VARIANT ROUTING: Variants MUST use direct pagination like products
             if (request.EntityType.Equals("variants", StringComparison.OrdinalIgnoreCase))
             {
@@ -844,16 +854,16 @@ public class EntityFetchService : IEntityFetchService
     }
 
     /// <summary>
-    /// Fetches product-related entities from EntityMappings table using efficient stream-based pagination
-    /// This method uses async enumerable streaming with Skip/Take for memory efficiency
-    /// instead of calling non-existent BigCommerce API (/product-related endpoint)
+    /// 🆕 RANGE-BASED FETCH: Fetches entities from EntityMappings table using efficient RowNumber range queries
+    /// Eliminates memory-intensive streaming by using direct range queries based on batch number
     /// 
-    /// DESIGN: Works like FetchEntitiesWithDirectPaginationAsync but for EntityMappings instead of BigCommerce API
-    /// - Batch 0: Skip 0, Take pageSize (entities 0-249)  
-    /// - Batch 1: Skip pageSize, Take pageSize (entities 250-499)
-    /// - Batch 2: Skip 2*pageSize, Take pageSize (entities 500-749)
+    /// DESIGN: Uses RowNumber-based range queries for true parallel processing
+    /// - Batch 0: RowNumbers 1-250 (direct range query)  
+    /// - Batch 1: RowNumbers 251-500 (direct range query)
+    /// - Batch 2: RowNumbers 501-750 (direct range query)
     /// 
-    /// MEMORY EFFICIENCY: Uses async enumerable streaming instead of loading all pages into memory
+    /// PERFORMANCE: Each batch only reads its specific range - no streaming, no memory accumulation
+    /// MEMORY EFFICIENCY: Constant memory usage regardless of total dataset size
     /// </summary>
     private async Task<List<Dictionary<string, object>>> FetchEntitiesFromEntityMappingsAsync(
         BatchProcessingRequest request, 
@@ -864,124 +874,145 @@ public class EntityFetchService : IEntityFetchService
             // 🚫 CANCELLATION: Check at start of fetch operation
             cancellationToken.ThrowIfCancellationRequested();
 
-            _logger.LogInformation("📊 [ENTITY-MAPPINGS-FETCH] Starting EntityMappings direct pagination for {EntityType} batch {BatchNumber} in migration {MigrationId}", 
+            _logger.LogInformation("🔍 [RANGE-FETCH] Starting RowNumber range query for {EntityType} batch {BatchNumber} in migration {MigrationId}", 
                 request.EntityType, request.BatchNumber, request.MigrationId);
+                
+            // ✅ DEBUG: Log ChannelMapping availability for product-channel-assign
+            if (request.EntityType.Equals("product-channel-assign", StringComparison.OrdinalIgnoreCase))
+            {
+                var hasChannelMapping = request.AdditionalData?.ContainsKey("ChannelMapping") == true;
+                _logger.LogInformation("🔗 [FETCH-DEBUG] ChannelMapping available in AdditionalData: {HasMapping} for {EntityType} batch {BatchNumber}", 
+                    hasChannelMapping, request.EntityType, request.BatchNumber);
+                    
+                if (hasChannelMapping)
+                {
+                    var channelMappingJson = request.AdditionalData["ChannelMapping"]?.ToString();
+                    _logger.LogInformation("🔗 [FETCH-DEBUG] ChannelMapping JSON: {ChannelMappingJson}", channelMappingJson);
+                }
+            }
 
             // Get configuration for batch size
             var config = _configService.GetConfiguration(request.EntityType);
             var pageSize = config.FetchBatchSize; // Use configured batch size
             
-            _logger.LogDebug("📊 [ENTITY-MAPPINGS-FETCH] Direct Pagination: BatchNumber={BatchNumber}, PageSize={PageSize}", 
-                request.BatchNumber, pageSize);
-
-            // Calculate skip count based on batch number (similar to API pagination)
-            var skipCount = request.BatchNumber * pageSize;
+            // 🆕 CALCULATE ROWNUMBER RANGE: Direct mapping from batch number to RowNumber range
+            var startRowNumber = (request.BatchNumber * pageSize) + 1;
+            var endRowNumber = startRowNumber + pageSize - 1;
             
-            _logger.LogInformation("📊 [ENTITY-MAPPINGS-FETCH] Direct pagination parameters: Skip={SkipCount}, Take={PageSize} for batch {BatchNumber}", 
-                skipCount, pageSize, request.BatchNumber);
+            _logger.LogInformation("🔍 [RANGE-FETCH] RowNumber range calculation: Batch {BatchNumber} → RowNumbers {StartRow}-{EndRow} (PageSize={PageSize})", 
+                request.BatchNumber, startRowNumber, endRowNumber, pageSize);
 
-            // 🚀 MEMORY-EFFICIENT APPROACH: Use async enumerable with Skip/Take (like variants use BigCommerce API pagination)
-            // This approach streams through records without loading everything into memory
-            _logger.LogInformation("📊 [ENTITY-MAPPINGS-FETCH] Using stream-based Skip/Take approach for memory efficiency");
+            // ✅ CORRECT APPROACH: No data field filtering at fetch level
+            // Transform phase will handle filtering and return appropriate skip statuses
+            _logger.LogInformation("🔍 [RANGE-FETCH] Retrieving ALL EntityMappings in range - transform phase will handle filtering", 
+                request.EntityType);
+                
+            // ✅ DEBUG: Log detailed range query parameters
+            _logger.LogInformation("📊 [FETCH-DEBUG] Range query details: MigrationId={MigrationId}, EntityType={EntityType}, StartRow={StartRow}, EndRow={EndRow}, NoFilter=AllEntities", 
+                request.MigrationId, request.EntityType, startRowNumber, endRowNumber);
 
-            var allMappings = _entityMappingsPaginationService.GetAllEntityMappingsAsync(
-                request.MigrationId, 
-                "products", 
-                250, // Internal streaming page size for Azure Table Storage
+            // 🚀 EFFICIENT RANGE QUERY: Single direct query - NO STREAMING, NO FILTERING
+            var mappings = await _entityMappingsPaginationService.GetEntityMappingsByRowNumberRangeAsync(
+                request.MigrationId,
+                "products", // All these entity types query products EntityMappings
+                startRowNumber,
+                endRowNumber,
+                null, // ✅ NO FILTER - let transform phase handle filtering
                 cancellationToken);
 
-            var batchMappings = new List<EntityMapping>();
-            var skippedMappings = new List<EntityMapping>(); // ✅ NEW: Track skipped entities
-            var processedCount = 0;
-            var targetStart = skipCount;
-            var targetEnd = skipCount + pageSize;
-            
-            _logger.LogDebug("📊 [ENTITY-MAPPINGS-FETCH] Streaming target range: {TargetStart} to {TargetEnd} (BatchNumber={BatchNumber})", 
-                targetStart, targetEnd, request.BatchNumber);
-
-            // Stream through entities efficiently using Skip/Take pattern
-            await foreach (var mapping in allMappings.WithCancellation(cancellationToken))
-            {
-                // Skip entities until we reach our batch start
-                if (processedCount < targetStart)
-                {
-                    processedCount++;
-                    continue;
-                }
-                
-                // Collect entities within our batch range  
-                if (processedCount < targetEnd)
-                {
-                    // 🚫 CANCELLATION: Periodic check during streaming (every 100 records)
-                    if (processedCount % 100 == 0)
-                    {
-                        cancellationToken.ThrowIfCancellationRequested();
-                    }
-
-                    // ✅ FIXED: Track both entities with data AND skipped entities
-                    if (!string.IsNullOrWhiteSpace(mapping.RelatedProductsData))
-                    {
-                        batchMappings.Add(mapping);
-                        _logger.LogDebug("📊 [ENTITY-MAPPINGS-FETCH] Collected entity {SourceId}→{DestinationId} (position {Position})", 
-                            mapping.SourceId, mapping.DestinationId, processedCount);
-                    }
-                    else
-                    {
-                        // 🚨 FIXED BUG: Track skipped entities so orchestrator gets correct total count
-                        skippedMappings.Add(mapping);
-                        _logger.LogDebug("📊 [ENTITY-MAPPINGS-FETCH] Skipped entity {SourceId}→{DestinationId} - no RelatedProductsData", 
-                            mapping.SourceId, mapping.DestinationId);
-                    }
-                    processedCount++;
-                }
-                else
-                {
-                    // We've passed our target range - stop streaming
-                    _logger.LogDebug("📊 [ENTITY-MAPPINGS-FETCH] Reached end of target range at position {Position}", processedCount);
-                    break;
-                }
-            }
-
-            _logger.LogInformation("📊 [ENTITY-MAPPINGS-FETCH] Stream completed: Processed={ProcessedCount}, CollectedWithData={CollectedCount}, Skipped={SkippedCount} for batch {BatchNumber}", 
-                processedCount, batchMappings.Count, skippedMappings.Count, request.BatchNumber);
+            _logger.LogInformation("✅ [RANGE-FETCH] Range query completed: Retrieved {Count} EntityMappings for RowNumbers {StartRow}-{EndRow}", 
+                mappings.Count, startRowNumber, endRowNumber);
 
             // Convert EntityMappings to Dictionary format expected by transform pipeline
             var entities = new List<Dictionary<string, object>>();
+            var processableEntities = 0;
+            var skippedEntities = 0;
             
-            // ✅ FIXED: Include entities with RelatedProductsData for processing
-            foreach (var mapping in batchMappings)
+            foreach (var mapping in mappings)
             {
+                // Create base entity dictionary
                 var entity = new Dictionary<string, object>
                 {
                     ["SourceId"] = mapping.SourceId ?? "",
                     ["DestinationId"] = mapping.DestinationId ?? "",
                     ["EntityType"] = mapping.EntityType ?? "",
-                    ["MigrationId"] = mapping.MigrationId ?? "",
-                    ["RelatedProductsData"] = mapping.RelatedProductsData ?? ""
+                    ["MigrationId"] = mapping.MigrationId ?? ""
                 };
+
+                // Add entity-type specific data and determine processing status
+                // ✅ CORRECT APPROACH: Populate ALL data fields, let transform phase handle filtering
+                switch (request.EntityType.ToLowerInvariant())
+                {
+                    case "product-related":
+                        entity["RelatedProductsData"] = mapping.RelatedProductsData ?? "";
+                        processableEntities++; // Count all entities, transform will handle skipping
+                        break;
+
+                    case "product-channel-assign":
+                        entity["ChannelsData"] = mapping.ChannelsData ?? "";
+                        
+                        // ✅ ALWAYS inject ChannelMapping for product-channel-assign entities
+                        var channelMappingJson = "[]"; // Default to empty
+                        if (request.AdditionalData?.TryGetValue("ChannelMapping", out var channelMappingObj) == true)
+                        {
+                            channelMappingJson = channelMappingObj?.ToString() ?? "[]";
+                            _logger.LogDebug("🔗 [CHANNEL-MAPPING] Injected ChannelMapping configuration for product {SourceId}: ChannelsData='{ChannelsData}', Mapping={Mapping}", 
+                                mapping.SourceId, mapping.ChannelsData ?? "NULL", channelMappingJson);
+                        }
+                        else
+                        {
+                            _logger.LogWarning("⚠️ [CHANNEL-MAPPING] No ChannelMapping found in AdditionalData for migration {MigrationId}, using empty mapping", 
+                                request.MigrationId);
+                        }
+                        
+                        entity["_channel_mapping"] = channelMappingJson;
+                        processableEntities++; // Count all entities, transform will handle skipping based on ChannelsData
+                        break;
+
+                    case "product-images":
+                        // For product-images, we don't store image data in EntityMappings
+                        // The ProductImagesCreationStrategy will fetch images dynamically from source store
+                        // We just need to ensure the product mapping exists (SourceId/DestinationId)
+                        if (!string.IsNullOrEmpty(mapping.SourceId) && !string.IsNullOrEmpty(mapping.DestinationId))
+                        {
+                            processableEntities++;
+                            _logger.LogDebug("✅ [RANGE-FETCH] Product {SourceId} → {DestinationId} is processable for product-images (migration: {MigrationId})",
+                                mapping.SourceId, mapping.DestinationId, request.MigrationId);
+                        }
+                        else
+                        {
+                            _logger.LogWarning("⚠️ [RANGE-FETCH] Skipping product with missing SourceId or DestinationId for product-images (migration: {MigrationId})",
+                                request.MigrationId);
+                        }
+                        break;
+
+                    default:
+                        _logger.LogWarning("⚠️ [RANGE-FETCH] Unknown entity type for EntityMappings fetch: {EntityType}", request.EntityType);
+                        processableEntities++;
+                        break;
+                }
 
                 entities.Add(entity);
             }
 
-            // ✅ FIXED BUG: Include skipped entities so orchestrator accounts for all entities
-            foreach (var mapping in skippedMappings)
+            _logger.LogInformation("✅ [RANGE-FETCH] Successfully converted {TotalCount} EntityMappings: {ProcessableCount} entities sent to transform (filtering handled by transform phase) for {EntityType} batch {BatchNumber}", 
+                entities.Count, processableEntities, request.EntityType, request.BatchNumber);
+                
+            // ✅ DEBUG: Log sample EntityMapping data for debugging
+            if (entities.Any())
             {
-                var skippedEntity = new Dictionary<string, object>
+                var sampleEntity = entities.First();
+                var sampleKeys = string.Join(", ", sampleEntity.Keys);
+                _logger.LogDebug("📊 [FETCH-DEBUG] Sample entity keys: [{SampleKeys}]", sampleKeys);
+                
+                if (request.EntityType.Equals("product-channel-assign", StringComparison.OrdinalIgnoreCase))
                 {
-                    ["SourceId"] = mapping.SourceId ?? "",
-                    ["DestinationId"] = mapping.DestinationId ?? "",
-                    ["EntityType"] = mapping.EntityType ?? "",
-                    ["MigrationId"] = mapping.MigrationId ?? "",
-                    ["RelatedProductsData"] = "", // Empty for skipped entities
-                    ["status"] = "skipped", // ✅ NEW: Mark as skipped for orchestrator counting
-                    ["reason"] = "no_related_products_data" // ✅ NEW: Reason for skipping
-                };
-
-                entities.Add(skippedEntity);
+                    var sampleChannelsData = sampleEntity.TryGetValue("ChannelsData", out var cd) ? cd?.ToString() : "NULL";
+                    var sampleChannelMapping = sampleEntity.TryGetValue("_channel_mapping", out var cm) ? cm?.ToString() : "NULL"; 
+                    _logger.LogInformation("📊 [FETCH-DEBUG] Sample product-channel-assign: ChannelsData='{ChannelsData}', ChannelMapping='{ChannelMapping}'", 
+                        sampleChannelsData, sampleChannelMapping);
+                }
             }
-
-            _logger.LogInformation("✅ [ENTITY-MAPPINGS-FETCH] Successfully converted {TotalCount} EntityMappings: {ProcessableCount} processable + {SkippedCount} skipped", 
-                entities.Count, batchMappings.Count, skippedMappings.Count);
 
             return entities;
         }

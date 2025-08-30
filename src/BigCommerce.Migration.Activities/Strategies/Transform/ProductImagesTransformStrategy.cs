@@ -92,19 +92,41 @@ public class ProductImagesTransformStrategy : IEntityTransformStrategy
         CategoryTreeContext? categoryTreeContext = null,
         CancellationToken cancellationToken = default)
     {
-        if (entity == null)
+        try
         {
-            _logger.LogWarning("⚠️ [PRODUCT-IMAGES-TRANSFORM] Null entity provided for migration {MigrationId}", migrationId);
-            return null!;
-        }
+            _logger.LogInformation("🔄 [PRODUCT-IMAGES-TRANSFORM] DEBUG: TransformEntityAsync called for migration {MigrationId}", migrationId);
+
+            if (entity == null)
+            {
+                _logger.LogWarning("⚠️ [PRODUCT-IMAGES-TRANSFORM] Null entity provided for migration {MigrationId}", migrationId);
+                return null!;
+            }
         
         _logger.LogInformation("🔄 [TRANSFORM-DEBUG] ===== STARTING IMAGE TRANSFORM ===== Migration: {MigrationId}, Entity keys: [{Keys}]", 
             migrationId, string.Join(", ", entity.Keys));
+
+        // 🔍 DEBUG: Log all entity values to understand the data structure
+        foreach (var kvp in entity)
+        {
+            var value = kvp.Value;
+            var valueString = value switch
+            {
+                null => "NULL",
+                string s => s.Length > 100 ? s[..100] + "..." : s,
+                IEnumerable<object> list => $"Array[{((IEnumerable<object>)list).Count()}]",
+                _ => value.ToString()?.Length > 100 ? value.ToString()![..100] + "..." : value.ToString() ?? "NULL"
+            };
+            _logger.LogInformation("🔍 [TRANSFORM-DEBUG] Entity field '{Key}' = '{Value}' (migration: {MigrationId})",
+                kvp.Key, valueString, migrationId);
+        }
 
         try
         {
             // Extract product ID and images from input
             var (productId, images) = ExtractProductAndImages(entity, migrationId);
+            
+            _logger.LogInformation("🔍 [TRANSFORM-DEBUG] Extracted productId='{ProductId}', images.Count={ImageCount} (migration: {MigrationId})",
+                productId ?? "NULL", images?.Count ?? 0, migrationId);
             
             if (string.IsNullOrEmpty(productId))
             {
@@ -131,6 +153,21 @@ public class ProductImagesTransformStrategy : IEntityTransformStrategy
             for (int i = 0; i < images.Count; i++)
             {
                 var image = images[i];
+
+                // 🔍 DEBUG: Log image fields to understand what data we're getting
+                _logger.LogInformation("🔍 [PRODUCT-IMAGES-TRANSFORM] Image {ImageIndex} fields: [{Fields}] (migration: {MigrationId})",
+                    i + 1, string.Join(", ", image.Keys), migrationId);
+
+                // 🔍 DEBUG: Log key field values
+                var imageFile = image.GetValueOrDefault("image_file")?.ToString() ?? "MISSING";
+                var urlStandard = image.GetValueOrDefault("url_standard")?.ToString() ?? "MISSING";
+                var imageUrl = image.GetValueOrDefault("image_url")?.ToString() ?? "MISSING";
+
+                _logger.LogInformation("🔍 [PRODUCT-IMAGES-TRANSFORM] Image {ImageIndex} key fields - image_file: '{ImageFile}', url_standard: '{UrlStandard}', image_url: '{ImageUrl}' (migration: {MigrationId})",
+                    i + 1, imageFile.Length > 50 ? imageFile[..50] + "..." : imageFile,
+                    urlStandard.Length > 50 ? urlStandard[..50] + "..." : urlStandard,
+                    imageUrl.Length > 50 ? imageUrl[..50] + "..." : imageUrl, migrationId);
+
                 var transformedImage = await TransformSingleImageAsync(image, i + 1, productId, sourceStore, migrationId, cancellationToken);
                 
                 if (transformedImage != null)
@@ -146,8 +183,8 @@ public class ProductImagesTransformStrategy : IEntityTransformStrategy
 
             if (transformedImages.Count == 0)
             {
-                _logger.LogWarning("⚠️ [PRODUCT-IMAGES-TRANSFORM] No valid images after transformation for product {ProductId} (migration: {MigrationId})", 
-                    productId, migrationId);
+                _logger.LogWarning("⚠️ [PRODUCT-IMAGES-TRANSFORM] No valid images after transformation for product {ProductId} (migration: {MigrationId}). Original images: {OriginalCount}, Valid: {ValidCount}, Skipped: {SkippedCount}", 
+                    productId, migrationId, images.Count, validImageCount, skippedImageCount);
                 return null!; // No valid images to update
             }
 
@@ -174,6 +211,13 @@ public class ProductImagesTransformStrategy : IEntityTransformStrategy
                 migrationId, ex.GetType().Name);
             throw;
         }
+        }
+        catch (Exception outerEx)
+        {
+            _logger.LogError(outerEx, "❌ [PRODUCT-IMAGES-TRANSFORM] DEBUG: OUTER EXCEPTION in TransformEntityAsync for migration {MigrationId}: {ErrorType} - {Message}", 
+                migrationId, outerEx.GetType().Name, outerEx.Message);
+            return null!;
+        }
     }
 
     #endregion
@@ -192,20 +236,26 @@ public class ProductImagesTransformStrategy : IEntityTransformStrategy
             // Extract product ID - check both EntityMappings format (DestinationId) and direct format (productId)
             string? productId = null;
             
+            _logger.LogInformation("🔍 [EXTRACT-DEBUG] Attempting to extract productId - Available keys: [{Keys}] (migration: {MigrationId})",
+                string.Join(", ", entity.Keys), migrationId);
+            
             // First try DestinationId (from EntityMappings table)
             if (entity.TryGetValue("DestinationId", out var destIdValue) && destIdValue != null)
             {
                 productId = destIdValue.ToString();
+                _logger.LogInformation("🔍 [EXTRACT-DEBUG] Found DestinationId: '{ProductId}' (migration: {MigrationId})", productId, migrationId);
             }
             // Fallback to destination_id (lowercase)
             else if (entity.TryGetValue("destination_id", out var destIdLowerValue) && destIdLowerValue != null)
             {
                 productId = destIdLowerValue.ToString();
+                _logger.LogInformation("🔍 [EXTRACT-DEBUG] Found destination_id: '{ProductId}' (migration: {MigrationId})", productId, migrationId);
             }
             // Fallback to productId (direct API format)
             else if (entity.TryGetValue("productId", out var productIdValue) && productIdValue != null)
             {
                 productId = productIdValue.ToString();
+                _logger.LogInformation("🔍 [EXTRACT-DEBUG] Found productId: '{ProductId}' (migration: {MigrationId})", productId, migrationId);
             }
             
             if (string.IsNullOrEmpty(productId))
@@ -336,15 +386,17 @@ public class ProductImagesTransformStrategy : IEntityTransformStrategy
     {
         // Only image_file is truly required to construct virtual path URL
         // If image_file is missing, we can fallback to url_standard
-        if (!sourceImage.TryGetValue("image_file", out var imageFileValue) || 
+        if (!sourceImage.TryGetValue("image_file", out var imageFileValue) ||
             string.IsNullOrWhiteSpace(imageFileValue?.ToString()))
         {
             // Check for fallback URL
-            if (!sourceImage.TryGetValue("url_standard", out var urlValue) || 
+            if (!sourceImage.TryGetValue("url_standard", out var urlValue) ||
                 string.IsNullOrWhiteSpace(urlValue?.ToString()))
             {
                 _logger.LogWarning("⚠️ [PRODUCT-IMAGES-TRANSFORM] Image {ImageIndex} missing both 'image_file' and 'url_standard' fields (migration: {MigrationId})", 
                     imageIndex, migrationId);
+                _logger.LogWarning("🔍 [PRODUCT-IMAGES-TRANSFORM] DEBUG: Available image fields: [{Fields}] (migration: {MigrationId})",
+                    string.Join(", ", sourceImage.Keys), migrationId);
                 return false;
             }
         }

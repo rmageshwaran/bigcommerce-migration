@@ -203,10 +203,20 @@ export const MigrationStartForm: React.FC = () => {
           storeId: destinationStoreConfig.storeId,
           accessToken: destinationStoreConfig.accessToken,
           channelId: destinationStoreConfig.channelId
-        }
+        },
+        channelMapping: [
+          {
+            sourceChannel: "1",
+            destinationChannel: "1680373"
+          }
+        ]
       };
 
-      console.log('🚀 Starting migration with payload:', migrationRequest);
+      console.log('🚀 [UI-DEBUG] Starting migration with complete payload:', migrationRequest);
+      console.log('🔗 [UI-DEBUG] ChannelMapping being sent:', migrationRequest.channelMapping);
+      console.log('📋 [UI-DEBUG] Selected entities:', migrationRequest.entities);
+      console.log('🏪 [UI-DEBUG] Source store:', migrationRequest.sourceStore.storeId);
+      console.log('🎯 [UI-DEBUG] Destination store:', migrationRequest.destinationStore.storeId);
       
       const apiService = getApiService();
       const response = await apiService.startMigration(migrationRequest);

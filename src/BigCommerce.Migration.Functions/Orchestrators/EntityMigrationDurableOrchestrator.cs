@@ -432,8 +432,24 @@ public static class EntityMigrationDurableOrchestrator
                     PaginationMetadata = useDirectPagination ? chunkPaginationMetadata : discoverResult?.PaginationMetadata,
                     IsCancelled = cancellationState.IsCancelled,
                     CancellationReason = cancellationState.CancellationReason,
-                    CancelledAt = cancellationState.CancelledAt
+                    CancelledAt = cancellationState.CancelledAt,
+                    ChannelMapping = input.ChannelMapping // ✅ Pass ChannelMapping from EntityMigrationRequest
                 };
+                
+                // ✅ DEBUG: Log ChannelMapping propagation for each chunk
+                if (entityType.Equals("product-channel-assign", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (chunkRequest.ChannelMapping?.Any() == true)
+                    {
+                        logger.LogInformation("🔗 [ENTITY-ORCHESTRATOR-DEBUG] Chunk {ChunkNumber}: Passing ChannelMapping [{Mappings}] to ProcessEntityChunkActivity", 
+                            chunkNumber, string.Join(", ", chunkRequest.ChannelMapping.Select(m => $"{m.SourceChannel}→{m.DestinationChannel}")));
+                    }
+                    else
+                    {
+                        logger.LogError("❌ [ENTITY-ORCHESTRATOR-DEBUG] Chunk {ChunkNumber}: No ChannelMapping available for {EntityType}!", 
+                            chunkNumber, entityType);
+                    }
+                }
                 
                 logger.LogError("🚀 [ORCHESTRATOR-CHUNK-DEBUG] FINAL chunkRequest for chunk {ChunkNumber}: " +
                               "MigrationId={MigrationId}, EntityType={EntityType}, ChunkNumber={ChunkNumber}, TotalChunks={TotalChunks}, " +
@@ -508,8 +524,16 @@ public static class EntityMigrationDurableOrchestrator
                     PaginationMetadata = discoverResult?.PaginationMetadata,
                     IsCancelled = cancellationState.IsCancelled,
                     CancellationReason = cancellationState.CancellationReason,
-                    CancelledAt = cancellationState.CancelledAt
+                    CancelledAt = cancellationState.CancelledAt,
+                    ChannelMapping = input.ChannelMapping // ✅ Pass ChannelMapping from EntityMigrationRequest
                 };
+                
+                // ✅ DEBUG: Log ChannelMapping for fast workflow
+                if (entityType.Equals("product-channel-assign", StringComparison.OrdinalIgnoreCase))
+                {
+                    logger.LogInformation("⚡ [ENTITY-ORCHESTRATOR-DEBUG] Fast workflow: ChannelMapping status for {EntityType}: {HasMapping}", 
+                        entityType, fastRequest.ChannelMapping?.Any() == true ? "Available" : "Missing");
+                }
 
                 // Call the fast parallel processing activity directly (like the original approach)
                 parallelResult = await context.CallActivityAsync<BigCommerce.Migration.Core.Interfaces.BatchProcessingResult>(

@@ -54,6 +54,11 @@ export interface ApiConfig {
 }
 
 // Additional type definitions for better type safety
+export interface ChannelMapping {
+  sourceChannel: string;
+  destinationChannel: string;
+}
+
 export interface MigrationRequest {
   entities: string[];
   sourceStore: {
@@ -68,6 +73,7 @@ export interface MigrationRequest {
     channelId: string;
     baseUrl?: string;
   };
+  channelMapping?: ChannelMapping[];
   settings?: {
     maxApiCallsPerSecond?: number;
     enableAdaptiveBatching?: boolean;

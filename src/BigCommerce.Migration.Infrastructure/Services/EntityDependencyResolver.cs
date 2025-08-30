@@ -102,10 +102,10 @@ public class EntityDependencyResolver : IEntityDependencyResolver
                 "product-components",    // Phase 2: Options, modifiers, reviews (10/page)
                 "product-related",       // Phase 3: Related products updates (provides timing gap for option mappings)
                 "product-images",        // Phase 4: Product images migration (individual product updates)
+                "product-channel-assign", // Phase 5: Product channel assignments (bulk API updates)
                 // ❌ NOT IMPLEMENTED YET - Commented out until implementation is complete
-                // "product-metafields",    // Phase 5: Product meta fields (provides timing gap for option mappings)
-                // "product-channels",      // Phase 6: Channel assignments (provides timing gap for option mappings)
-                "variants"               // Phase 7: Product variants ✅ NOW with option mappings ready
+                // "product-metafields",    // Phase 6: Product meta fields (provides timing gap for option mappings)
+                "variants"               // Phase 6: Product variants ✅ NOW with option mappings ready
             };
         }
 
@@ -173,7 +173,7 @@ public class EntityDependencyResolver : IEntityDependencyResolver
         {
             PhaseType = "variants",
                 PhaseName = "Product Variants",
-                PhaseNumber = 7, // Moved to phase 7 (after product-images and other phases)
+                PhaseNumber = 6, // Phase 6 (after product-channel-assign)
                 PageSize = 250, // ✅ FIXED: Match appsettings.json for optimal API efficiency
                 Include = string.Empty,
                 CreatesNewEntities = true,
@@ -234,11 +234,23 @@ public class EntityDependencyResolver : IEntityDependencyResolver
             {
                 PhaseType = "product-images",
                 PhaseName = "Product Images",
-                PhaseNumber = 4, // Phase 4 (after product-related, before variants)
+                PhaseNumber = 4, // Phase 4 (after product-related, before product-channel-assign)
                 PageSize = 20, // Products per discovery batch
                 Include = "", // No include needed - uses EntityMappings discovery
                 CreatesNewEntities = false, // Updates existing products with images
                 TargetEntityTypes = new List<string> { "products" }, // Updates products with image data
+                RequiresPreviousPhaseCompletion = true
+            },
+            
+            ["product-channel-assign"] = new EntityPhaseConfiguration
+            {
+                PhaseType = "product-channel-assign",
+                PhaseName = "Product Channel Assignments",
+                PhaseNumber = 5, // Phase 5 (after product-images, before variants)
+                PageSize = 250, // Products per discovery batch (similar to variants)
+                Include = "", // No include needed - uses EntityMappings discovery
+                CreatesNewEntities = false, // Updates existing product channel assignments
+                TargetEntityTypes = new List<string> { "products" }, // Updates products with channel assignments
                 RequiresPreviousPhaseCompletion = true
             },
             

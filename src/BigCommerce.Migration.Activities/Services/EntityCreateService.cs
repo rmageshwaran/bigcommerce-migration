@@ -82,6 +82,22 @@ public class EntityCreateService : IEntityCreateService
                     entities.Count, request.MigrationId);
             }
             
+            // TODO: For product-channel-assign, we need to include channel mapping configuration in the entities
+            // This will be implemented once we have access to the MigrationRequest with ChannelMapping
+            if (request.EntityType.Equals("product-channel-assign", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogInformation("🔗 [ENTITY-CREATE-DEBUG] Product-channel-assign entities processing with ChannelMapping configuration (migration: {MigrationId})", 
+                    request.MigrationId);
+                
+                // ✅ CHANNEL MAPPING: Already injected during fetch phase via EntityFetchService
+                // EntityFetchService injects ChannelMapping from BatchProcessingRequest.AdditionalData into entity["_channel_mapping"]
+                // No additional processing needed here - channel mapping is ready for transform strategy
+                
+                var entitiesWithMapping = entities.Count(e => e.ContainsKey("_channel_mapping"));
+                _logger.LogInformation("✅ [CHANNEL-MAPPING] Processing {TotalEntities} entities, {EntitiesWithMapping} have channel mapping configuration (migration: {MigrationId})", 
+                    entities.Count, entitiesWithMapping, request.MigrationId);
+            }
+            
             var result = await strategy.CreateEntitiesAsync(
                 entities, 
                 request.MigrationId, 

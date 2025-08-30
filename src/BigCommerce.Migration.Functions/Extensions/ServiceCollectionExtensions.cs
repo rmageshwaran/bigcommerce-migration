@@ -440,6 +440,10 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IMigrationStorageService, MigrationStorageService>();
         services.AddScoped<IEntityMappingsPaginationService, EntityMappingsPaginationService>();
         services.AddSingleton<ICancellationStore, CancellationStore>();
+        
+        // 🔢 ROWNUMBER SERVICE: Register atomic counter service for composite RowKey generation
+        // Singleton is appropriate because service is stateless and thread-safe
+        services.AddSingleton<IRowNumberService, RowNumberService>();
 
         // Register API request handler for HTTP concerns (delegation pattern)
                     services.AddSingleton<IApiRequestHandler>(serviceProvider =>

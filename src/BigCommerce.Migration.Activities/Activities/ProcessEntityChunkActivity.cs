@@ -128,8 +128,18 @@ public class ProcessEntityChunkActivity
                 DestinationStore = request.DestinationStore,
                 CategoryTreeContext = request.CategoryTreeContext,
                 PaginationMetadata = request.PaginationMetadata,
-                UseDirectPagination = request.UseDirectPagination
+                UseDirectPagination = request.UseDirectPagination,
+                ChannelMapping = request.ChannelMapping // ✅ Pass ChannelMapping from ProcessEntityChunkRequest
             };
+            
+            // ✅ INJECT CHANNEL MAPPING: Add to AdditionalData for EntityFetchService access
+            if (request.EntityType.Equals("product-channel-assign", StringComparison.OrdinalIgnoreCase) && 
+                request.ChannelMapping?.Any() == true)
+            {
+                batchRequest.AdditionalData["ChannelMapping"] = System.Text.Json.JsonSerializer.Serialize(request.ChannelMapping);
+                _logger.LogInformation("✅ [CHANNEL-MAPPING] Injected {MappingCount} channel mappings for {EntityType} batch {ChunkNumber} (migration: {MigrationId})", 
+                    request.ChannelMapping.Count, request.EntityType, request.ChunkNumber, request.MigrationId);
+            }
 
             // Step 1: Fetch entities
             var entities = await FetchEntitiesForChunk(batchRequest);

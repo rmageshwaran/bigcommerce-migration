@@ -179,7 +179,20 @@ services:
       - ParallelProcessing__subBatchConfigurations__product-related__enableSubBatching=true
       - ParallelProcessing__subBatchConfigurations__product-related__subBatchDelayMs=50
       - ParallelProcessing__subBatchConfigurations__product-related__processSubBatchesSequentially=false
+      - ParallelProcessing__subBatchConfigurations__product-related__preferRangeAllocation=true
       - ParallelProcessing__subBatchConfigurations__product-related__include=
+      
+      # ✅ Product-Channel-Assign Configuration - Phase 8: RowNumber Pagination (Production)
+      - ParallelProcessing__subBatchConfigurations__product-channel-assign__entityType=product-channel-assign
+      - ParallelProcessing__subBatchConfigurations__product-channel-assign__pageSize=250
+      - ParallelProcessing__subBatchConfigurations__product-channel-assign__chunkSize=250
+      - ParallelProcessing__subBatchConfigurations__product-channel-assign__fetchBatchSize=250
+      - ParallelProcessing__subBatchConfigurations__product-channel-assign__subBatchSize=15
+      - ParallelProcessing__subBatchConfigurations__product-channel-assign__maxConcurrency=12
+      - ParallelProcessing__subBatchConfigurations__product-channel-assign__enableSubBatching=true
+      - ParallelProcessing__subBatchConfigurations__product-channel-assign__subBatchDelayMs=75
+      - ParallelProcessing__subBatchConfigurations__product-channel-assign__processSubBatchesSequentially=false
+      - ParallelProcessing__subBatchConfigurations__product-channel-assign__preferRangeAllocation=true
       
       # ✅ Product-Images Configuration - Phase 4: Individual product image updates (Production)
       - ParallelProcessing__subBatchConfigurations__product-images__entityType=product-images
@@ -195,6 +208,7 @@ services:
       - ParallelProcessing__subBatchConfigurations__product-images__imageChunkDelayMs=300
       - ParallelProcessing__subBatchConfigurations__product-images__maxImagesPerProduct=1000
       - ParallelProcessing__subBatchConfigurations__product-images__cancellationCheckInterval=5
+      - ParallelProcessing__subBatchConfigurations__product-images__preferRangeAllocation=true
       - ParallelProcessing__subBatchConfigurations__product-images__include=
       
       # ✅ Enhanced Product Configuration (Production - Phase 2 comprehensive entity migration)
@@ -214,9 +228,28 @@ services:
       # Production SignalR Configuration
       - AzureSignalR=${AZURE_SIGNALR_CONNECTION_STRING}
       
+      # ✅ PHASE 8: RowNumber Service Configuration (Production)
+      - RowNumberService__MaxRetryAttempts=7
+      - RowNumberService__BaseRetryDelayMs=50
+      - RowNumberService__MaxRetryDelayMs=1000
+      - RowNumberService__MaxRangeAllocationSize=10000
+      - RowNumberService__RangeAllocationThreshold=10
+      - RowNumberService__EnableDetailedMetrics=true
+      - RowNumberService__MetricsAggregationIntervalMs=60000
+      - RowNumberService__EnablePerformanceRecommendations=false
+      
+      # ✅ PHASE 8: Azure Table Storage Configuration (Production)
+      - AzureTableStorage__MaxConnections=100
+      - AzureTableStorage__RequestTimeoutMs=30000
+      - AzureTableStorage__SdkMaxRetries=3
+      - AzureTableStorage__SdkRetryDelayMs=500
+      - AzureTableStorage__SdkMaxDelayMs=5000
+      - AzureTableStorage__EnableConnectionPooling=true
+      
       # Production Logging Configuration
       - Logging__LogLevel__Default=Warning
       - Logging__LogLevel__BigCommerce.Migration=Information
+      - Logging__LogLevel__BigCommerce.Migration.Infrastructure.Services.RowNumberService=Information
       - Logging__LogLevel__Microsoft=Error
       
       # Application Insights for Production Monitoring

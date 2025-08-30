@@ -513,7 +513,14 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
 
             // Update the product's entity mapping immediately
             productMapping.OptionsMappingData = jsonString;
+
+            _logger.LogInformation("🔧 [OPTIONS-MAPPING-UPDATE] Updating OptionsMappingData for product {SourceProductId} → {DestinationProductId}. JSON length: {JsonLength}",
+                sourceProductId, productMapping.DestinationId, jsonString.Length);
+
             await _migrationStorageService.UpdateEntityMappingAsync(productMapping);
+
+            _logger.LogInformation("✅ [OPTIONS-MAPPING-UPDATE] Successfully updated OptionsMappingData for product {SourceProductId}",
+                sourceProductId);
 
             _logger.LogDebug("✅ [OPTION-MAPPING] Immediately stored option mapping: Source={SourceOptionId} → Destination={DestinationOptionId} with {OptionValueCount} option values for product {ProductId}", 
                 sourceOptionId, destinationOptionId, optionValueMappings.Count, sourceProductId);

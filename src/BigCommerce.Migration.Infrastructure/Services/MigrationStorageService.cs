@@ -14,6 +14,7 @@ namespace BigCommerce.Migration.Infrastructure.Services;
 public class MigrationStorageService : IMigrationStorageService
 {
     private readonly IAzureTableInitializationService _tableInitializationService;
+    private readonly IRowNumberService _rowNumberService;
     private readonly ILogger<MigrationStorageService> _logger;
     
     private const string MigrationsTableName = "migrations";
@@ -26,10 +27,15 @@ public class MigrationStorageService : IMigrationStorageService
     /// Initializes a new instance of the MigrationStorageService class
     /// </summary>
     /// <param name="tableInitializationService">Centralized table initialization service</param>
+    /// <param name="rowNumberService">RowNumber service for atomic counter operations</param>
     /// <param name="logger">Logger instance</param>
-    public MigrationStorageService(IAzureTableInitializationService tableInitializationService, ILogger<MigrationStorageService> logger)
+    public MigrationStorageService(
+        IAzureTableInitializationService tableInitializationService, 
+        IRowNumberService rowNumberService,
+        ILogger<MigrationStorageService> logger)
     {
         _tableInitializationService = tableInitializationService ?? throw new ArgumentNullException(nameof(tableInitializationService));
+        _rowNumberService = rowNumberService ?? throw new ArgumentNullException(nameof(rowNumberService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         
         _logger.LogInformation("✅ MigrationStorageService initialized with centralized table management for: {Tables}", 
@@ -261,12 +267,19 @@ public class MigrationStorageService : IMigrationStorageService
     {
         try
         {
-            _logger.LogInformation("Creating entity mapping: {MigrationId}, {EntityType}, {SourceId}", 
+            _logger.LogInformation("🔢 [ENTITY-MAPPING] Creating entity mapping with RowNumber: {MigrationId}, {EntityType}, {SourceId}", 
                 mapping.MigrationId, mapping.EntityType, mapping.SourceId);
 
+            // 🆕 ROWNUMBER INTEGRATION: Get next sequential RowNumber for composite RowKey
+            var rowNumber = await _rowNumberService.GetNextRowNumberAsync(mapping.MigrationId, mapping.EntityType);
+            
+            // 🆕 COMPOSITE ROWKEY: Use zero-padded RowNumber + EntityType + SourceId format
+            var compositeRowKey = $"{rowNumber:D10}_{mapping.EntityType}_{mapping.SourceId}";
+
             var tableClient = await GetTableClientAsync(EntityMappingsTableName);
-            var tableEntity = new TableEntity(mapping.MigrationId, $"{mapping.EntityType}_{mapping.SourceId}")
+            var tableEntity = new TableEntity(mapping.MigrationId, compositeRowKey)
             {
+                ["RowNumber"] = rowNumber, // 🆕 Store RowNumber for easier debugging and queries
                 ["EntityType"] = mapping.EntityType,
                 ["SourceId"] = mapping.SourceId,
                 ["DestinationId"] = mapping.DestinationId,
@@ -276,25 +289,29 @@ public class MigrationStorageService : IMigrationStorageService
                 ["Metadata"] = mapping.Metadata,
                 ["RelatedProductsData"] = mapping.RelatedProductsData,
                 ["ChannelsData"] = mapping.ChannelsData,
-                ["OptionsMappingData"] = mapping.OptionsMappingData,  // 🔧 CRITICAL FIX: Include OptionsMappingData field
+                ["OptionsMappingData"] = mapping.OptionsMappingData,
                 ["CreatedAt"] = mapping.CreatedAt,
                 ["UpdatedAt"] = mapping.UpdatedAt
             };
 
             await tableClient.AddEntityAsync(tableEntity);
             
-            _logger.LogInformation("Successfully created entity mapping: {MigrationId}", mapping.MigrationId);
+            _logger.LogInformation("✅ [ENTITY-MAPPING] Successfully created entity mapping with RowNumber {RowNumber}: {MigrationId}/{EntityType}/{SourceId}", 
+                rowNumber, mapping.MigrationId, mapping.EntityType, mapping.SourceId);
+            
             return mapping;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error creating entity mapping: {MigrationId}", mapping.MigrationId);
+            _logger.LogError(ex, "❌ [ENTITY-MAPPING] Error creating entity mapping: {MigrationId}/{EntityType}/{SourceId}", 
+                mapping.MigrationId, mapping.EntityType, mapping.SourceId);
             throw;
         }
     }
 
     /// <summary>
     /// Gets an entity mapping by migration ID, entity type, and source ID
+    /// Uses filter query to handle composite RowKey format: "{RowNumber:D10}_{EntityType}_{SourceId}"
     /// </summary>
     /// <param name="migrationId">Migration identifier</param>
     /// <param name="entityType">Type of entity</param>
@@ -308,33 +325,38 @@ public class MigrationStorageService : IMigrationStorageService
                 migrationId, entityType, sourceId);
 
             var tableClient = await GetTableClientAsync(EntityMappingsTableName);
-            var rowKey = $"{entityType}_{sourceId}";
-            var response = await tableClient.GetEntityIfExistsAsync<TableEntity>(migrationId, rowKey);
-
-            if (!response.HasValue)
+            
+            // Use filter query for RowNumber format: "{RowNumber:D10}_{EntityType}_{SourceId}"
+            // Note: This requires scanning within partition but necessary for composite RowKey lookup
+            var filter = $"PartitionKey eq '{migrationId}' and EntityType eq '{entityType}' and SourceId eq '{sourceId}'";
+            
+            await foreach (var entity in tableClient.QueryAsync<TableEntity>(filter))
             {
-                _logger.LogWarning("Entity mapping not found: {MigrationId}, {EntityType}, {SourceId}", 
+                _logger.LogDebug("Found entity mapping: {MigrationId}, {EntityType}, {SourceId}", 
                     migrationId, entityType, sourceId);
-                return null;
+                
+                return new EntityMapping
+                {
+                    MigrationId = entity.PartitionKey!,
+                    EntityType = entity.GetString("EntityType") ?? string.Empty,
+                    SourceId = entity.GetString("SourceId") ?? string.Empty,
+                    DestinationId = entity.GetString("DestinationId") ?? string.Empty,
+                    SourceStoreId = entity.GetString("SourceStoreId") ?? string.Empty,
+                    DestinationStoreId = entity.GetString("DestinationStoreId") ?? string.Empty,
+                    Status = entity.GetString("Status") ?? string.Empty,
+                    Metadata = entity.GetString("Metadata"),
+                    RelatedProductsData = entity.GetString("RelatedProductsData"),
+                    ChannelsData = entity.GetString("ChannelsData"),
+                    OptionsMappingData = entity.GetString("OptionsMappingData"),
+                    RowNumber = entity.GetInt64("RowNumber") ?? 0,
+                    CreatedAt = entity.GetDateTime("CreatedAt") ?? DateTime.UtcNow,
+                    UpdatedAt = entity.GetDateTime("UpdatedAt") ?? DateTime.UtcNow
+                };
             }
 
-            var entity = response.Value!;
-            return new EntityMapping
-            {
-                MigrationId = entity.PartitionKey!,
-                EntityType = entity.GetString("EntityType") ?? string.Empty,
-                SourceId = entity.GetString("SourceId") ?? string.Empty,
-                DestinationId = entity.GetString("DestinationId") ?? string.Empty,
-                SourceStoreId = entity.GetString("SourceStoreId") ?? string.Empty,
-                DestinationStoreId = entity.GetString("DestinationStoreId") ?? string.Empty,
-                Status = entity.GetString("Status") ?? string.Empty,
-                Metadata = entity.GetString("Metadata"),
-                RelatedProductsData = entity.GetString("RelatedProductsData"),
-                ChannelsData = entity.GetString("ChannelsData"),
-                OptionsMappingData = entity.GetString("OptionsMappingData"),  // 🔧 CRITICAL FIX: Include OptionsMappingData field
-                CreatedAt = entity.GetDateTime("CreatedAt") ?? DateTime.UtcNow,
-                UpdatedAt = entity.GetDateTime("UpdatedAt") ?? DateTime.UtcNow
-            };
+            _logger.LogWarning("Entity mapping not found: {MigrationId}, {EntityType}, {SourceId}", 
+                migrationId, entityType, sourceId);
+            return null;
         }
         catch (Exception ex)
         {
@@ -402,64 +424,101 @@ public class MigrationStorageService : IMigrationStorageService
     {
         try
         {
-            _logger.LogInformation("Creating entity mappings batch: {Count} mappings", mappings.Count);
+            _logger.LogInformation("🔢 [ENTITY-MAPPING-BATCH] Creating entity mappings batch with RowNumber ranges: {Count} mappings", mappings.Count);
+
+            if (!mappings.Any())
+            {
+                return new List<EntityMapping>();
+            }
 
             var tableClient = await GetTableClientAsync(EntityMappingsTableName);
             var createdMappings = new List<EntityMapping>();
 
-            // Process in batches (Azure Tables supports up to 100 operations per batch)
-            var batchSize = 100;
-            for (int i = 0; i < mappings.Count; i += batchSize)
+            // Group mappings by migration and entity type for range allocation
+            var groupedMappings = mappings
+                .GroupBy(m => new { m.MigrationId, m.EntityType })
+                .ToList();
+
+            foreach (var group in groupedMappings)
             {
-                var batch = mappings.Skip(i).Take(batchSize).ToList();
-                var transaction = new List<TableTransactionAction>();
+                var migrationId = group.Key.MigrationId;
+                var entityType = group.Key.EntityType;
+                var groupMappings = group.ToList();
 
-                foreach (var mapping in batch)
+                _logger.LogInformation("🔢 [ENTITY-MAPPING-BATCH] Processing {Count} mappings for {MigrationId}/{EntityType}", 
+                    groupMappings.Count, migrationId, entityType);
+
+                // 🆕 RANGE ALLOCATION: Allocate RowNumber range for entire group
+                var (startRowNumber, endRowNumber) = await _rowNumberService.AllocateRangeAsync(
+                    migrationId, entityType, groupMappings.Count);
+
+                _logger.LogInformation("🔢 [ENTITY-MAPPING-BATCH] Allocated RowNumber range {Start}-{End} for {MigrationId}/{EntityType}", 
+                    startRowNumber, endRowNumber, migrationId, entityType);
+
+                // Process group in Azure Table Storage batches (max operations per transaction)
+                var azureBatchSize = AzureTableStorageLimits.MaxTransactionOperations;
+                for (int i = 0; i < groupMappings.Count; i += azureBatchSize)
                 {
-                    var tableEntity = new TableEntity(mapping.MigrationId, $"{mapping.EntityType}_{mapping.SourceId}")
+                    var azureBatch = groupMappings.Skip(i).Take(azureBatchSize).ToList();
+                    var transaction = new List<TableTransactionAction>();
+
+                    for (int j = 0; j < azureBatch.Count; j++)
                     {
-                        ["EntityType"] = mapping.EntityType,
-                        ["SourceId"] = mapping.SourceId,
-                        ["DestinationId"] = mapping.DestinationId,
-                        ["SourceStoreId"] = mapping.SourceStoreId,
-                        ["DestinationStoreId"] = mapping.DestinationStoreId,
-                        ["RelatedProductsData"] = mapping.RelatedProductsData,
-                        ["ChannelsData"] = mapping.ChannelsData,
-                        ["OptionsMappingData"] = mapping.OptionsMappingData,
-                        ["Status"] = mapping.Status,
-                        ["Metadata"] = mapping.Metadata,
-                        ["CreatedAt"] = mapping.CreatedAt,
-                        ["UpdatedAt"] = mapping.UpdatedAt
-                    };
+                        var mapping = azureBatch[j];
+                        var rowNumber = startRowNumber + i + j; // Sequential assignment within allocated range
+                        
+                        // 🆕 COMPOSITE ROWKEY: Use zero-padded RowNumber + EntityType + SourceId format
+                        var compositeRowKey = $"{rowNumber:D10}_{mapping.EntityType}_{mapping.SourceId}";
 
-                    transaction.Add(new TableTransactionAction(TableTransactionActionType.Add, tableEntity));
-                }
+                        var tableEntity = new TableEntity(mapping.MigrationId, compositeRowKey)
+                        {
+                            ["RowNumber"] = rowNumber, // 🆕 Store RowNumber for easier debugging and queries
+                            ["EntityType"] = mapping.EntityType,
+                            ["SourceId"] = mapping.SourceId,
+                            ["DestinationId"] = mapping.DestinationId,
+                            ["SourceStoreId"] = mapping.SourceStoreId,
+                            ["DestinationStoreId"] = mapping.DestinationStoreId,
+                            ["RelatedProductsData"] = mapping.RelatedProductsData,
+                            ["ChannelsData"] = mapping.ChannelsData,
+                            ["OptionsMappingData"] = mapping.OptionsMappingData,
+                            ["Status"] = mapping.Status,
+                            ["Metadata"] = mapping.Metadata,
+                            ["CreatedAt"] = mapping.CreatedAt,
+                            ["UpdatedAt"] = mapping.UpdatedAt
+                        };
 
-                try
-                {
-                    await tableClient.SubmitTransactionAsync(transaction);
-                    createdMappings.AddRange(batch);
-                }
-                catch (TableTransactionFailedException ex) when (ex.ErrorCode == "EntityAlreadyExists")
-                {
-                    // This is expected behavior in our dual storage approach:
-                    // 1. Individual storage succeeds immediately after entity creation  
-                    // 2. Batch storage at end fails with EntityAlreadyExists (gracefully handled here)
-                    _logger.LogDebug("Entity mappings already exist for batch (expected from dual storage approach). Batch size: {BatchSize}, Error: {ErrorCode}", 
-                        batch.Count, ex.ErrorCode);
-                    
-                    // Still count these as "created" since they exist from individual storage
-                    createdMappings.AddRange(batch);
-                }
-                catch (RequestFailedException ex) when (ex.Status == 409)
-                {
-                    // Handle general 409 Conflict errors (backup case)
-                    _logger.LogDebug("Conflict detected during entity mapping batch creation (expected from dual storage). Batch size: {BatchSize}", batch.Count);
-                    createdMappings.AddRange(batch);
+                        transaction.Add(new TableTransactionAction(TableTransactionActionType.Add, tableEntity));
+                    }
+
+                    try
+                    {
+                        await tableClient.SubmitTransactionAsync(transaction);
+                        createdMappings.AddRange(azureBatch);
+                        
+                        _logger.LogDebug("✅ [ENTITY-MAPPING-BATCH] Azure batch {BatchIndex} completed: {BatchSize} mappings with RowNumbers {StartRow}-{EndRow}", 
+                            i / azureBatchSize, azureBatch.Count, startRowNumber + i, startRowNumber + i + azureBatch.Count - 1);
+                    }
+                    catch (TableTransactionFailedException ex) when (ex.ErrorCode == "EntityAlreadyExists")
+                    {
+                        // This is expected behavior in our dual storage approach:
+                        // 1. Individual storage succeeds immediately after entity creation  
+                        // 2. Batch storage at end fails with EntityAlreadyExists (gracefully handled here)
+                        _logger.LogDebug("📊 [ENTITY-MAPPING-BATCH] Entity mappings already exist for Azure batch (expected from dual storage approach). Batch size: {BatchSize}, Error: {ErrorCode}", 
+                            azureBatch.Count, ex.ErrorCode);
+                        
+                        // Still count these as "created" since they exist from individual storage
+                        createdMappings.AddRange(azureBatch);
+                    }
+                    catch (RequestFailedException ex) when (ex.Status == 409)
+                    {
+                        // Handle general 409 Conflict errors (backup case)
+                        _logger.LogDebug("📊 [ENTITY-MAPPING-BATCH] Conflict detected during Azure batch creation (expected from dual storage). Batch size: {BatchSize}", azureBatch.Count);
+                        createdMappings.AddRange(azureBatch);
+                    }
                 }
             }
 
-            _logger.LogInformation("Successfully processed {Count} entity mappings batch (includes existing from dual storage)", createdMappings.Count);
+            _logger.LogInformation("✅ [ENTITY-MAPPING-BATCH] Successfully processed {Count} entity mappings batch with RowNumber ranges (includes existing from dual storage)", createdMappings.Count);
             return createdMappings;
         }
         catch (Exception ex)
@@ -478,12 +537,24 @@ public class MigrationStorageService : IMigrationStorageService
     {
         try
         {
-            _logger.LogInformation("Updating entity mapping: {MigrationId}, {EntityType}, {SourceId}", 
+            _logger.LogInformation("🔧 [UPDATE-ENTITY-MAPPING] Updating entity mapping: {MigrationId}, {EntityType}, {SourceId}",
                 mapping.MigrationId, mapping.EntityType, mapping.SourceId);
 
             var tableClient = await GetTableClientAsync(EntityMappingsTableName);
-            var rowKey = $"{mapping.EntityType}_{mapping.SourceId}";
-            var tableEntity = new TableEntity(mapping.MigrationId, rowKey)
+
+            // 🚨 CRITICAL FIX: Use RowNumber-based composite RowKey format (same as creation)
+            // We need to find the existing record first to get its RowNumber
+            var existingMapping = await GetEntityMappingAsync(mapping.MigrationId, mapping.EntityType, mapping.SourceId);
+            if (existingMapping == null)
+            {
+                throw new InvalidOperationException($"Entity mapping not found for update: {mapping.MigrationId}, {mapping.EntityType}, {mapping.SourceId}");
+            }
+
+            // Use the existing RowNumber to construct the correct composite RowKey
+            var compositeRowKey = $"{existingMapping.RowNumber:D10}_{mapping.EntityType}_{mapping.SourceId}";
+            _logger.LogDebug("🔧 [UPDATE-ROWKEY] Using composite RowKey: {RowKey} for update", compositeRowKey);
+
+            var tableEntity = new TableEntity(mapping.MigrationId, compositeRowKey)
             {
                 ["EntityType"] = mapping.EntityType,
                 ["SourceId"] = mapping.SourceId,
@@ -500,8 +571,9 @@ public class MigrationStorageService : IMigrationStorageService
             };
 
             await tableClient.UpdateEntityAsync(tableEntity, ETag.All);
-            
-            _logger.LogInformation("Successfully updated entity mapping: {MigrationId}", mapping.MigrationId);
+
+            _logger.LogInformation("✅ [UPDATE-ENTITY-MAPPING] Successfully updated entity mapping: {MigrationId}, RowKey: {RowKey}, OptionsMappingData length: {OptionsLength}",
+                mapping.MigrationId, compositeRowKey, mapping.OptionsMappingData?.Length ?? 0);
             return mapping;
         }
         catch (Exception ex)

@@ -48,19 +48,22 @@ public class EntityMappingsPaginationService : IEntityMappingsPaginationService
     #region Public Methods
 
     /// <summary>
-    /// Gets a page of entity mappings using continuation token-based pagination
+    /// 🆕 RANGE QUERY: Gets entity mappings by RowNumber range for efficient parallel processing
+    /// Uses composite RowKey range queries for optimal Azure Table Storage performance
     /// </summary>
     /// <param name="migrationId">Migration identifier</param>
     /// <param name="entityType">Entity type to filter by (e.g., "products")</param>
-    /// <param name="pageSize">Number of records per page (default: 250)</param>
-    /// <param name="continuationToken">Continuation token from previous page (null for first page)</param>
+    /// <param name="startRowNumber">Start of RowNumber range (inclusive)</param>
+    /// <param name="endRowNumber">End of RowNumber range (inclusive)</param>
+    /// <param name="dataFieldFilter">Optional data field that must be non-empty (e.g., "ChannelsData")</param>
     /// <param name="cancellationToken">Cancellation token</param>
-    /// <returns>Paginated entity mappings result</returns>
-    public async Task<EntityMappingsPageResult> GetEntityMappingsPageAsync(
+    /// <returns>List of entity mappings in the specified RowNumber range</returns>
+    public async Task<List<EntityMapping>> GetEntityMappingsByRowNumberRangeAsync(
         string migrationId,
         string entityType,
-        int pageSize = 250,
-        string? continuationToken = null,
+        long startRowNumber,
+        long endRowNumber,
+        string? dataFieldFilter = null,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -70,123 +73,83 @@ public class EntityMappingsPaginationService : IEntityMappingsPaginationService
             // Validate inputs
             if (string.IsNullOrWhiteSpace(migrationId))
                 throw new ArgumentException("Migration ID cannot be null or empty", nameof(migrationId));
-
             if (string.IsNullOrWhiteSpace(entityType))
                 throw new ArgumentException("Entity type cannot be null or empty", nameof(entityType));
-
-            if (pageSize <= 0 || pageSize > 1000)
-                throw new ArgumentOutOfRangeException(nameof(pageSize), "Page size must be between 1 and 1000");
+            if (startRowNumber < 1)
+                throw new ArgumentOutOfRangeException(nameof(startRowNumber), "Start RowNumber must be >= 1");
+            if (endRowNumber < startRowNumber)
+                throw new ArgumentOutOfRangeException(nameof(endRowNumber), "End RowNumber must be >= start RowNumber");
 
             _logger.LogInformation(
-                "📄 [PAGINATION] Getting EntityMappings page: MigrationId={MigrationId}, EntityType={EntityType}, PageSize={PageSize}, HasContinuation={HasContinuation}",
-                migrationId, entityType, pageSize, !string.IsNullOrEmpty(continuationToken));
+                "🔍 [RANGE-QUERY] Querying EntityMappings range: MigrationId={MigrationId}, EntityType={EntityType}, " +
+                "Range={StartRow}-{EndRow}, DataFilter={DataFilter}",
+                migrationId, entityType, startRowNumber, endRowNumber, dataFieldFilter ?? "none");
 
             var tableClient = await GetTableClientAsync();
 
-            // Build filter for PartitionKey = migrationId AND EntityType = entityType
-            // Note: EntityType is a property, not part of the RowKey
-            var filter = $"PartitionKey eq '{migrationId}' and EntityType eq '{entityType}'";
-
-            var result = new EntityMappingsPageResult
+            // 🆕 COMPOSITE ROWKEY RANGE QUERY: Build efficient range filter using RowKey
+            var startRowKey = $"{startRowNumber:D10}_{entityType}_";
+            var endRowKey = $"{endRowNumber + 1:D10}_{entityType}_"; // +1 for exclusive upper bound
+            
+            // Build filter: PartitionKey + RowKey range only
+            // ✅ CORRECT APPROACH: No data field filtering at database level
+            // Transform phase will handle filtering and add to skip counts appropriately
+            var filter = $"PartitionKey eq '{migrationId}' and RowKey ge '{startRowKey}' and RowKey lt '{endRowKey}'";
+            
+            if (!string.IsNullOrEmpty(dataFieldFilter))
             {
-                MigrationId = migrationId,
-                EntityType = entityType,
-                PageSize = pageSize,
-                Mappings = new List<EntityMapping>()
-            };
+                _logger.LogInformation("🔍 [RANGE-QUERY] Retrieving all EntityMappings in range - {DataField} filtering will be handled in transform phase", 
+                    dataFieldFilter);
+            }
 
-            // Execute query with pagination using AsPages for continuation token support
+            _logger.LogDebug(
+                "🔍 [RANGE-QUERY] Azure Table Storage filter: {Filter}",
+                filter);
+
+            var results = new List<EntityMapping>();
+
+            // Calculate optimal page size based on expected range size
+            var expectedRecordCount = endRowNumber - startRowNumber + 1;
+            var optimalPageSize = Math.Min(Math.Max((int)expectedRecordCount, 250), 1000); // Between 250-1000
+            
+            _logger.LogDebug("🔍 [RANGE-QUERY] Calculated optimal page size: {PageSize} for expected {ExpectedCount} records", 
+                optimalPageSize, expectedRecordCount);
+
+            // Execute efficient range query using native Azure Table Storage indexing
             var queryResults = tableClient.QueryAsync<TableEntity>(
                 filter: filter,
-                maxPerPage: pageSize,
+                maxPerPage: optimalPageSize, // Dynamic page size based on range
                 cancellationToken: cancellationToken);
 
-            var pageEnumerator = queryResults.AsPages(
-                continuationToken: continuationToken,
-                pageSizeHint: pageSize).GetAsyncEnumerator(cancellationToken);
-
-            try
+            await foreach (var entity in queryResults.WithCancellation(cancellationToken))
             {
-                if (await pageEnumerator.MoveNextAsync())
-                {
-                    var page = pageEnumerator.Current;
-                    
-                    // Convert TableEntity results to EntityMapping objects
-                    foreach (var entity in page.Values)
-                    {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        
-                        var mapping = ConvertFromTableEntity(entity);
-                        result.Mappings.Add(mapping);
-                    }
-
-                    // Set continuation token for next page if available
-                    result.ContinuationToken = page.ContinuationToken;
-
-                    _logger.LogInformation(
-                        "✅ [PAGINATION] Successfully retrieved EntityMappings page: Count={Count}, HasMorePages={HasMorePages}",
-                        result.Count, result.HasMorePages);
-                }
-                else
-                {
-                    _logger.LogInformation("📄 [PAGINATION] No EntityMappings found for specified criteria");
-                }
-            }
-            finally
-            {
-                await pageEnumerator.DisposeAsync();
+                var mapping = ConvertFromTableEntity(entity);
+                results.Add(mapping);
             }
 
-            return result;
+            _logger.LogInformation(
+                "✅ [RANGE-QUERY] Successfully retrieved {Count} EntityMappings for range {StartRow}-{EndRow}",
+                results.Count, startRowNumber, endRowNumber);
+
+            return results;
         }
         catch (OperationCanceledException)
         {
-            _logger.LogInformation("❌ [PAGINATION] EntityMappings pagination cancelled");
+            _logger.LogInformation("❌ [RANGE-QUERY] Range query cancelled");
             throw;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, 
-                "❌ [PAGINATION] Error getting EntityMappings page: MigrationId={MigrationId}, EntityType={EntityType}",
-                migrationId, entityType);
+                "❌ [RANGE-QUERY] Error getting EntityMappings by range: MigrationId={MigrationId}, EntityType={EntityType}, Range={StartRow}-{EndRow}",
+                migrationId, entityType, startRowNumber, endRowNumber);
             throw;
         }
     }
 
-    /// <summary>
-    /// Gets all entity mappings for a migration and entity type using async enumerable
-    /// Uses continuation token pagination internally for memory efficiency
-    /// </summary>
-    /// <param name="migrationId">Migration identifier</param>
-    /// <param name="entityType">Entity type to filter by</param>
-    /// <param name="pageSize">Page size for internal pagination (default: 250)</param>
-    /// <param name="cancellationToken">Cancellation token</param>
-    /// <returns>Async enumerable of entity mappings</returns>
-    public async IAsyncEnumerable<EntityMapping> GetAllEntityMappingsAsync(
-        string migrationId,
-        string entityType,
-        int pageSize = 250,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
-        string? continuationToken = null;
-        
-        do
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            
-            var pageResult = await GetEntityMappingsPageAsync(
-                migrationId, entityType, pageSize, continuationToken, cancellationToken);
 
-            foreach (var mapping in pageResult.Mappings)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                yield return mapping;
-            }
 
-            continuationToken = pageResult.ContinuationToken;
-            
-        } while (!string.IsNullOrEmpty(continuationToken));
-    }
+
 
     #endregion
 
@@ -221,6 +184,7 @@ public class EntityMappingsPaginationService : IEntityMappingsPaginationService
             RelatedProductsData = entity.GetString("RelatedProductsData"),
             ChannelsData = entity.GetString("ChannelsData"),
             OptionsMappingData = entity.GetString("OptionsMappingData"),
+            RowNumber = entity.GetInt64("RowNumber") ?? 0,
             CreatedAt = entity.GetDateTime("CreatedAt") ?? DateTime.UtcNow,
             UpdatedAt = entity.GetDateTime("UpdatedAt") ?? DateTime.UtcNow
         };

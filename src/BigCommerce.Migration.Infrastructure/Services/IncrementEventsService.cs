@@ -166,15 +166,15 @@ public class IncrementEventsService : IIncrementEventsService, IDisposable
                 return;
             }
 
-            // Try batch operation first (Azure Table Storage supports up to 100 operations per batch)
-            if (validEvents.Count <= 100)
+            // Try batch operation first (Azure Table Storage batch transaction limit)
+            if (validEvents.Count <= AzureTableStorageLimits.MaxTransactionOperations)
             {
                 await WriteBatchWithRetryAsync(validEvents, cancellationToken);
             }
             else
             {
                 // Split into multiple batches
-                var batches = validEvents.Chunk(100).ToList();
+                var batches = validEvents.Chunk(AzureTableStorageLimits.MaxTransactionOperations).ToList();
                 _logger.LogInformation("Splitting {Count} events into {BatchCount} batches", validEvents.Count, batches.Count);
 
                 foreach (var batch in batches)

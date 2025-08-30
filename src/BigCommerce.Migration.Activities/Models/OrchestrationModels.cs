@@ -198,6 +198,12 @@ public class EntityMigrationRequest
     public MigrationSettings? Settings { get; set; }
     
     /// <summary>
+    /// Channel mapping configuration for product-channel-assign phase
+    /// Maps source channel IDs to destination channel IDs
+    /// </summary>
+    public List<ChannelMapping>? ChannelMapping { get; set; }
+    
+    /// <summary>
     /// Indicates if the migration has been cancelled (for fast token-based checking)
     /// This is set by the orchestrator based on external storage checks to avoid
     /// repeated external storage calls in activities
@@ -332,6 +338,12 @@ public class BatchProcessingRequest
     /// When the cancellation was detected
     /// </summary>
     public DateTime? CancelledAt { get; set; }
+    
+    /// <summary>
+    /// Channel mapping configuration for product-channel-assign phase
+    /// Passed from EntityMigrationRequest for channel ID mapping
+    /// </summary>
+    public List<ChannelMapping>? ChannelMapping { get; set; }
     
     /// <summary>
     /// Additional data for passing context between activities
@@ -912,4 +924,10 @@ public class ProcessEntityChunkRequest
     public bool IsCancelled { get; set; }
     public string CancellationReason { get; set; } = string.Empty;
     public DateTime? CancelledAt { get; set; }
+    
+    /// <summary>
+    /// Channel mapping configuration for product-channel-assign phase
+    /// Passed from EntityMigrationRequest for channel ID mapping
+    /// </summary>
+    public List<ChannelMapping>? ChannelMapping { get; set; }
 } 

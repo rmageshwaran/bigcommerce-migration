@@ -42,7 +42,31 @@ public static class MigrationDurableOrchestrator
 
         try
         {
-            logger.LogInformation("Starting migration orchestration for MigrationId: {MigrationId}", migrationId);
+            logger.LogInformation("🚀 [ORCHESTRATOR-DEBUG] Starting migration orchestration for MigrationId: {MigrationId}", migrationId);
+            
+            // ✅ DEBUG: Log ChannelMapping details
+            if (input.MigrationRequest?.ChannelMapping?.Any() == true)
+            {
+                logger.LogInformation("🔗 [ORCHESTRATOR-DEBUG] ChannelMapping received from UI: {MappingCount} mappings", 
+                    input.MigrationRequest.ChannelMapping.Count);
+                
+                foreach (var mapping in input.MigrationRequest.ChannelMapping)
+                {
+                    logger.LogInformation("🔗 [ORCHESTRATOR-DEBUG] Channel mapping: {Source} → {Destination}", 
+                        mapping.SourceChannel, mapping.DestinationChannel);
+                }
+            }
+            else
+            {
+                logger.LogWarning("⚠️ [ORCHESTRATOR-DEBUG] No ChannelMapping found in MigrationRequest for migration {MigrationId}", migrationId);
+            }
+            
+            // ✅ DEBUG: Log entities being processed
+            if (input.MigrationRequest?.Entities?.Any() == true)
+            {
+                logger.LogInformation("📋 [ORCHESTRATOR-DEBUG] Entities to process: [{Entities}]", 
+                    string.Join(", ", input.MigrationRequest.Entities));
+            }
 
             // Step 1: Initialize Migration
             logger.LogInformation("Step 1: Initializing migration for MigrationId: {MigrationId}", migrationId);
@@ -236,6 +260,10 @@ public static class MigrationDurableOrchestrator
                     };
                 }
 
+                // ✅ DEBUG: Log entity type processing start
+                logger.LogInformation("🎯 [ORCHESTRATOR-DEBUG] Starting {EntityType} processing for migration {MigrationId}", 
+                    entityType, migrationId);
+
                 // Process the entity type using the entity-specific orchestrator
                 var entityRequest = new EntityMigrationRequest
                 {
@@ -245,11 +273,27 @@ public static class MigrationDurableOrchestrator
                     DestinationStore = input.MigrationRequest?.DestinationStore ?? new StoreConfiguration(),
                     CategoryTreeContext = input.CategoryTreeContext ?? new CategoryTreeContext(),
                     Settings = input.MigrationRequest?.Settings,
+                    ChannelMapping = input.MigrationRequest?.ChannelMapping, // ✅ Pass ChannelMapping from UI
                     // 🚫 CANCELLATION FIX: Propagate cancellation state to child orchestrators
                     IsCancelled = cancellationState.IsCancelled,
                     CancellationReason = cancellationState.CancellationReason,
                     CancelledAt = cancellationState.CancelledAt
                 };
+                
+                // ✅ DEBUG: Log ChannelMapping propagation for product-channel-assign
+                if (entityType.Equals("product-channel-assign", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (entityRequest.ChannelMapping?.Any() == true)
+                    {
+                        logger.LogInformation("🔗 [ORCHESTRATOR-DEBUG] Passing {MappingCount} ChannelMappings to {EntityType} orchestrator: [{Mappings}]", 
+                            entityRequest.ChannelMapping.Count, entityType, 
+                            string.Join(", ", entityRequest.ChannelMapping.Select(m => $"{m.SourceChannel}→{m.DestinationChannel}")));
+                    }
+                    else
+                    {
+                        logger.LogError("❌ [ORCHESTRATOR-DEBUG] No ChannelMapping found for {EntityType} processing - this will cause failures!", entityType);
+                    }
+                }
 
                 try
                 {

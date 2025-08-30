@@ -50,6 +50,11 @@ export interface MigrationCancellationResponse {
   cancelledAt: string;
 }
 
+export interface ChannelMapping {
+  sourceChannel: string;
+  destinationChannel: string;
+}
+
 export interface MigrationRequest {
   sourceStore: {
     storeId: string;
@@ -64,6 +69,7 @@ export interface MigrationRequest {
     baseUrl?: string;
   };
   entities: string[];
+  channelMapping?: ChannelMapping[];
   settings?: {
     maxApiCallsPerSecond?: number;
     enableAdaptiveBatching?: boolean;

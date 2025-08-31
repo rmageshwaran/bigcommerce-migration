@@ -230,6 +230,18 @@ services:
       - ParallelProcessing__subBatchConfigurations__product-images__preferRangeAllocation=true
       - ParallelProcessing__subBatchConfigurations__product-images__include=
       
+      # Product-Metafields Configuration - Phase 7: Bulk API with 50 metafields per call
+      - ParallelProcessing__subBatchConfigurations__product-metafields__entityType=product-metafields
+      - ParallelProcessing__subBatchConfigurations__product-metafields__fetchBatchSize=250
+      - ParallelProcessing__subBatchConfigurations__product-metafields__chunkSize=250
+      - ParallelProcessing__subBatchConfigurations__product-metafields__pageSize=250
+      - ParallelProcessing__subBatchConfigurations__product-metafields__subBatchSize=50
+      - ParallelProcessing__subBatchConfigurations__product-metafields__maxConcurrency=5
+      - ParallelProcessing__subBatchConfigurations__product-metafields__enableSubBatching=true
+      - ParallelProcessing__subBatchConfigurations__product-metafields__subBatchDelayMs=100
+      - ParallelProcessing__subBatchConfigurations__product-metafields__processSubBatchesSequentially=false
+      - ParallelProcessing__subBatchConfigurations__product-metafields__include=
+      
       # ✅ Enhanced Product Configuration (Phase 2 - comprehensive entity migration)
 
       

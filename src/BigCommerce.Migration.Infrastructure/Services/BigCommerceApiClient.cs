@@ -632,7 +632,7 @@ public class BigCommerceApiClient : IBigCommerceApiClient
             // 🚀 ENHANCED PRODUCT MIGRATION: Phase-specific entity type mappings
             "product-components" => "catalog/products",    // Phase 2: Fetch products with includes
             "product-related" => "catalog/products",       // Phase 4: Fetch products for relationship updates
-            "product-metafields" => "catalog/products",    // Phase 5: Fetch products for metafield updates  
+            "product-metafields" => "catalog/products/metafields",    // Phase 7: Fetch product metafields using dedicated API  
             "product-channels" => "catalog/products",      // Phase 6: Fetch products for channel assignments
             
             _ => throw new ArgumentException($"Unsupported entity type: {entityType}")

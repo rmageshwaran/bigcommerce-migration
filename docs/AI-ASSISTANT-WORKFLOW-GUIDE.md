@@ -150,6 +150,13 @@ read_file("relevant_file_from_searches.cs")
 - [ ] **Auto-populated properties** - Factory handles base properties
 - [ ] **Consistent naming** - Follow established event patterns
 
+#### **IApiRequestHandler Compliance (CRITICAL):**
+- [ ] **ALL API calls via IApiRequestHandler** - Never use IBigCommerceApiClient directly
+- [ ] **Consistent rate limiting** - All calls respect dynamic rate limiting
+- [ ] **Unified logging** - Standardized request/response payload logging
+- [ ] **Error categorization** - Proper infrastructure vs application error handling
+- [ ] **Performance monitoring** - All API calls contribute to health metrics
+
 #### **Continue-on-Error Policy:**
 - [ ] **Individual failures OK** - Don't stop migration for single entity failures
 - [ ] **Comprehensive logging** - Log all errors with context
@@ -178,6 +185,17 @@ read_file("relevant_file_from_searches.cs")
 ## 💻 **STEP 5: IMPLEMENTATION APPROACH**
 
 ### **Use Established Patterns** *(Reference CODING-PATTERNS-QUICK-REFERENCE.md)*
+
+#### **API Calls:**
+```csharp
+// ❌ WRONG - Bypasses rate limiting and consistent logging
+var response = await _apiClient.GetPaginatedEntitiesAsync(storeConfig, entityType, request, cancellationToken);
+
+// ✅ CORRECT - All API calls must go through IApiRequestHandler
+var url = $"{storeConfig.GetApiBaseUrl()}/catalog/products/metafields?page=1&limit=250";
+var apiRequest = ApiRequest.CreateGet(url, storeConfig);
+var response = await _apiRequestHandler.ExecuteRequestAsync<Dictionary<string, object>>(apiRequest, cancellationToken);
+```
 
 #### **SignalR Events:**
 ```csharp
@@ -231,6 +249,7 @@ public async Task Method_WithCondition_ExpectedBehavior()
 - [ ] **Proper error handling** - Result objects returned
 - [ ] **Dependency injection** - All services properly injected
 - [ ] **Performance impact** - No degradation introduced
+- [ ] **IApiRequestHandler compliance** - ALL API calls routed through IApiRequestHandler (not IBigCommerceApiClient)
 
 #### **Code Quality Standards:**
 - [ ] **SOLID Principles Applied** - Single Responsibility, Open/Closed, Liskov Substitution, Interface Segregation, Dependency Inversion
@@ -280,6 +299,7 @@ public async Task Method_WithCondition_ExpectedBehavior()
 ❌ Break backward compatibility
 ❌ Use in-memory caching for shared state (multi-instance Azure Functions issue)
 ❌ Use low contrast colors in diagrams that make text difficult to read
+❌ **Use IBigCommerceApiClient directly - ALL API calls must go through IApiRequestHandler**
 
 ### **ALWAYS DO:**
 ✅ Complete entire workflow for every request
@@ -295,6 +315,7 @@ public async Task Method_WithCondition_ExpectedBehavior()
 ✅ Design for multi-instance Azure Functions (stateless, centralized caching)
 ✅ Update memory when needed
 ✅ Use HIGH CONTRAST COLORS ONLY in all diagrams for text readability
+✅ **Route ALL API calls through IApiRequestHandler for consistent rate limiting and logging**
 
 ---
 

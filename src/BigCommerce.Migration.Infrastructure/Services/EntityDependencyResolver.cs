@@ -103,9 +103,8 @@ public class EntityDependencyResolver : IEntityDependencyResolver
                 "product-related",       // Phase 3: Related products updates (provides timing gap for option mappings)
                 "product-images",        // Phase 4: Product images migration (individual product updates)
                 "product-channel-assign", // Phase 5: Product channel assignments (bulk API updates)
-                // ❌ NOT IMPLEMENTED YET - Commented out until implementation is complete
-                // "product-metafields",    // Phase 6: Product meta fields (provides timing gap for option mappings)
-                "variants"               // Phase 6: Product variants ✅ NOW with option mappings ready
+                "variants",              // Phase 6: Product variants ✅ with option mappings ready
+                "product-metafields"     // Phase 7: Product metafields ✅ NEW - after all dependencies complete
             };
         }
 
@@ -257,12 +256,12 @@ public class EntityDependencyResolver : IEntityDependencyResolver
             ["product-metafields"] = new EntityPhaseConfiguration
             {
                 PhaseType = "product-metafields",
-                PhaseName = "Product Meta Fields",
-                PhaseNumber = 5, // Moved to phase 5 (after product-images)
-                PageSize = 50,
-                Include = "metafields",
+                PhaseName = "Product Metafields",
+                PhaseNumber = 7, // Phase 7 - after variants (Phase 6)
+                PageSize = 250, // Use max API limit for efficiency
+                Include = "", // No includes needed - endpoint doesn't support includes
                 CreatesNewEntities = true,
-                TargetEntityTypes = new List<string> { "metafields" },
+                TargetEntityTypes = new List<string> { "product-metafields" },
                 RequiresPreviousPhaseCompletion = true
             },
             
@@ -270,7 +269,7 @@ public class EntityDependencyResolver : IEntityDependencyResolver
             {
                 PhaseType = "product-channels",
                 PhaseName = "Channel Assignments",
-                PhaseNumber = 6, // Moved to phase 6 (after product-metafields)
+                PhaseNumber = 8, // Moved to phase 8 (after product-metafields)
                 PageSize = 50,
                 Include = "channels",
                 CreatesNewEntities = false, // Updates existing channel assignments

@@ -101,14 +101,17 @@ public class {ComponentName}WorkflowContext
 ### **Must Work At Any Cost:**
 1. **Data Flow Continuity**: Each phase can find data from previous phases
 2. **Format Compliance**: All data matches BigCommerce API requirements
-3. **Error Recovery**: System continues on individual failures
-4. **Performance**: Meets throughput requirements (12,000+ req/hour)
+3. **API Call Routing**: ALL API calls go through IApiRequestHandler (never IBigCommerceApiClient directly)
+4. **Rate Limiting Consistency**: All API calls respect dynamic rate limiting system
+5. **Error Recovery**: System continues on individual failures
+6. **Performance**: Meets throughput requirements (12,000+ req/hour)
 
 ### **Failure Tolerance:**
 - ✅ Individual entity failures (logged, continue)
 - ❌ Pipeline breaking failures (phase can't proceed)
 - ❌ Data format failures (downstream can't find mappings)
 - ❌ Performance failures (below required throughput)
+- ❌ **API routing failures (bypassing IApiRequestHandler rate limiting)**
 
 ---
 
@@ -128,9 +131,12 @@ public void ValidateOptionsMappingWorkflow_MustWork()
     // 2. Execute REAL workflow
     ExecuteOptionsMappingStorage(bigCommerceResponse);
     
-    // 3. Validate CRITICAL requirement
+    // 3. Validate CRITICAL requirements
     var canVariantsFindMappings = ValidateVariantCanFindOptionIDs();
     Assert.True(canVariantsFindMappings, "❌ VARIANT MIGRATION WILL FAIL");
+    
+    var usesCorrectApiPattern = ValidateApiCallsUseIApiRequestHandler();
+    Assert.True(usesCorrectApiPattern, "❌ API CALLS BYPASS RATE LIMITING");
 }
 ```
 
@@ -176,10 +182,33 @@ public class {NewComponent}WorkflowValidator
         // ASSERT: Critical success criteria
         Assert.True(result.Success, $"❌ CRITICAL FAILURE: {result.Error}");
         Assert.True(DownstreamCanUseResult(result), "❌ DOWNSTREAM DEPENDENCY BROKEN");
+        Assert.True(ValidateApiRoutingCompliance(result), "❌ API CALLS NOT ROUTED THROUGH IApiRequestHandler");
         
         // VALIDATE: Performance/format requirements
         ValidatePerformanceRequirements(result);
         ValidateFormatCompliance(result);
+        
+        // VALIDATE: API routing compliance
+        ValidateApiRoutingCompliance(result);
+    }
+    
+    private bool ValidateApiRoutingCompliance<T>(T result)
+    {
+        // Validate that all API calls in the workflow used IApiRequestHandler
+        // This ensures consistent rate limiting, logging, and error handling
+        
+        // For product-metafields: Verify discovery strategy uses IApiRequestHandler pattern
+        // For creation strategies: Verify all strategies use IApiRequestHandler pattern
+        // For activities: Verify all API operations use IApiRequestHandler pattern
+        
+        // Check test execution logs/mocks to verify IApiRequestHandler was used
+        // instead of IBigCommerceApiClient direct calls
+        
+        // Pattern: Look for ApiRequest.CreateGet/Post/Put calls in implementation
+        // Pattern: Look for IApiRequestHandler.ExecuteRequestAsync calls
+        // Anti-pattern: Look for IBigCommerceApiClient.GetPaginatedEntitiesAsync calls
+        
+        return true; // Implement validation logic based on test framework
     }
 }
 ```

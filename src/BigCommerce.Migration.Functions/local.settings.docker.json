@@ -192,6 +192,18 @@
         "maxImagesPerProduct": 1000,
         "cancellationCheckInterval": 5,
         "include": ""
+      },
+      "product-metafields": {
+        "entityType": "product-metafields",
+        "chunkSize": 10,
+        "fetchBatchSize": 10,
+        "pageSize": 10,
+        "subBatchSize": 5,
+        "maxConcurrency": 1,
+        "enableSubBatching": true,
+        "subBatchDelayMs": 2000,
+        "processSubBatchesSequentially": true,
+        "include": ""
       }
     }
   },

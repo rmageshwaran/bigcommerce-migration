@@ -20,9 +20,11 @@ public class EntityDiscoveryStrategyFactory : IEntityDiscoveryStrategyFactory
     private readonly ILogger<ProductRelatedDiscoveryStrategy> _productRelatedLogger;
     private readonly ILogger<ProductImagesDiscoveryStrategy> _productImagesLogger;
     private readonly ILogger<ProductChannelAssignDiscoveryStrategy> _productChannelAssignLogger;
+    private readonly ILogger<ProductMetafieldsDiscoveryStrategy> _productMetafieldsLogger;
     //private readonly ILogger<V3ProductComponentsDiscoveryStrategy> _v3ProductComponentsLogger;
     private readonly ICancellationStore _cancellationStore;
     private readonly IMigrationStorageService _storageService;
+    private readonly IApiRequestHandler _apiRequestHandler;
 
     /// <summary>
     /// Initializes a new instance of EntityDiscoveryStrategyFactory
@@ -35,8 +37,10 @@ public class EntityDiscoveryStrategyFactory : IEntityDiscoveryStrategyFactory
     /// <param name="productRelatedLogger">Logger for ProductRelated discovery strategy</param>
     /// <param name="productImagesLogger">Logger for ProductImages discovery strategy</param>
     /// <param name="productChannelAssignLogger">Logger for ProductChannelAssign discovery strategy</param>
+    /// <param name="productMetafieldsLogger">Logger for ProductMetafields discovery strategy</param>
     /// <param name="cancellationStore">Cancellation store for blob-based cancellation</param>
     /// <param name="storageService">Migration storage service for EntityProgress queries</param>
+    /// <param name="apiRequestHandler">API request handler for rate limiting and authentication</param>
     public EntityDiscoveryStrategyFactory(
         IBigCommerceApiClient apiClient,
         ILogger<EntityDiscoveryStrategyFactory> logger,
@@ -46,8 +50,10 @@ public class EntityDiscoveryStrategyFactory : IEntityDiscoveryStrategyFactory
         ILogger<ProductRelatedDiscoveryStrategy> productRelatedLogger,
         ILogger<ProductImagesDiscoveryStrategy> productImagesLogger,
         ILogger<ProductChannelAssignDiscoveryStrategy> productChannelAssignLogger,
+        ILogger<ProductMetafieldsDiscoveryStrategy> productMetafieldsLogger,
         ICancellationStore cancellationStore,
-        IMigrationStorageService storageService)
+        IMigrationStorageService storageService,
+        IApiRequestHandler apiRequestHandler)
     {
         _apiClient = apiClient ?? throw new ArgumentNullException(nameof(apiClient));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -57,8 +63,10 @@ public class EntityDiscoveryStrategyFactory : IEntityDiscoveryStrategyFactory
         _productRelatedLogger = productRelatedLogger ?? throw new ArgumentNullException(nameof(productRelatedLogger));
         _productImagesLogger = productImagesLogger ?? throw new ArgumentNullException(nameof(productImagesLogger));
         _productChannelAssignLogger = productChannelAssignLogger ?? throw new ArgumentNullException(nameof(productChannelAssignLogger));
+        _productMetafieldsLogger = productMetafieldsLogger ?? throw new ArgumentNullException(nameof(productMetafieldsLogger));
         _cancellationStore = cancellationStore ?? throw new ArgumentNullException(nameof(cancellationStore));
         _storageService = storageService ?? throw new ArgumentNullException(nameof(storageService));
+        _apiRequestHandler = apiRequestHandler ?? throw new ArgumentNullException(nameof(apiRequestHandler));
     }
 
     /// <summary>
@@ -137,6 +145,13 @@ public class EntityDiscoveryStrategyFactory : IEntityDiscoveryStrategyFactory
         {
             _logger.LogInformation("🏭 [STRATEGY-FACTORY-DEBUG] ✅ Creating ProductChannelAssignDiscoveryStrategy for {EntityType} - will query EntityMappings table", entityType);
             return new ProductChannelAssignDiscoveryStrategy(_storageService, _productChannelAssignLogger);
+        }
+        
+        // 🔧 SPECIAL CASE: product-metafields uses dedicated BigCommerce API endpoint with IApiRequestHandler
+        if (entityType.Equals("product-metafields", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogInformation("🏭 [STRATEGY-FACTORY-DEBUG] ✅ Creating ProductMetafieldsDiscoveryStrategy for {EntityType} - will query /v3/catalog/products/metafields API via IApiRequestHandler", entityType);
+            return new ProductMetafieldsDiscoveryStrategy(_apiRequestHandler, _productMetafieldsLogger);
         }
         
         // 🔧 SPECIAL CASE: product-components and individual component types are not real BigCommerce API endpoints

@@ -109,6 +109,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ProductRelatedDiscoveryStrategy>();
         services.AddSingleton<ProductImagesDiscoveryStrategy>();
         services.AddSingleton<ProductChannelAssignDiscoveryStrategy>();
+        services.AddSingleton<ProductMetafieldsDiscoveryStrategy>();
         
         // 🎯 Register entity creation strategy pattern implementations (Task 3.1 - COMPLETED)
         // Strategy Pattern for Open/Closed Principle compliance
@@ -124,6 +125,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IEntityCreationStrategy, ReviewsCreationStrategy>();
         services.AddScoped<IEntityCreationStrategy, ProductImagesCreationStrategy>();
         services.AddScoped<IEntityCreationStrategy, ProductChannelAssignCreationStrategy>();
+        services.AddScoped<IEntityCreationStrategy, ProductMetafieldsCreationStrategy>();
         
         // 🔄 Register entity transform strategy pattern implementations (Task 3.2 - COMPLETED)
         services.AddScoped<IEntityTransformStrategyFactory, EntityTransformStrategyFactory>();
@@ -139,6 +141,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IEntityTransformStrategy, ProductRelatedTransformStrategy>();
         services.AddScoped<IEntityTransformStrategy, ProductImagesTransformStrategy>();
         services.AddScoped<IEntityTransformStrategy, ProductChannelAssignTransformStrategy>();
+        services.AddScoped<IEntityTransformStrategy, ProductMetafieldsTransformStrategy>();
         
         // 🖼️ Register entity creation strategies for Product-Images phase
         services.AddScoped<IEntityCreationStrategy, ProductImagesCreationStrategy>();

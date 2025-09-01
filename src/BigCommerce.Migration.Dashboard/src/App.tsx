@@ -20,6 +20,8 @@ import NotificationToastContainer from './components/Notifications/NotificationT
 import { ThemeContextProvider } from './contexts/ThemeContext';
 import { SignalRIntegrationTest } from './components/Tests/SignalRIntegrationTest';
 import { Phase5ComprehensiveTest } from './components/Tests/Phase5ComprehensiveTest';
+import { MockDashboardTest } from './components/Tests/MockDashboardTest';
+import { EnhancedMigrationOverview } from './components/Dashboard/EnhancedMigrationOverview';
 
 // New page components for the redesigned interface
 const HomePage = () => (
@@ -60,6 +62,30 @@ const SettingsPage = () => (
   </Box>
 );
 
+const EnhancedMigrationPage = () => {
+  const [searchParams] = useSearchParams();
+  const migrationId = searchParams.get('migrationId');
+  
+  if (!migrationId) {
+    return (
+      <Box p={3}>
+        <Typography variant="h4" gutterBottom>
+          Migration Dashboard
+        </Typography>
+        <Typography variant="body1" color="error">
+          No migration ID specified. Please select a migration from the overview page.
+        </Typography>
+      </Box>
+    );
+  }
+
+  return (
+    <Box p={3}>
+      <EnhancedMigrationOverview migrationId={migrationId} />
+    </Box>
+  );
+};
+
 // Removed: Enhanced Migration Page - real-time progress is now only shown on main overview page
 
 function App() {
@@ -68,9 +94,9 @@ function App() {
     const handleGlobalError = (event: ErrorEvent) => {
       // Suppress common browser extension errors that don't affect our app
       if (event.message && (
-        event.message.includes('message channel closed') ||
-        event.message.includes('Extension context invalidated') ||
-        event.message.includes('Could not establish connection')
+        event.message.toLowerCase().includes('message channel closed') ||
+        event.message.toLowerCase().includes('extension context invalidated') ||
+        event.message.toLowerCase().includes('could not establish connection')
       )) {
         event.preventDefault();
         console.warn('Browser extension error suppressed:', event.message);
@@ -111,7 +137,9 @@ function App() {
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/test/signalr" element={<SignalRIntegrationTest />} />
               <Route path="/test/phase5" element={<Phase5ComprehensiveTest />} />
-              {/* Removed: /enhanced and /realtime routes - real-time progress is now only on main page */}
+              <Route path="/test/mock-dashboard" element={<MockDashboardTest />} />
+              <Route path="/enhanced" element={<EnhancedMigrationPage />} />
+              {/* Enhanced route restored for detailed migration dashboard */}
             </Routes>
           </DashboardLayout>
         </Router>

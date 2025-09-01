@@ -960,6 +960,7 @@ public class MigrationStorageService : IMigrationStorageService
                         ["CancelledCount"] = progressEntry.CancelledCount,
                         ["ProgressPercentage"] = progressEntry.ProgressPercentage,
                         ["Status"] = progressEntry.Status,
+                        ["ShowTotalCount"] = progressEntry.ShowTotalCount, // 🎯 UI FLAG: Store display flag
                         ["StartTime"] = progressEntry.StartTime,
                         ["EndTime"] = progressEntry.EndTime,
                         ["ProcessingTime"] = progressEntry.ProcessingTime.TotalMilliseconds,
@@ -985,6 +986,7 @@ public class MigrationStorageService : IMigrationStorageService
                         ["CancelledCount"] = progressEntry.CancelledCount,
                         ["ProgressPercentage"] = progressEntry.ProgressPercentage,
                         ["Status"] = progressEntry.Status,
+                        ["ShowTotalCount"] = progressEntry.ShowTotalCount, // 🎯 UI FLAG: Store display flag
                         ["StartTime"] = progressEntry.StartTime,
                         ["EndTime"] = progressEntry.EndTime,
                         ["ProcessingTime"] = progressEntry.ProcessingTime.TotalMilliseconds,
@@ -1076,6 +1078,7 @@ public class MigrationStorageService : IMigrationStorageService
                     CancelledCount = entity.GetInt32("CancelledCount") ?? 0,
                     ProgressPercentage = entity.GetDouble("ProgressPercentage") ?? 0.0,
                     Status = entity.GetString("Status") ?? string.Empty,
+                    ShowTotalCount = entity.GetBoolean("ShowTotalCount") ?? true, // 🎯 UI FLAG: Include display flag from storage
                     StartTime = entity.GetDateTime("StartTime") ?? DateTime.UtcNow,
                     EndTime = entity.GetDateTime("EndTime"),
                     ProcessingTime = TimeSpan.FromMilliseconds(entity.GetDouble("ProcessingTime") ?? 0),

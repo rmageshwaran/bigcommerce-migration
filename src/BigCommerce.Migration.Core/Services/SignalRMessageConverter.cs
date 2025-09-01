@@ -147,6 +147,11 @@ namespace BigCommerce.Migration.Core.Services
         Task PublishEntityChunkProgressAsync(string migrationId, EntityChunkProgressOptions options, CancellationToken cancellationToken = default);
         
         /// <summary>
+        /// Publishes an entity completed event using the centralized factory
+        /// </summary>
+        Task PublishEntityCompletedAsync(string migrationId, EntityCompletedOptions options, CancellationToken cancellationToken = default);
+        
+        /// <summary>
         /// Publishes a migration completed event using the centralized factory
         /// </summary>
         Task PublishMigrationCompletedAsync(string migrationId, MigrationCompletedOptions options, CancellationToken cancellationToken = default);
@@ -215,6 +220,27 @@ namespace BigCommerce.Migration.Core.Services
             {
                 _logger.LogError(ex, "❌ Failed to publish chunk progress event for {MigrationId} - {EntityType} chunk {ChunkNumber}", 
                     migrationId, options.EntityType, options.ChunkNumber);
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Publishes an entity completed event
+        /// </summary>
+        public async Task PublishEntityCompletedAsync(string migrationId, EntityCompletedOptions options, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                var completedEvent = _eventFactory.CreateEntityCompleted(migrationId, options);
+                await _publisher.PublishEntityCompletedAsync(completedEvent, cancellationToken).ConfigureAwait(false);
+                
+                _logger.LogDebug("📢 Published entity completed event for {MigrationId} - {EntityType}", 
+                    migrationId, options.EntityType);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Failed to publish entity completed event for {MigrationId} - {EntityType}", 
+                    migrationId, options.EntityType);
                 throw;
             }
         }

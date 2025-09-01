@@ -263,7 +263,7 @@ public class ProductImagesCreationStrategy : IEntityCreationStrategy
             
             // Log error to OpenSearch for monitoring
             var errorRequest = new BatchProcessingRequest { MigrationId = migrationId, EntityType = "product-images" };
-            await _errorHandlingService.LogStructuredMigrationErrorAsync(ex, entities, errorRequest, "creation_strategy_failure", cancellationToken);
+            await _errorHandlingService.LogStructuredMigrationErrorAsync(ex, entities, errorRequest, "creation_strategy_failure", cancellationToken: cancellationToken);
             
             throw;
         }
@@ -515,7 +515,7 @@ public class ProductImagesCreationStrategy : IEntityCreationStrategy
                         
                         var errorRequest = new BatchProcessingRequest { MigrationId = migrationId, EntityType = "product-images" };
                         var apiException = new Exception($"API call failed for product {destinationProductId}, chunk {chunkIndex + 1}: {ex.Message}");
-                        await _errorHandlingService.LogStructuredMigrationErrorAsync(apiException, new List<Dictionary<string, object>> { errorPayload }, errorRequest, "image_update_failures", cancellationToken);
+                        await _errorHandlingService.LogStructuredMigrationErrorAsync(apiException, new List<Dictionary<string, object>> { errorPayload }, errorRequest, "image_update_failures", cancellationToken: cancellationToken);
                     }
                     catch (Exception logEx)
                     {
@@ -585,7 +585,7 @@ public class ProductImagesCreationStrategy : IEntityCreationStrategy
 
             // Log error to OpenSearch
             var errorRequest = new BatchProcessingRequest { MigrationId = migrationId, EntityType = "product-images" };
-            await _errorHandlingService.LogStructuredMigrationErrorAsync(ex, new List<Dictionary<string, object>> { productEntity }, errorRequest, "product_processing_failure", cancellationToken);
+            await _errorHandlingService.LogStructuredMigrationErrorAsync(ex, new List<Dictionary<string, object>> { productEntity }, errorRequest, "product_processing_failure", cancellationToken: cancellationToken);
 
             return new List<Dictionary<string, object>>
             {

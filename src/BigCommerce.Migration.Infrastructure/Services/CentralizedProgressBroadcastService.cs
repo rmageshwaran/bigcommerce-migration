@@ -158,7 +158,8 @@ namespace BigCommerce.Migration.Infrastructure.Services
                     TotalEntitiesForType = progress.TotalEntitiesForType, // ✅ Total count from discovery
                     Status = progress.Status,
                     ProcessingTime = TimeSpan.FromMilliseconds(progress.ProcessingTimeMs),
-                    ProgressPercentage = progress.ProgressPercentage
+                    ProgressPercentage = progress.ProgressPercentage,
+                    ShowTotalCount = progress.ShowTotalCount // 🎯 UI FLAG: Pass display flag through SignalR
                 });
 
                 await _publisher.PublishEntityChunkProgressAsync(progressEvent, cancellationToken).ConfigureAwait(false);
@@ -173,6 +174,46 @@ namespace BigCommerce.Migration.Infrastructure.Services
             {
                 _logger.LogError(ex, "Failed to broadcast chunk progress event for migration {MigrationId}, chunk {ChunkNumber}", 
                     migrationId, progress.ChunkNumber);
+            }
+        }
+
+        /// <summary>
+        /// Broadcasts entity completion event.
+        /// Called when an individual entity type finishes processing.
+        /// </summary>
+        public async Task BroadcastEntityCompletedAsync(string migrationId, string entityType, string status, int totalProcessed, int totalSuccess, int totalFailed, int totalSkipped, int totalCancelled, bool showTotalCount, CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrEmpty(migrationId))
+            {
+                _logger.LogWarning("Attempted to broadcast entity completed with null or empty migration ID");
+                return;
+            }
+
+            try
+            {
+                var entityCompletedEvent = _eventFactory.CreateEntityCompleted(migrationId, new EntityCompletedOptions
+                {
+                    EntityType = entityType,
+                    TotalProcessed = totalProcessed,
+                    TotalSuccess = totalSuccess,
+                    TotalFailed = totalFailed,
+                    TotalSkipped = totalSkipped,
+                    TotalCancelled = totalCancelled,
+                    Status = status,
+                    ShowTotalCount = showTotalCount,
+                    ProcessingTimeMs = 0, // 🎯 FRONTEND-COMPAT: Use milliseconds for frontend compatibility
+                    CompletedDateTime = _dateTimeProvider.UtcNow,
+                    Message = $"Entity {entityType} completed with status: {status}"
+                });
+
+                await _publisher.PublishEntityCompletedAsync(entityCompletedEvent, cancellationToken).ConfigureAwait(false);
+
+                _logger.LogInformation("Broadcasting entity completed for {MigrationId}: {EntityType} with status {Status} ({TotalProcessed} processed)",
+                    migrationId, entityType, status, totalProcessed);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to broadcast entity completed event for migration {MigrationId}, entity {EntityType}", migrationId, entityType);
             }
         }
 

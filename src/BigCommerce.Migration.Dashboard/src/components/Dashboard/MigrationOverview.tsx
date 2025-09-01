@@ -31,7 +31,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { apiService } from '../../services/apiService';
 import { getSignalRService } from '../../services/signalRService';
 import { notificationService } from '../../services/notificationService';
-import { EnhancedMigrationOverview } from './EnhancedMigrationOverview';
+
 
 /**
  * MigrationOverview Component
@@ -51,8 +51,6 @@ export const MigrationOverview: React.FC = () => {
   const location = useLocation();
   const { state, refreshData, addError, clearErrors, joinMigrationGroup, removeMigration, addCancelledMigration, removeCancelledMigration } = useDashboard();
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [joiningGroups, setJoiningGroups] = useState<Set<string>>(new Set());
-  const [joinedGroups, setJoinedGroups] = useState<Set<string>>(new Set());
   const [showDebugInfo, setShowDebugInfo] = useState(false);
   
   // Cancel migration state
@@ -70,8 +68,6 @@ export const MigrationOverview: React.FC = () => {
     
     return () => {
       console.log('🧹 Cleaning up MigrationOverview component...');
-      setJoiningGroups(new Set());
-      setJoinedGroups(new Set());
       window.removeEventListener('toggleDebugInfo', handleToggleDebug);
     };
   }, []);
@@ -127,59 +123,11 @@ export const MigrationOverview: React.FC = () => {
   };
 
   /**
-   * Enhanced navigation handler that ensures SignalR group is joined
+   * Instant navigation handler - groups are already pre-joined by dashboard context
    */
-  const handleNavigateToMigrationDetail = async (migrationId: string) => {
-    try {
-      // Check if SignalR is connected
-      if (!signalRConnection.isConnected) {
-        console.warn('SignalR not connected - navigating without group join');
-        navigate(`/enhanced?migrationId=${migrationId}`);
-        return;
-      }
-
-      // Check if already joined
-      if (joinedGroups.has(migrationId)) {
-        console.log(`✅ Group already joined for migration: ${migrationId}`);
-        navigate(`/enhanced?migrationId=${migrationId}`);
-        return;
-      }
-
-      // Set loading state
-      setJoiningGroups(prev => new Set(prev).add(migrationId));
-      console.log(`🔗 Ensuring SignalR group is joined for migration: ${migrationId}`);
-      
-      // Use the dashboard context to join the group
-      await joinMigrationGroup(migrationId);
-      
-      console.log(`✅ SignalR group confirmed joined for migration: ${migrationId}`);
-      
-      // Update success state
-      setJoinedGroups(prev => new Set(prev).add(migrationId));
-      
-      // Navigate to the detail view
-      navigate(`/enhanced?migrationId=${migrationId}`);
-      
-    } catch (error) {
-      console.error(`❌ Failed to join SignalR group for migration ${migrationId}:`, error);
-      
-      // Still navigate even if group join fails (fallback to polling)
-      addError({
-        code: 'GROUP_JOIN_FAILED',
-        message: `Failed to join real-time updates for migration ${migrationId.slice(-8)}`,
-        details: 'You will still see migration progress, but updates may be delayed.',
-        timestamp: new Date()
-      });
-      
-      navigate(`/enhanced?migrationId=${migrationId}`);
-    } finally {
-      // Clear loading state
-      setJoiningGroups(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(migrationId);
-        return newSet;
-      });
-    }
+  const handleNavigateToMigrationDetail = (migrationId: string) => {
+    console.log(`🚀 [INSTANT-NAV] Navigating to dashboard for migration: ${migrationId} (group already joined)`);
+    navigate(`/enhanced?migrationId=${migrationId}`);
   };
 
   // Cancel migration handlers
@@ -207,7 +155,7 @@ export const MigrationOverview: React.FC = () => {
       console.log('✅ API cancellation response:', cancelResponse);
 
       // Check if the API response indicates successful cancellation
-      if (cancelResponse?.status === 'cancelled' || cancelResponse?.message?.includes('cancelled successfully')) {
+      if (cancelResponse?.status?.toLowerCase() === 'cancelled' || cancelResponse?.message?.toLowerCase().includes('cancelled successfully')) {
         console.log('✅ Backend confirmed cancellation was successful');
         
         // Leave SignalR group to stop receiving real-time updates for this migration
@@ -379,7 +327,7 @@ export const MigrationOverview: React.FC = () => {
           {errors.map((error, index) => (
             <Alert 
               key={index} 
-              severity={error.code.includes('SUCCESS') ? 'success' : 'error'} 
+              severity={error.code?.toLowerCase().includes('success') ? 'success' : 'error'} 
               sx={{ mb: 1 }}
             >
               <Typography variant="subtitle2">{error.message}</Typography>
@@ -428,62 +376,19 @@ export const MigrationOverview: React.FC = () => {
                   <Card key={migration.migrationId} variant="outlined" sx={{ mb: 2 }}>
                     <CardContent>
                       {/* Enhanced Migration Display for Active Migrations */}
-                      {!['completed', 'failed', 'cancelled'].includes(migration.status) ? (
+                      {!['completed', 'failed', 'cancelled'].includes(migration.status?.toLowerCase() || '') ? (
                         <Box>
                           {/* Header with basic info and controls */}
                           <Box display="flex" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
                             <Box>
-                              <Box display="flex" alignItems="center" gap={1} sx={{ mb: 1 }}>
-                                <Typography variant="subtitle1">
-                                  Migration: {migration.migrationId}
-                                </Typography>
-                                {/* Live Updates Status Indicator */}
-                                {joiningGroups.has(migration.migrationId) ? (
-                                  <Chip
-                                    size="small"
-                                    icon={<CircularProgress size={16} />}
-                                    label="Joining..."
-                                    color="info"
-                                    variant="outlined"
-                                    sx={{ 
-                                      fontSize: '0.75rem',
-                                      height: '24px',
-                                      '& .MuiChip-icon': { fontSize: '16px' }
-                                    }}
-                                  />
-                                ) : joinedGroups.has(migration.migrationId) ? (
-                                  <Chip
-                                    size="small"
-                                    icon={<SuccessIcon />}
-                                    label="Connected"
-                                    color="success"
-                                    variant="outlined"
-                                    sx={{ 
-                                      fontSize: '0.75rem',
-                                      height: '24px',
-                                      '& .MuiChip-icon': { fontSize: '16px' }
-                                    }}
-                                  />
-                                ) : (
-                                  <Chip
-                                    size="small"
-                                    icon={signalRConnection.isConnected ? <SuccessIcon /> : <ErrorIcon />}
-                                    label={signalRConnection.isConnected ? 'Live Updates' : 'No Live Updates'}
-                                    color={signalRConnection.isConnected ? 'success' : 'warning'}
-                                    variant="outlined"
-                                    sx={{ 
-                                      fontSize: '0.75rem',
-                                      height: '24px',
-                                      '& .MuiChip-icon': { fontSize: '16px' }
-                                    }}
-                                  />
-                                )}
-                              </Box>
-                              <Typography variant="body2" color="text.secondary" gutterBottom>
-                                Status: {migration.status}
+                              <Typography variant="h6" fontWeight="medium" sx={{ mb: 1 }}>
+                                Migration: {migration.migrationId}
                               </Typography>
-                              <Typography variant="caption">
-                                {(migration.processedEntities ?? 0)} / {(migration.totalEntities ?? 0)} entities
+                              <Typography variant="h6" fontWeight="medium" color="text.secondary" gutterBottom>
+                                {migration.sourceStore || 'Source Store'} → {migration.destinationStore || 'Destination Store'}
+                              </Typography>
+                              <Typography variant="h6" fontWeight="medium" color="text.secondary">
+                                Status: {migration.status}
                               </Typography>
                             </Box>
                             <Stack direction="row" spacing={1} alignItems="center">
@@ -492,15 +397,14 @@ export const MigrationOverview: React.FC = () => {
                                 variant="contained"
                                 size="small"
                                 onClick={() => handleNavigateToMigrationDetail(migration.migrationId)}
-                                disabled={joiningGroups.has(migration.migrationId)}
                               >
-                                {joiningGroups.has(migration.migrationId) ? 'Joining...' : 'View Dashboard'}
+                                View Dashboard
                               </Button>
                               
                               {/* Cancel button */}
                               {(() => {
                                 const isInActiveList = activeMigrations.has(migration.migrationId);
-                                const hasRunningStatus = migration.status === 'running' || migration.status === 'in_progress' || migration.status === 'inprogress' || migration.status?.toLowerCase().includes('progress');
+                                const hasRunningStatus = ['running', 'in_progress', 'inprogress', 'in-progress', 'processing'].includes(migration.status?.toLowerCase() || '');
                                 
                                 return isInActiveList || hasRunningStatus;
                               })() && (
@@ -509,7 +413,7 @@ export const MigrationOverview: React.FC = () => {
                                     size="small"
                                     color="error"
                                     onClick={() => handleCancelClick(migration.migrationId)}
-                                    disabled={isCancelling || joiningGroups.has(migration.migrationId)}
+                                    disabled={isCancelling}
                                     sx={{ 
                                       border: '1px solid',
                                       borderColor: 'error.main',
@@ -526,15 +430,7 @@ export const MigrationOverview: React.FC = () => {
                             </Stack>
                           </Box>
                           
-                          {/* Enhanced Migration Overview - Real-time progress */}
-                          {(() => {
-                            console.log(`🏠 [DEBUG] Rendering EnhancedMigrationOverview for migrationId: "${migration.migrationId}"`);
-                            return null;
-                          })()}
-                          <EnhancedMigrationOverview 
-                            migrationId={migration.migrationId} 
-                            onRefresh={handleRefresh}
-                          />
+
                         </Box>
                       ) : (
                         /* Simple display for completed/failed/cancelled migrations */
@@ -557,7 +453,7 @@ export const MigrationOverview: React.FC = () => {
                             <Chip
                               size="small"
                               label={`Migration ${migration.status}`}
-                              color={migration.status === 'completed' ? 'success' : 'error'}
+                              color={migration.status?.toLowerCase() === 'completed' ? 'success' : 'error'}
                               variant="outlined"
                               sx={{ 
                                 fontSize: '0.75rem',

@@ -570,9 +570,9 @@ public class ProductMetafieldsCreationStrategy : IEntityCreationStrategy
                 DestinationStore = destinationStore
             };
 
-            // Log structured batch error
+            // 🔧 FIX: Use actual request/response payloads instead of source data
             await _errorHandlingService.LogStructuredMigrationErrorAsync(
-                exception, batchMetafields, batchRequest, "batch-create", cancellationToken);
+                exception, batchMetafields, batchRequest, "batch-create", requestPayload, responsePayload, cancellationToken);
 
             // Log individual metafield errors for detailed analysis
             foreach (var metafield in batchMetafields)
@@ -622,7 +622,7 @@ public class ProductMetafieldsCreationStrategy : IEntityCreationStrategy
             };
 
             await _errorHandlingService.LogStructuredMigrationErrorAsync(
-                exception, allMetafields, batchRequest, "migration-level", cancellationToken);
+                exception, allMetafields, batchRequest, "migration-level", cancellationToken: cancellationToken);
 
             _logger.LogInformation("✅ Successfully logged migration-level error for {MetafieldCount} metafields to OpenSearch", allMetafields.Count);
         }

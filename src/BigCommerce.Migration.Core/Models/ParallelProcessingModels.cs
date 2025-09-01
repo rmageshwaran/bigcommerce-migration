@@ -439,10 +439,10 @@ public class SubBatchConfiguration
                 ChunkSize = 250, // ✅ ALIGNED: Match Docker configuration for consistency
                 FetchBatchSize = 250,
                 SubBatchSize = 50, // ✅ ALIGNED: Match Docker configuration for batch API efficiency
-                MaxConcurrency = 5, // ✅ ALIGNED: Match Docker configuration for stability
+                MaxConcurrency = 4, // ✅ BALANCED: Slight increase for better throughput while maintaining stability
                 EnableSubBatching = true,
-                SubBatchDelayMs = 100, // ✅ ALIGNED: Match Docker configuration for rate limiting
-                ProcessSubBatchesSequentially = false // ✅ ALIGNED: Match Docker configuration for performance
+                SubBatchDelayMs = 1000, // ✅ FURTHER INCREASED: Maximum spacing between batches for API stability
+                ProcessSubBatchesSequentially = false // ✅ PARALLEL: Maintain performance while reducing conflicts
             },
             ["customers"] = new SubBatchConfiguration
             {

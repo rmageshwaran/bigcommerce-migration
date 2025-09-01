@@ -251,6 +251,44 @@ public static class MigrationDurableOrchestrator
                     logger.LogInformation("Migration {MigrationId} was cancelled during {EntityType} processing. Source: {Source}, Reason: {Reason}", 
                         migrationId, entityType, cancellationState.CancellationSource, cancellationState.CancellationReason);
                     
+                    // 🚨 CRITICAL FIX: Update current entity status to "cancelled" before stopping migration
+                    // This prevents entities from being stuck in "processing" status when migration is cancelled
+                    logger.LogInformation("🚫 [CLEANUP] Updating {EntityType} status to 'cancelled' for migration {MigrationId} before stopping", 
+                        entityType, migrationId);
+                    
+                    try
+                    {
+                        await context.CallActivityAsync(
+                            "UpdateEntityProgressActivity",
+                            new UpdateEntityProgressRequest
+                            {
+                                MigrationId = migrationId,
+                                EntityType = entityType,
+                                Phase = "Cancelled",
+                                TotalEntities = 0, // Will be updated with real counts
+                                ProcessedEntities = 0,
+                                SuccessfulEntities = 0,
+                                FailedEntities = 0,
+                                SkippedEntities = 0,
+                                CancelledEntities = 0,
+                                CurrentBatch = 0,
+                                TotalBatches = 0,
+                                Timestamp = context.CurrentUtcDateTime,
+                                IsCancelled = true,
+                                CancellationReason = cancellationState.CancellationReason,
+                                CancelledAt = cancellationState.CancelledAt
+                            });
+                            
+                        logger.LogInformation("✅ [CLEANUP] Successfully updated {EntityType} status to 'cancelled' for migration {MigrationId}", 
+                            entityType, migrationId);
+                    }
+                    catch (Exception cleanupEx)
+                    {
+                        logger.LogWarning(cleanupEx, "⚠️ [CLEANUP-ERROR] Failed to update {EntityType} status during cancellation cleanup for migration {MigrationId}", 
+                            entityType, migrationId);
+                        // Continue with cancellation even if cleanup fails
+                    }
+                    
                     return new MigrationOrchestrationResult
                     {
                         MigrationId = migrationId,

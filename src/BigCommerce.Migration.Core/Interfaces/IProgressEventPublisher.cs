@@ -40,6 +40,14 @@ namespace BigCommerce.Migration.Core.Interfaces
         Task PublishEntityChunkProgressAsync(EntityChunkProgressEvent chunkEvent, CancellationToken cancellationToken = default);
 
         /// <summary>
+        /// Publishes an entity completed event to the queue
+        /// </summary>
+        /// <param name="completedEvent">The entity completed event to publish</param>
+        /// <param name="cancellationToken">Cancellation token</param>
+        /// <returns>Task representing the async operation</returns>
+        Task PublishEntityCompletedAsync(EntityCompletedEvent completedEvent, CancellationToken cancellationToken = default);
+
+        /// <summary>
         /// Publishes a migration completed event to the queue
         /// </summary>
         /// <param name="completedEvent">The migration completed event to publish</param>

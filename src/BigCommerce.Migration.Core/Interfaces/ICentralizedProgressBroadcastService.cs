@@ -36,6 +36,12 @@ namespace BigCommerce.Migration.Core.Interfaces
         Task BroadcastEntityChunkProgressAsync(string migrationId, EntityChunkProgress progress, CancellationToken cancellationToken = default);
 
         /// <summary>
+        /// Broadcasts entity completion event.
+        /// Called when an individual entity type finishes processing.
+        /// </summary>
+        Task BroadcastEntityCompletedAsync(string migrationId, string entityType, string status, int totalProcessed, int totalSuccess, int totalFailed, int totalSkipped, int totalCancelled, bool showTotalCount, CancellationToken cancellationToken = default);
+
+        /// <summary>
         /// Broadcasts migration completed event.
         /// Called once at the end of each migration (success or cancellation).
         /// </summary>
@@ -148,6 +154,11 @@ namespace BigCommerce.Migration.Core.Interfaces
         /// Time taken to process this chunk (in milliseconds).
         /// </summary>
         public long ProcessingTimeMs { get; set; }
+        
+        /// <summary>
+        /// Whether to show total count in UI (false for dynamic discovery phases)
+        /// </summary>
+        public bool ShowTotalCount { get; set; } = true;
     }
 
     /// <summary>

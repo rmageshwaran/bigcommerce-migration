@@ -1002,9 +1002,9 @@ public class VariantCreationStrategy : IEntityCreationStrategy
                 DestinationStore = destinationStore
             };
 
-            // Log structured batch error
+            // 🔧 FIX: Use actual request/response payloads instead of source data
             await _errorHandlingService.LogStructuredMigrationErrorAsync(
-                exception, batchVariants, batchRequest, "batch-create", cancellationToken);
+                exception, batchVariants, batchRequest, "batch-create", requestPayload, responsePayload, cancellationToken);
 
             // Log individual variant errors for detailed analysis
             foreach (var variant in batchVariants)
@@ -1054,7 +1054,7 @@ public class VariantCreationStrategy : IEntityCreationStrategy
             };
 
             await _errorHandlingService.LogStructuredMigrationErrorAsync(
-                exception, allVariants, batchRequest, "migration-level", cancellationToken);
+                exception, allVariants, batchRequest, "migration-level", cancellationToken: cancellationToken);
 
             _logger.LogInformation("✅ Successfully logged migration-level error for {VariantCount} variants to OpenSearch", allVariants.Count);
         }

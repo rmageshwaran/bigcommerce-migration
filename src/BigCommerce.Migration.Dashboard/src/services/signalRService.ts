@@ -300,6 +300,11 @@ export class SignalRService {
       this.notifyListeners('error', eventData);
     });
 
+    this.connection.on('migrationCancelled', (eventData: any) => {
+      console.warn('🛑 SignalR: Migration Cancelled', eventData);
+      this.notifyListeners('migrationCancelled', eventData);
+    });
+
     // 🎯 LEGACY: Core Progress Events (for backward compatibility)
     this.connection.on('MigrationProgressUpdated', (eventData: any) => {
       console.log('🔄 DEBUG: Received MigrationProgressUpdated (legacy)', eventData);
@@ -339,6 +344,13 @@ export class SignalRService {
       this.notifyListeners('BatchStarted', eventData);
       this.notifyListeners('BatchProgress', eventData);
       this.notifyListeners('BatchCompleted', eventData);
+    });
+
+    this.connection.on('EntityCompleted', (eventData: any) => {
+      console.log('✅ DEBUG: Received EntityCompleted:', eventData);
+      
+      // Forward entity completion event to the entity-completed listener
+      this.notifyListeners('entity-completed', eventData);
     });
 
     this.connection.on('ErrorOccurred', (errorEvent: any) => {
@@ -415,11 +427,11 @@ export class SignalRService {
       throw new Error('Failed to initialize SignalR connection');
     }
 
-    if (this.connectionState === 'Connected') {
+    if (this.connectionState?.toLowerCase() === 'connected') {
       return;
     }
 
-    if (this.connectionState === 'Connecting') {
+    if (this.connectionState?.toLowerCase() === 'connecting') {
       return; // Already connecting, don't start another connection attempt
     }
 
@@ -455,7 +467,7 @@ export class SignalRService {
         console.error('Error stack:', error.stack);
         
         // Check for CORS-specific errors
-        if (error.message.includes('CORS') || error.message.includes('cross-origin')) {
+        if (error.message?.toLowerCase().includes('cors') || error.message?.toLowerCase().includes('cross-origin')) {
           console.error('🚫 CORS ERROR DETECTED - This is a browser security restriction');
           console.error('Hub URL being used:', this.hubUrl);
           console.error('Config API key:', config.auth.apiKey ? 'Present' : 'Missing');
@@ -632,8 +644,8 @@ export class SignalRService {
   public getConnectionState(): SignalRConnection {
     return {
       connectionId: this.connection?.connectionId || '',
-      isConnected: this.connectionState === 'Connected',
-      lastConnected: this.connectionState === 'Connected' ? new Date() : undefined,
+      isConnected: this.connectionState?.toLowerCase() === 'connected',
+      lastConnected: this.connectionState?.toLowerCase() === 'connected' ? new Date() : undefined,
       connectionState: this.connectionState
     };
   }
@@ -642,7 +654,7 @@ export class SignalRService {
    * Check if connection is active
    */
   public isConnected(): boolean {
-    return this.connectionState === 'Connected';
+    return this.connectionState?.toLowerCase() === 'connected';
   }
 
   /**

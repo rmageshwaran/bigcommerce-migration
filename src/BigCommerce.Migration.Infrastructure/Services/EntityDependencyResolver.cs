@@ -103,8 +103,8 @@ public class EntityDependencyResolver : IEntityDependencyResolver
                 "product-related",       // Phase 3: Related products updates (provides timing gap for option mappings)
                 "product-images",        // Phase 4: Product images migration (individual product updates)
                 "product-channel-assign", // Phase 5: Product channel assignments (bulk API updates)
-                "variants",              // Phase 6: Product variants ✅ with option mappings ready
-                "product-metafields"     // Phase 7: Product metafields ✅ NEW - after all dependencies complete
+                "product-metafields",    // Phase 6: Product metafields (no dependencies)
+                "variants"               // Phase 7: Product variants ✅ MOVED TO LAST - ensures all dependencies completed
             };
         }
 
@@ -172,7 +172,7 @@ public class EntityDependencyResolver : IEntityDependencyResolver
         {
             PhaseType = "variants",
                 PhaseName = "Product Variants",
-                PhaseNumber = 6, // Phase 6 (after product-channel-assign)
+                PhaseNumber = 7, // Phase 7 (MOVED TO LAST - after product-metafields)
                 PageSize = 250, // ✅ FIXED: Match appsettings.json for optimal API efficiency
                 Include = string.Empty,
                 CreatesNewEntities = true,
@@ -257,7 +257,7 @@ public class EntityDependencyResolver : IEntityDependencyResolver
             {
                 PhaseType = "product-metafields",
                 PhaseName = "Product Metafields",
-                PhaseNumber = 7, // Phase 7 - after variants (Phase 6)
+                PhaseNumber = 6, // Phase 6 - before variants (now Phase 7)
                 PageSize = 250, // Use max API limit for efficiency
                 Include = "", // No includes needed - endpoint doesn't support includes
                 CreatesNewEntities = true,

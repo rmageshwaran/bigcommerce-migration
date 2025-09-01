@@ -535,16 +535,41 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
     const signalRService = getSignalRService();
 
     // Connection state listener
-    const connectionUnsubscribe = signalRService.on('connectionStateChanged', (connectionData) => {
+    const connectionUnsubscribe = signalRService.on('connectionStateChanged', async (connectionData) => {
+      const isConnected = connectionData.state?.toLowerCase() === 'connected';
+      
       dispatch({
         type: 'SET_SIGNALR_CONNECTION',
         payload: {
           connectionId: connectionData.connectionId || '',
-          isConnected: connectionData.state === 'Connected',
-          lastConnected: connectionData.state === 'Connected' ? new Date() : undefined,
+          isConnected,
+          lastConnected: isConnected ? new Date() : undefined,
           connectionState: connectionData.state
         }
       });
+      
+      // ✅ AUTO-JOIN: When SignalR connects, immediately join groups for all active migrations
+      if (isConnected) {
+        console.log('🚀 [AUTO-JOIN] SignalR connected - pre-joining groups for all active migrations...');
+        const currentMigrations = Array.from(state.activeMigrations.keys());
+        
+        if (currentMigrations.length > 0) {
+          console.log(`🔗 [AUTO-JOIN] Joining ${currentMigrations.length} migration groups:`, currentMigrations);
+          const joinPromises = currentMigrations.map(async (migrationId) => {
+            try {
+              await signalRService.joinMigrationGroup(migrationId);
+              console.log(`✅ [AUTO-JOIN] Joined group for migration: ${migrationId}`);
+            } catch (error) {
+              console.warn(`⚠️ [AUTO-JOIN] Failed to join group for migration ${migrationId}:`, error);
+            }
+          });
+          
+          await Promise.allSettled(joinPromises);
+          console.log('✅ [AUTO-JOIN] All group joins completed');
+        } else {
+          console.log('ℹ️ [AUTO-JOIN] No active migrations to join groups for');
+        }
+      }
     });
 
     // 🎯 GLOBAL Migration Events - Only for dashboard-level management (not detailed progress)

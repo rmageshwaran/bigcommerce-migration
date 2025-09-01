@@ -53,6 +53,7 @@ interface MigrationHistoryItem {
   destinationStore: string;
   startedAt: string;
   completedAt: string;
+  updatedAt?: string; // Add updatedAt field from migrations table
   status: MigrationStatus;
   totalEntities: number;
   processedEntities: number;
@@ -68,7 +69,7 @@ interface FilterState {
   startDate: Date | null;
   endDate: Date | null;
   requestId: string;
-  status: MigrationStatus | '';
+  status: string;
   sourceStore: string;
   destinationStore: string;
   entityType: string;
@@ -78,18 +79,19 @@ const initialFilters: FilterState = {
   startDate: subDays(new Date(), 30), // Show last 30 days instead of 7
   endDate: new Date(),
   requestId: '',
-  status: '',
+  status: '', // Show all migrations by default, user can filter to Completed
   sourceStore: '',
   destinationStore: '',
   entityType: '',
 };
 
-const statusOptions: { value: MigrationStatus; label: string; color: 'default' | 'primary' | 'secondary' | 'error' | 'info' | 'success' | 'warning' }[] = [
-  { value: 'pending', label: 'Pending', color: 'default' },
-  { value: 'running', label: 'Running', color: 'info' },
-  { value: 'completed', label: 'Completed', color: 'success' },
-  { value: 'failed', label: 'Failed', color: 'error' },
-  { value: 'cancelled', label: 'Cancelled', color: 'warning' },
+const statusOptions: { value: string; label: string; color: 'default' | 'primary' | 'secondary' | 'error' | 'info' | 'success' | 'warning' }[] = [
+  { value: '', label: 'All Statuses', color: 'default' },
+  { value: 'Pending', label: 'Pending', color: 'default' },
+  { value: 'Running', label: 'Running', color: 'info' },
+  { value: 'Completed', label: 'Completed', color: 'success' },
+  { value: 'Failed', label: 'Failed', color: 'error' },
+  { value: 'Cancelled', label: 'Cancelled', color: 'warning' },
 ];
 
 const entityTypeOptions = [
@@ -278,8 +280,11 @@ export const HistoryView: React.FC = () => {
     }
   };
 
-  const getStatusColor = (status: MigrationStatus) => {
-    const statusOption = statusOptions.find(option => option.value === status);
+  const getStatusColor = (status: string) => {
+    // Handle case-insensitive status matching since API returns lowercase
+    const statusOption = statusOptions.find(option => 
+      option.value.toLowerCase() === status.toLowerCase()
+    );
     return statusOption?.color || 'default';
   };
 
@@ -288,6 +293,33 @@ export const HistoryView: React.FC = () => {
       return format(new Date(dateString), 'MMM dd, yyyy HH:mm');
     } catch {
       return dateString;
+    }
+  };
+
+  const formatDuration = (startDate: string, endDate: string | null) => {
+    if (!endDate) return '-';
+    
+    try {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      const diffMs = end.getTime() - start.getTime();
+      
+      if (diffMs <= 0) return '-';
+      
+      const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+      const hours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+      const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+      const seconds = Math.floor((diffMs % (1000 * 60)) / 1000);
+      
+      const parts: string[] = [];
+      if (days > 0) parts.push(`${days} Day${days > 1 ? 's' : ''}`);
+      if (hours > 0) parts.push(`${hours} Hr${hours > 1 ? 's' : ''}`);
+      if (minutes > 0) parts.push(`${minutes} Min${minutes > 1 ? 's' : ''}`);
+      if (seconds > 0 || parts.length === 0) parts.push(`${seconds} Sec`);
+      
+      return parts.join(', ');
+    } catch {
+      return '-';
     }
   };
 
@@ -311,6 +343,11 @@ export const HistoryView: React.FC = () => {
 
   return (
     <Box sx={{ p: 3 }}>
+      {/* Page Title */}
+      <Typography variant="h4" fontWeight="bold" gutterBottom sx={{ mb: 3 }}>
+        Migration History
+      </Typography>
+
       {/* Error Alert */}
       {error && (
         <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>
@@ -322,7 +359,7 @@ export const HistoryView: React.FC = () => {
       <Card sx={{ mb: 3 }}>
         <CardContent>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-            <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center' }}>
+            <Typography variant="h5" fontWeight="bold" sx={{ display: 'flex', alignItems: 'center' }}>
               <FilterListIcon sx={{ mr: 1 }} />
               Filters & Search
             </Typography>
@@ -476,14 +513,16 @@ export const HistoryView: React.FC = () => {
                     <TableCell sx={{ fontWeight: 600, py: 2 }}>Source Store</TableCell>
                     <TableCell sx={{ fontWeight: 600, py: 2 }}>Destination Store</TableCell>
                     <TableCell sx={{ fontWeight: 600, py: 2 }}>Started At</TableCell>
+                    <TableCell sx={{ fontWeight: 600, py: 2 }}>Completed At</TableCell>
+                    <TableCell sx={{ fontWeight: 600, py: 2 }}>Duration</TableCell>
                     <TableCell sx={{ fontWeight: 600, py: 2 }}>Status</TableCell>
-                    <TableCell sx={{ fontWeight: 600, py: 2 }}>Success</TableCell>
-                    <TableCell sx={{ fontWeight: 600, py: 2 }}>Fail</TableCell>
-                    <TableCell sx={{ fontWeight: 600, py: 2 }}>Skipped</TableCell>
-
-                    <TableCell sx={{ fontWeight: 600, py: 2 }}>Total</TableCell>
-                    <TableCell sx={{ fontWeight: 600, py: 2 }}>Success Rate</TableCell>
-                    <TableCell sx={{ fontWeight: 600, py: 2 }}>Progress</TableCell>
+                    {/* Hidden columns - keeping code for future use */}
+                    <TableCell sx={{ fontWeight: 600, py: 2, display: 'none' }}>Success</TableCell>
+                    <TableCell sx={{ fontWeight: 600, py: 2, display: 'none' }}>Fail</TableCell>
+                    <TableCell sx={{ fontWeight: 600, py: 2, display: 'none' }}>Skipped</TableCell>
+                    <TableCell sx={{ fontWeight: 600, py: 2, display: 'none' }}>Total</TableCell>
+                    <TableCell sx={{ fontWeight: 600, py: 2, display: 'none' }}>Success Rate</TableCell>
+                    <TableCell sx={{ fontWeight: 600, py: 2, display: 'none' }}>Progress</TableCell>
                     <TableCell sx={{ fontWeight: 600, py: 2 }}>Actions</TableCell>
                   </TableRow>
                 </TableHead>
@@ -509,7 +548,7 @@ export const HistoryView: React.FC = () => {
                           }}
                           onClick={() => handleViewDetails(migration.migrationId)}
                         >
-                          {migration.migrationId.substring(0, 8)}...
+                          {migration.migrationId}
                         </Typography>
                       </TableCell>
                       <TableCell sx={{ fontSize: '0.875rem', fontFamily: 'monospace' }}>
@@ -521,6 +560,16 @@ export const HistoryView: React.FC = () => {
                       <TableCell sx={{ fontSize: '0.875rem' }}>
                         {formatDate(migration.startedAt)}
                       </TableCell>
+                      <TableCell sx={{ fontSize: '0.875rem' }}>
+                        {migration.updatedAt ? formatDate(migration.updatedAt) : 
+                         migration.completedAt ? formatDate(migration.completedAt) : '-'}
+                      </TableCell>
+                      <TableCell sx={{ fontSize: '0.875rem', fontWeight: 500, color: 'text.primary' }}>
+                        {formatDuration(
+                          migration.startedAt, 
+                          migration.updatedAt || migration.completedAt
+                        )}
+                      </TableCell>
                       <TableCell>
                         <Chip
                           label={migration.status.charAt(0).toUpperCase() + migration.status.slice(1)}
@@ -529,17 +578,17 @@ export const HistoryView: React.FC = () => {
                           variant="outlined"
                         />
                       </TableCell>
-                      <TableCell sx={{ fontSize: '0.875rem', color: 'success.main' }}>
+                      {/* Hidden columns - keeping code for future use */}
+                      <TableCell sx={{ fontSize: '0.875rem', color: 'success.main', display: 'none' }}>
                         {migration.successfulEntities}
                       </TableCell>
-                      <TableCell sx={{ fontSize: '0.875rem', color: 'error.main' }}>
+                      <TableCell sx={{ fontSize: '0.875rem', color: 'error.main', display: 'none' }}>
                         {migration.failedEntities}
                       </TableCell>
-                      <TableCell sx={{ fontSize: '0.875rem', color: 'warning.main' }}>
+                      <TableCell sx={{ fontSize: '0.875rem', color: 'warning.main', display: 'none' }}>
                         {migration.skippedEntities || 0}
                       </TableCell>
-
-                      <TableCell sx={{ fontSize: '0.875rem' }}>
+                      <TableCell sx={{ fontSize: '0.875rem', display: 'none' }}>
                         {migration.totalEntities}
                       </TableCell>
                       <TableCell sx={{ 
@@ -547,10 +596,11 @@ export const HistoryView: React.FC = () => {
                         color: (migration.successfulEntities + (migration.skippedEntities || 0)) === migration.totalEntities ? 'success.main' : 
                                migration.failedEntities === migration.totalEntities ? 'error.main' : 'warning.main',
                         fontWeight: 500,
+                        display: 'none'
                       }}>
                         {formatSuccessRate(migration.successfulEntities + (migration.skippedEntities || 0), migration.totalEntities)}
                       </TableCell>
-                      <TableCell sx={{ fontSize: '0.875rem' }}>
+                      <TableCell sx={{ fontSize: '0.875rem', display: 'none' }}>
                         {migration.percentageCompleted.toFixed(1)}%
                       </TableCell>
                       <TableCell>
@@ -574,10 +624,7 @@ export const HistoryView: React.FC = () => {
                           </Tooltip>
                           
                           {/* Cancel button - only show for running migrations - positioned last */}
-                          {(migration.status === 'running' || 
-                            migration.status.toLowerCase() === 'inprogress' || 
-                            migration.status.toLowerCase() === 'in-progress' ||
-                            migration.status.toLowerCase() === 'in_progress') && (
+                          {['running', 'inprogress', 'in-progress', 'in_progress', 'processing'].includes(migration.status?.toLowerCase() || '') && (
                             <Tooltip title="Cancel Migration">
                               <IconButton
                                 size="small"

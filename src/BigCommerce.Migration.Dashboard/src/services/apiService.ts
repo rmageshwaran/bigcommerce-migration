@@ -214,9 +214,9 @@ export class ApiService {
     }
     
     return (
-      error.code === 'ECONNABORTED' || // Timeout
-      error.code === 'ENOTFOUND' || // Network error
-      error.code === 'ECONNRESET' || // Connection reset
+      error.code?.toLowerCase() === 'econnaborted' || // Timeout
+      error.code?.toLowerCase() === 'enotfound' || // Network error
+      error.code?.toLowerCase() === 'econnreset' || // Connection reset
       (error.response && error.response.status >= 500) // Server errors
     );
   }
@@ -449,8 +449,18 @@ export class ApiService {
           }
         }
         
+        // Ensure sourceStore and destinationStore are preserved
+        if (anyMigration.sourceStore) {
+          enhanced.sourceStore = anyMigration.sourceStore;
+        }
+        if (anyMigration.destinationStore) {
+          enhanced.destinationStore = anyMigration.destinationStore;
+        }
+        
         console.log('🔧 Enhanced migration object:', {
           migrationId: enhanced.migrationId,
+          sourceStore: enhanced.sourceStore,
+          destinationStore: enhanced.destinationStore,
           originalTotalEntities: enhanced.totalEntities,
           originalProcessedEntities: enhanced.processedEntities,
           extractedTotalEntities: enhanced.totalEntities,

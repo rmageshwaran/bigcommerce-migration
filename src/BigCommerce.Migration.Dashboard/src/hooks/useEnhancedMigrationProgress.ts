@@ -1,16 +1,73 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { getSignalRService } from '../services/signalRService';
 import { apiService } from '../services/apiService';
+import { useDashboard } from '../context/DashboardContext';
 import type { 
   EnhancedMigrationDisplayData, 
   EntityDisplayData,
   MigrationStartedEvent,
   EntityStartedEvent,
   EntityChunkProgressEvent,
+  EntityCompletedEvent,
   MigrationCompletedEvent,
   ErrorProgressEvent,
   MigrationStatus
 } from '../types';
+
+/**
+ * Calculate overall progress across all entities
+ */
+const calculateOverallProgress = (entities: EntityDisplayData[]): { percentage: number } => {
+  if (entities.length === 0) return { percentage: 0 };
+  
+  let totalExpectedEntities = 0;
+  let totalProcessedEntities = 0;
+  
+  entities.forEach(entity => {
+    if (entity.showTotalCount && entity.totalCount > 0) {
+      totalExpectedEntities += entity.totalCount;
+      totalProcessedEntities += entity.processedCount;
+    } else {
+      // For dynamic discovery phases, consider progress based on status
+      if (entity.status?.toLowerCase() === 'completed') {
+        totalExpectedEntities += entity.processedCount;
+        totalProcessedEntities += entity.processedCount;
+      } else if (entity.processedCount > 0) {
+        // Assume at least some work needs to be done
+        totalExpectedEntities += Math.max(entity.processedCount * 1.1, entity.processedCount + 10);
+        totalProcessedEntities += entity.processedCount;
+      }
+    }
+  });
+  
+  const percentage = totalExpectedEntities > 0 ? (totalProcessedEntities / totalExpectedEntities) * 100 : 0;
+  return { percentage: Math.min(percentage, 100) };
+};
+
+/**
+ * Calculate total counts across all entities
+ */
+const calculateTotalCounts = (entities: EntityDisplayData[]): {
+  totalProcessed: number;
+  totalSuccess: number;
+  totalFailed: number;
+  totalSkipped: number;
+  totalCancelled: number;
+} => {
+  return entities.reduce((totals, entity) => ({
+    totalProcessed: totals.totalProcessed + entity.processedCount,
+    totalSuccess: totals.totalSuccess + entity.successCount,
+    totalFailed: totals.totalFailed + entity.failedCount,
+    totalSkipped: totals.totalSkipped + entity.skippedCount,
+    totalCancelled: totals.totalCancelled + (entity.cancelledCount || 0)
+  }), {
+    totalProcessed: 0,
+    totalSuccess: 0,
+    totalFailed: 0,
+    totalSkipped: 0,
+    totalCancelled: 0
+  });
+};
 
 interface UseEnhancedMigrationProgressState {
   migrationData: EnhancedMigrationDisplayData | null;
@@ -45,7 +102,19 @@ export const useEnhancedMigrationProgress = (migrationId: string): UseEnhancedMi
   });
 
   const signalRService = useRef(getSignalRService());
-  const hasJoinedGroup = useRef(false);
+  
+  // Get store information from dashboard context
+  const { state: dashboardState } = useDashboard();
+  const migrationFromContext = dashboardState.activeMigrations.get(migrationId);
+  
+  // Debug: Log context data
+  console.log(`🏪 [DEBUG] Enhanced Migration Progress: Context data for ${migrationId}:`, {
+    foundInContext: !!migrationFromContext,
+    sourceStore: migrationFromContext?.sourceStore,
+    destinationStore: migrationFromContext?.destinationStore,
+    totalActiveMigrations: dashboardState.activeMigrations.size,
+    activeMigrationIds: Array.from(dashboardState.activeMigrations.keys())
+  });
 
   /**
    * Add a recent event to the event log
@@ -69,9 +138,15 @@ export const useEnhancedMigrationProgress = (migrationId: string): UseEnhancedMi
     // 🔧 FIX: Handle both camelCase and PascalCase for SignalR serialization
     const migrationId = event.migrationId || (event as any).MigrationId;
     const entities = event.entities || (event as any).Entities;
+    const sourceStore = event.sourceStore || (event as any).SourceStore || 'Source Store';
+    const destinationStore = event.destinationStore || (event as any).DestinationStore || 'Destination Store';
+    const startDateTime = event.startDateTime || (event as any).StartDateTime || new Date().toISOString();
+    const estimatedEndTime = event.estimatedEndTime || (event as any).EstimatedEndTime;
     
     console.log(`🔍 [DEBUG] event.entities:`, entities);
     console.log(`🔍 [DEBUG] event.migrationId:`, migrationId);
+    console.log(`🔍 [DEBUG] event.sourceStore:`, sourceStore);
+    console.log(`🔍 [DEBUG] event.destinationStore:`, destinationStore);
     
     // Initialize entities with count = 0 (will be updated by entity-started events)
     // Handle case where entities might be undefined and filter out invalid entities
@@ -79,7 +154,7 @@ export const useEnhancedMigrationProgress = (migrationId: string): UseEnhancedMi
       .filter(entity => {
         // 🔧 FIX: Handle both camelCase and PascalCase for entity type
         const entityType = entity.entityType;
-        if (!entityType || entityType === 'undefined' || entityType === 'null') {
+        if (!entityType || entityType?.toLowerCase() === 'undefined' || entityType?.toLowerCase() === 'null') {
           console.warn('🚫 [DEBUG] Filtering out entity with invalid entityType in migration-started:', entityType);
           return false;
         }
@@ -103,10 +178,10 @@ export const useEnhancedMigrationProgress = (migrationId: string): UseEnhancedMi
       ...prev,
       migrationData: {
         migrationId: migrationId,
-                sourceStore: event.sourceStore || 'Source Store',
-        destinationStore: event.destinationStore || 'Destination Store',
-        startDateTime: event.startDateTime || new Date().toISOString(),
-        estimatedEndTime: event.estimatedEndTime,
+        sourceStore: migrationFromContext?.sourceStore || sourceStore, // Get from context first
+        destinationStore: migrationFromContext?.destinationStore || destinationStore, // Get from context first
+        startDateTime: startDateTime,
+        estimatedEndTime: estimatedEndTime,
         overallProgress: 0,
         totalProcessed: 0,
         totalSuccess: 0,
@@ -121,20 +196,27 @@ export const useEnhancedMigrationProgress = (migrationId: string): UseEnhancedMi
     }));
 
     addRecentEvent('migration-started', `Migration started: ${entities.length} entity types (discovery in progress)`);
-  }, [addRecentEvent]);
+  }, [addRecentEvent, migrationFromContext]);
 
   /**
    * Handle entity started event - updates specific entity with discovered count
    */
   const handleEntityStarted = useCallback((event: EntityStartedEvent) => {
     console.log('🎯 [DEBUG] Enhanced Migration Progress: Entity Started', event);
-    console.log(`🔍 [DEBUG] event.entityType:`, event.entityType);
-    console.log(`🔍 [DEBUG] event.totalCount:`, event.totalCount);
+    
+    // 🔧 FIX: Handle both camelCase and PascalCase for SignalR serialization
+    const entityType = event.entityType || (event as any).EntityType;
+    const totalCount = event.totalCount ?? (event as any).TotalCount ?? 0;
+    const message = event.message || (event as any).Message || '';
+    
+    console.log(`🔍 [DEBUG] event.entityType:`, entityType);
+    console.log(`🔍 [DEBUG] event.totalCount:`, totalCount);
+    console.log(`🔍 [DEBUG] event.message:`, message);
     
     setState(prev => {
       if (!prev.migrationData) return prev;
       
-      const existingEntityIndex = prev.migrationData.entities.findIndex(e => e.entityType === event.entityType);
+      const existingEntityIndex = prev.migrationData.entities.findIndex(e => e.entityType?.toLowerCase() === entityType?.toLowerCase());
       
       let updatedEntities;
       if (existingEntityIndex >= 0) {
@@ -142,15 +224,15 @@ export const useEnhancedMigrationProgress = (migrationId: string): UseEnhancedMi
         updatedEntities = prev.migrationData.entities.map((entity, index) => 
           index === existingEntityIndex ? {
             ...entity,
-            totalCount: event.totalCount, // Update with discovered count
-            status: event.totalCount === 0 ? 'pending' as const : 'pending' as const // Keep pending until chunk processing starts
+            totalCount: totalCount, // Update with discovered count
+            status: totalCount === 0 ? 'pending' as const : 'pending' as const // Keep pending until chunk processing starts
           } : entity
         );
       } else {
         // Add new entity (for component types)
         const newEntity: EntityDisplayData = {
-          entityType: event.entityType,
-          totalCount: event.totalCount,
+          entityType: entityType,
+          totalCount: totalCount,
           processedCount: 0,
           successCount: 0,
           failedCount: 0,
@@ -175,8 +257,8 @@ export const useEnhancedMigrationProgress = (migrationId: string): UseEnhancedMi
       };
     });
 
-    const countDisplay = event.totalCount === 0 ? 'starting...' : `${event.totalCount} entities discovered`;
-    addRecentEvent('entity-started', `${event.entityType}: ${countDisplay}`);
+    const countDisplay = totalCount === 0 ? 'starting...' : `${totalCount} entities discovered`;
+    addRecentEvent('entity-started', `${entityType}: ${countDisplay}`);
   }, [addRecentEvent]);
 
   /**
@@ -185,25 +267,25 @@ export const useEnhancedMigrationProgress = (migrationId: string): UseEnhancedMi
   const handleEntityChunkProgress = useCallback((event: EntityChunkProgressEvent) => {
     console.log('📊 [DEBUG] Enhanced Migration Progress: Chunk Progress', event);
     
-    // 🔧 FIX: Use correct property names from actual chunk events
-    const entityType = event.entityType || (event as any).EntityType;
-    const totalProcessed = (event as any).totalProcessed || (event as any).TotalProcessed || 0;
-    const totalSuccess = (event as any).totalSuccess || (event as any).TotalSuccess || 0;
-    const totalFailed = (event as any).totalFailed || (event as any).TotalFailed || 0;
-    const progressPercentage = (event as any).progressPercentage || (event as any).ProgressPercentage || 0;
-    
-    console.log(`🔍 [DEBUG] event.entityType:`, entityType);
-    console.log(`🔍 [DEBUG] event.totalProcessed:`, totalProcessed);
-    console.log(`🔍 [DEBUG] event.totalSuccess:`, totalSuccess);
-    console.log(`🔍 [DEBUG] event.progressPercentage:`, progressPercentage);
-    console.log(`🔍 [DEBUG] Full event object:`, JSON.stringify(event, null, 2));
-    
     setState(prev => {
       if (!prev.migrationData) return prev;
 
       // 🚨 SAFETY CHECK: Ensure event has valid data
-      // Note: Backend sends "EntityType" with capital E, not "entityType"
+      // 🔧 FIX: Use correct property names from actual chunk events (handle both cases)
       const entityType = event.entityType || (event as any).EntityType;
+      const totalProcessed = (event as any).totalProcessed || (event as any).TotalProcessed || 0;
+      const totalSuccess = (event as any).totalSuccess || (event as any).TotalSuccess || 0;
+      const totalFailed = (event as any).totalFailed || (event as any).TotalFailed || 0;
+      const totalSkipped = (event as any).totalSkipped || (event as any).TotalSkipped || 0;
+      const totalCancelled = (event as any).totalCancelled || (event as any).TotalCancelled || 0;
+      const progressPercentage = (event as any).progressPercentage || (event as any).ProgressPercentage || 0;
+      const showTotalCount = (event as any).showTotalCount ?? (event as any).ShowTotalCount ?? true; // 🎯 UI FLAG: Get display flag from SignalR
+      
+      console.log(`🔍 [DEBUG] event.entityType:`, entityType);
+      console.log(`🔍 [DEBUG] event.totalProcessed:`, totalProcessed);
+      console.log(`🔍 [DEBUG] event.totalSuccess:`, totalSuccess);
+      console.log(`🔍 [DEBUG] event.progressPercentage:`, progressPercentage);
+      console.log(`🔍 [DEBUG] Full event object:`, JSON.stringify(event, null, 2));
       if (!entityType) {
         console.warn('🚫 [DEBUG] handleEntityChunkProgress: Missing EntityType/entityType, skipping update');
         return prev;
@@ -211,7 +293,7 @@ export const useEnhancedMigrationProgress = (migrationId: string): UseEnhancedMi
 
       // Update the specific entity data
       const updatedEntities = prev.migrationData.entities.map(entity => {
-        if (entity.entityType === entityType) {
+        if (entity.entityType?.toLowerCase() === entityType?.toLowerCase()) {
           // 🔧 FIX: Use TotalEntitiesForType from discovery (transmitted via SignalR)
           const totalFromEvent = (event as any).totalEntitiesForType || (event as any).TotalEntitiesForType;
           let totalCount = totalFromEvent || entity.totalCount;
@@ -219,7 +301,7 @@ export const useEnhancedMigrationProgress = (migrationId: string): UseEnhancedMi
           // 🎯 PROGRESSIVE DISCOVERY: For component types, total may be unknown (0) - show as ???
           if (totalCount === 0) {
             // Check if this is a component type with progressive discovery
-            const isComponentType = ['options', 'modifiers', 'images', 'reviews', 'product-components'].includes(entityType);
+            const isComponentType = ['options', 'modifiers', 'images', 'reviews', 'product-components'].includes(entityType?.toLowerCase() || '');
             
             if (isComponentType) {
               console.log(`📊 [PROGRESSIVE] Component type ${entityType} - total unknown, showing as ???`);
@@ -240,8 +322,29 @@ export const useEnhancedMigrationProgress = (migrationId: string): UseEnhancedMi
             processedCount: totalProcessed,
             successCount: totalSuccess,
             failedCount: totalFailed,
+            skippedCount: totalSkipped,
             progressPercentage: progressPercentage,
-            status: (progressPercentage >= 100 ? 'completed' : 'processing') as 'processing' | 'completed' | 'cancelled' | 'failed' | 'pending',
+            showTotalCount: showTotalCount, // 🎯 UI FLAG: Set display flag from SignalR event
+            status: (() => {
+              // 🎯 RESPECT EXISTING STATUS - don't downgrade completed entities
+              const currentStatus = entity.status?.toLowerCase() || '';
+              
+              // Check multiple completion indicators first
+              if (progressPercentage >= 100 || 
+                  (totalCount > 0 && totalProcessed >= totalCount)) {
+                return 'completed';
+              }
+              
+              // If entity is already completed, don't downgrade it to processing
+              if (currentStatus === 'completed') {
+                return 'completed';
+              }
+              
+              if (totalCancelled > 0) return 'cancelled';
+              if (totalFailed > totalSuccess) return 'failed';
+              if (totalProcessed > 0) return 'processing';
+              return 'pending';
+            })() as 'processing' | 'completed' | 'cancelled' | 'failed' | 'pending',
             currentChunk: (event as any).ChunkNumber || 0,
             totalChunks: (event as any).TotalChunks || 0,
             processingSpeed: (event as any).ProcessingTimeMs > 0 ? ((event as any).ProcessedInChunk || 0) / ((event as any).ProcessingTimeMs / 1000) : 0
@@ -255,6 +358,7 @@ export const useEnhancedMigrationProgress = (migrationId: string): UseEnhancedMi
       const totalProcessedAcrossTypes = updatedEntities.reduce((sum, entity) => sum + entity.processedCount, 0);
       const totalSuccessAcrossTypes = updatedEntities.reduce((sum, entity) => sum + entity.successCount, 0);
       const totalFailedAcrossTypes = updatedEntities.reduce((sum, entity) => sum + entity.failedCount, 0);
+      const totalSkippedAcrossTypes = updatedEntities.reduce((sum, entity) => sum + entity.skippedCount, 0);
       const overallProgress = totalEntitiesAcrossTypes > 0 ? (totalProcessedAcrossTypes / totalEntitiesAcrossTypes) * 100 : 0;
 
       return {
@@ -266,6 +370,7 @@ export const useEnhancedMigrationProgress = (migrationId: string): UseEnhancedMi
           totalProcessed: totalProcessedAcrossTypes,
           totalSuccess: totalSuccessAcrossTypes,
           totalFailed: totalFailedAcrossTypes,
+          totalSkipped: totalSkippedAcrossTypes,
           lastUpdated: new Date()
         },
         lastUpdated: new Date()
@@ -276,16 +381,101 @@ export const useEnhancedMigrationProgress = (migrationId: string): UseEnhancedMi
   }, [addRecentEvent]);
 
   /**
+   * Handle entity completed event - marks entity phase as definitively completed
+   */
+  const handleEntityCompleted = useCallback((event: EntityCompletedEvent) => {
+    console.log('✅ [DEBUG] Enhanced Migration Progress: Entity Completed', event);
+    
+    // 🔧 FIX: Handle both camelCase and PascalCase for SignalR serialization
+    const entityType = event.entityType || (event as any).EntityType;
+    const totalProcessed = event.totalProcessed || (event as any).TotalProcessed || 0;
+    const totalSuccess = event.totalSuccess || (event as any).TotalSuccess || 0;
+    const totalFailed = event.totalFailed || (event as any).TotalFailed || 0;
+    const totalSkipped = event.totalSkipped || (event as any).TotalSkipped || 0;
+    const totalCancelled = event.totalCancelled || (event as any).TotalCancelled || 0;
+    const status = event.status || (event as any).Status || 'completed';
+    const showTotalCount = event.showTotalCount ?? (event as any).ShowTotalCount ?? true;
+    
+    console.log(`🔍 [DEBUG] event.entityType:`, entityType);
+    console.log(`🔍 [DEBUG] event.totalProcessed:`, totalProcessed);
+    console.log(`🔍 [DEBUG] event.status:`, status);
+    console.log(`🔍 [DEBUG] event.showTotalCount:`, showTotalCount);
+    
+    setState(prev => {
+      if (!prev.migrationData) return prev;
+      
+      const updatedEntities = prev.migrationData.entities.map(entity => {
+        if (entity.entityType.toLowerCase() === (entityType || '').toLowerCase()) {
+          return {
+            ...entity,
+            totalCount: entity.totalCount, // Keep existing total count
+            processedCount: totalProcessed || totalSuccess + totalFailed + totalSkipped + totalCancelled,
+            successCount: totalSuccess,
+            failedCount: totalFailed,
+            skippedCount: totalSkipped,
+            cancelledCount: totalCancelled,
+            progressPercentage: 100, // ✅ Explicitly mark as 100% complete
+            showTotalCount: showTotalCount ?? entity.showTotalCount ?? true, // Preserve display flag
+            status: status as 'processing' | 'completed' | 'cancelled' | 'failed' | 'pending', // ✅ Use actual status from event
+            currentChunk: entity.totalChunks || 0,
+            totalChunks: entity.totalChunks || 0,
+            processingSpeed: entity.processingSpeed || 0
+          };
+        }
+        return entity;
+      });
+      
+      // Calculate overall progress with completed entity
+      const overallProgress = calculateOverallProgress(updatedEntities);
+      const totalCounts = calculateTotalCounts(updatedEntities);
+      
+      return {
+        ...prev,
+        migrationData: {
+          ...prev.migrationData,
+          entities: updatedEntities,
+          overallProgress: overallProgress.percentage,
+          totalProcessed: totalCounts.totalProcessed,
+          totalSuccess: totalCounts.totalSuccess,
+          totalFailed: totalCounts.totalFailed,
+          totalSkipped: totalCounts.totalSkipped,
+          totalCancelled: totalCounts.totalCancelled,
+          lastUpdated: new Date()
+        },
+        lastUpdated: new Date()
+      };
+    });
+
+    addRecentEvent('entity-completed', `Entity ${entityType} completed: ${totalSuccess}/${totalProcessed} successful`);
+  }, [addRecentEvent]);
+
+  /**
    * Handle migration completed event
    */
   const handleMigrationCompleted = useCallback((event: MigrationCompletedEvent) => {
     console.log('✅ Enhanced Migration Progress: Migration Completed', event);
     
+    // 🔧 FIX: Handle both camelCase and PascalCase for SignalR serialization
+    const status = event.status || (event as any).Status || 'completed';
+    const message = event.message || (event as any).Message || 'Migration completed';
+    const totalProcessedEntities = event.totalProcessedEntities || (event as any).TotalProcessedEntities || 0;
+    const totalFailedEntities = event.totalFailedEntities || (event as any).TotalFailedEntities || 0;
+    const durationMs = event.durationMs || (event as any).DurationMs || 0;
+    const endDateTime = event.endDateTime || (event as any).EndDateTime;
+    
+    console.log(`🔍 [DEBUG] migration.status:`, status);
+    console.log(`🔍 [DEBUG] migration.message:`, message);
+    console.log(`🔍 [DEBUG] migration.totalProcessedEntities:`, totalProcessedEntities);
+    
     setState(prev => {
       if (!prev.migrationData) return prev;
 
-      const finalStatus: MigrationStatus = event.status.toLowerCase().includes('cancelled') ? 'cancelled' :
-                                         event.status.toLowerCase().includes('failed') ? 'failed' : 'completed';
+      const finalStatus: MigrationStatus = (() => {
+        const statusLower = status?.toLowerCase() || '';
+        if (statusLower.includes('cancelled')) return 'cancelled';
+        if (statusLower.includes('failed')) return 'failed';
+        return 'completed';
+      })();
 
       return {
         ...prev,
@@ -293,16 +483,16 @@ export const useEnhancedMigrationProgress = (migrationId: string): UseEnhancedMi
           ...prev.migrationData,
           status: finalStatus,
           overallProgress: 100,
-          totalProcessed: event.totalProcessedEntities,
-          totalSuccess: event.totalProcessedEntities - event.totalFailedEntities,
-          totalFailed: event.totalFailedEntities,
+          totalProcessed: totalProcessedEntities,
+          totalSuccess: totalProcessedEntities - totalFailedEntities,
+          totalFailed: totalFailedEntities,
           lastUpdated: new Date()
         },
         lastUpdated: new Date()
       };
     });
 
-    addRecentEvent('migration-completed', `Migration ${event.status}: ${event.totalProcessedEntities} entities processed`);
+    addRecentEvent('migration-completed', `Migration ${status}: ${totalProcessedEntities} entities processed`);
   }, [addRecentEvent]);
 
   /**
@@ -325,23 +515,43 @@ export const useEnhancedMigrationProgress = (migrationId: string): UseEnhancedMi
   }, [addRecentEvent]);
 
   /**
+   * Handle migration cancelled event
+   */
+  const handleMigrationCancelled = useCallback((event: any) => {
+    console.warn('🛑 Enhanced Migration Progress: Migration Cancelled', event);
+    
+    // 🔧 FIX: Handle both camelCase and PascalCase for SignalR serialization
+    const migrationId = event.migrationId || event.MigrationId;
+    const reason = event.reason || event.Reason || 'Migration was cancelled';
+    const cancelledAt = event.cancelledAt || event.CancelledAt || new Date().toISOString();
+    const message = event.message || event.Message || 'Migration cancelled';
+    
+    setState(prev => {
+      if (!prev.migrationData) return prev;
+
+      return {
+        ...prev,
+        migrationData: {
+          ...prev.migrationData,
+          status: 'cancelled' as MigrationStatus,
+          lastUpdated: new Date(cancelledAt)
+        },
+        lastUpdated: new Date()
+      };
+    });
+
+    addRecentEvent('migration-cancelled', `Migration cancelled: ${reason}`);
+  }, [addRecentEvent]);
+
+  /**
    * Handle connection state changes
    */
   const handleConnectionStateChange = useCallback((connectionData: { state: string; error?: any }) => {
-    const isConnected = connectionData.state === 'Connected';
+    const isConnected = connectionData.state?.toLowerCase() === 'connected';
     setState(prev => ({ ...prev, isConnected }));
     
-    if (isConnected && !hasJoinedGroup.current) {
-      // Auto-join migration group when connected
-      signalRService.current.joinMigrationGroup(migrationId)
-        .then(() => {
-          hasJoinedGroup.current = true;
-          console.log(`✅ Enhanced Migration Progress: Joined group for migration ${migrationId}`);
-        })
-        .catch(error => {
-          console.error(`❌ Enhanced Migration Progress: Failed to join group for migration ${migrationId}:`, error);
-        });
-    }
+    // ✅ OPTIMIZATION: No need to join group here - already pre-joined by dashboard context
+    console.log(`🔗 [ENHANCED-DASHBOARD] Connection state changed: ${connectionData.state} for migration ${migrationId} (group already joined)`);
   }, [migrationId]);
 
   /**
@@ -361,7 +571,7 @@ export const useEnhancedMigrationProgress = (migrationId: string): UseEnhancedMi
       const entities: EntityDisplayData[] = Object.entries(migrationData?.entityProgress || {})
         .filter(([entityType, progress]) => {
           // 🚨 FILTER OUT: Skip entities with invalid names
-          if (!entityType || entityType === 'undefined' || entityType === 'null') {
+          if (!entityType || entityType?.toLowerCase() === 'undefined' || entityType?.toLowerCase() === 'null') {
             console.warn('🚫 [DEBUG] Filtering out entity with invalid entityType:', entityType);
             return false;
           }
@@ -375,10 +585,47 @@ export const useEnhancedMigrationProgress = (migrationId: string): UseEnhancedMi
           failedCount: progress?.failureCount || 0,
           skippedCount: progress?.skippedCount || 0,
           progressPercentage: progress?.progressPercentage || 0,
-          status: (progress?.status === 'completed' ? 'completed' :
-                  progress?.status === 'failed' ? 'failed' :
-                  progress?.status === 'cancelled' ? 'cancelled' :
-                  (progress?.processedCount || 0) > 0 ? 'processing' : 'pending') as 'processing' | 'completed' | 'cancelled' | 'failed' | 'pending',
+          showTotalCount: (progress as any)?.showTotalCount ?? true, // 🎯 UI FLAG: Get display flag from API response
+          status: (() => {
+            // 🎯 TRUST BACKEND STATUS FIRST - don't override with calculations
+            const statusLower = progress?.status?.toLowerCase() || '';
+            
+            // First: Trust explicit backend status
+            if (statusLower === 'completed') {
+              console.log(`✅ [STATUS-TRUST] Using backend status 'completed' for ${entityType}`);
+              return 'completed';
+            }
+            if (statusLower === 'failed') {
+              console.log(`❌ [STATUS-TRUST] Using backend status 'failed' for ${entityType}`);
+              return 'failed';
+            }
+            if (statusLower === 'cancelled') {
+              console.log(`🚫 [STATUS-TRUST] Using backend status 'cancelled' for ${entityType}`);
+              return 'cancelled';
+            }
+            if (statusLower === 'processing') {
+              console.log(`⏳ [STATUS-TRUST] Using backend status 'processing' for ${entityType}`);
+              return 'processing';
+            }
+            if (statusLower === 'pending') {
+              console.log(`⏸️ [STATUS-TRUST] Using backend status 'pending' for ${entityType}`);
+              return 'pending';
+            }
+            
+            // Only calculate status if backend doesn't provide valid status
+            console.log(`⚠️ [STATUS-CALC] Backend status '${progress?.status}' invalid for ${entityType}, calculating...`);
+            if ((progress?.progressPercentage || 0) >= 100 ||
+                ((progress?.totalCount || 0) > 0 && (progress?.processedCount || 0) >= (progress?.totalCount || 0))) {
+              console.log(`📊 [STATUS-CALC] Calculated 'completed' for ${entityType}`);
+              return 'completed';
+            }
+            if ((progress?.processedCount || 0) > 0) {
+              console.log(`📊 [STATUS-CALC] Calculated 'processing' for ${entityType}`);
+              return 'processing';
+            }
+            console.log(`📊 [STATUS-CALC] Calculated 'pending' for ${entityType}`);
+            return 'pending';
+          })() as 'processing' | 'completed' | 'cancelled' | 'failed' | 'pending',
           currentChunk: 0,
           totalChunks: 0,
           processingSpeed: (progress?.processingTime || 0) > 0 ? (progress?.processedCount || 0) / progress.processingTime : 0
@@ -389,8 +636,8 @@ export const useEnhancedMigrationProgress = (migrationId: string): UseEnhancedMi
 
       const enhancedData: EnhancedMigrationDisplayData = {
         migrationId: migrationData?.migrationId || migrationId,
-        sourceStore: migrationData?.sourceStore || 'Source Store', // Fallback
-        destinationStore: migrationData?.destinationStore || 'Destination Store', // Fallback  
+        sourceStore: migrationFromContext?.sourceStore || migrationData?.sourceStore || 'Source Store', // Get from context first
+        destinationStore: migrationFromContext?.destinationStore || migrationData?.destinationStore || 'Destination Store', // Get from context first
         startDateTime: migrationData?.startTime ? new Date(migrationData.startTime).toISOString() : new Date().toISOString(),
         estimatedEndTime: migrationData?.estimatedEndTime ? new Date(migrationData.estimatedEndTime).toISOString() : undefined,
         overallProgress: migrationData?.overallProgressPercentage || 0,
@@ -421,7 +668,7 @@ export const useEnhancedMigrationProgress = (migrationId: string): UseEnhancedMi
         isLoading: false
       }));
     }
-  }, [migrationId]);
+  }, [migrationId, migrationFromContext]);
 
   /**
    * Clear error state
@@ -440,8 +687,10 @@ export const useEnhancedMigrationProgress = (migrationId: string): UseEnhancedMi
     const unsubscribeStarted = signalR.on('migration-started', handleMigrationStarted);
     const unsubscribeEntityStarted = signalR.on('entity-started', handleEntityStarted);
     const unsubscribeChunkProgress = signalR.on('chunk-progress', handleEntityChunkProgress);
+    const unsubscribeEntityCompleted = signalR.on('entity-completed', handleEntityCompleted); // 🔧 FIX: Use event type for consistency with other events
     const unsubscribeCompleted = signalR.on('migration-completed', handleMigrationCompleted);
     const unsubscribeError = signalR.on('error', handleError);
+    const unsubscribeCancelled = signalR.on('migrationCancelled', handleMigrationCancelled);
     const unsubscribeConnectionState = signalR.on('connectionStateChanged', handleConnectionStateChange);
 
     // 🔧 FIX: Get initial connection state
@@ -453,7 +702,8 @@ export const useEnhancedMigrationProgress = (migrationId: string): UseEnhancedMi
     
     console.log('🔌 [ENHANCED] Initial SignalR connection state:', {
       isConnected: initialConnectionState.isConnected,
-      connectionState: initialConnectionState.connectionState
+      connectionState: initialConnectionState.connectionState,
+      groupPreJoined: 'Groups pre-joined by dashboard context - no delay needed'
     });
 
     // Initial data load
@@ -464,11 +714,13 @@ export const useEnhancedMigrationProgress = (migrationId: string): UseEnhancedMi
       unsubscribeStarted();
       unsubscribeEntityStarted();
       unsubscribeChunkProgress();
+      unsubscribeEntityCompleted();
       unsubscribeCompleted();
       unsubscribeError();
+      unsubscribeCancelled();
       unsubscribeConnectionState();
     };
-  }, [migrationId, handleMigrationStarted, handleEntityStarted, handleEntityChunkProgress, handleMigrationCompleted, handleError, handleConnectionStateChange, refreshData]);
+  }, [migrationId, migrationFromContext, handleMigrationStarted, handleEntityStarted, handleEntityChunkProgress, handleEntityCompleted, handleMigrationCompleted, handleError, handleMigrationCancelled, handleConnectionStateChange, refreshData]);
 
   return {
     ...state,

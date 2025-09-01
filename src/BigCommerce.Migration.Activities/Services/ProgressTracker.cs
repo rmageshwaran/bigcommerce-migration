@@ -213,6 +213,11 @@ public class ProgressTracker : IProgressTracker
             {
                 if (!progress.EntityProgress.ContainsKey(entityType))
                 {
+                    // 🎯 UI DISPLAY FLAG: Determine if this is a dynamic discovery phase
+                    var isDynamicDiscoveryPhase = entityType.Equals("product-components", StringComparison.OrdinalIgnoreCase) ||
+                                                  entityType.Equals("product-images", StringComparison.OrdinalIgnoreCase) ||
+                                                  entityType.Equals("product-channel-assign", StringComparison.OrdinalIgnoreCase);
+                    
                     progress.EntityProgress[entityType] = new EntityProgress
                     {
                         EntityType = entityType,
@@ -224,7 +229,8 @@ public class ProgressTracker : IProgressTracker
                         CancelledCount = 0, // 🚨 FIX: Initialize CancelledCount
                         ProgressPercentage = 0.0,
                         Status = "processing",
-                        StartTime = DateTime.UtcNow
+                        StartTime = DateTime.UtcNow,
+                        ShowTotalCount = !isDynamicDiscoveryPhase // 🎯 UI FLAG: Hide total for dynamic discovery
                     };
                 }
                 
@@ -304,7 +310,42 @@ public class ProgressTracker : IProgressTracker
                 }
             }
             
-            // Note: SignalR entity completion publishing removed - handled by CentralizedProgressBroadcastService
+            // 🚨 CRITICAL FIX: Publish entity completion event via SignalR
+            try
+            {
+                var entityProgress = progress.EntityProgress.ContainsKey(entityType) ? progress.EntityProgress[entityType] : null;
+                if (entityProgress != null)
+                {
+                    _logger.LogInformation("📢 [ENTITY-COMPLETION] Publishing entity completed event for {EntityType} in migration {MigrationId} (Status: {Status})", 
+                        entityType, migrationId, entityProgress.Status);
+                    
+                    var entityCompletedEvent = _signalREventFactory.CreateEntityCompleted(migrationId, new EntityCompletedOptions
+                    {
+                        EntityType = entityType,
+                        TotalProcessed = entityProgress.ProcessedCount,
+                        TotalSuccess = entityProgress.SuccessCount,
+                        TotalFailed = entityProgress.FailureCount,
+                        TotalSkipped = entityProgress.SkippedCount,
+                        TotalCancelled = entityProgress.CancelledCount,
+                        Status = entityProgress.Status,
+                        ShowTotalCount = entityProgress.ShowTotalCount,
+                        ProcessingTimeMs = (long)entityProgress.ProcessingTime.TotalMilliseconds,
+                        CompletedDateTime = entityProgress.EndTime ?? DateTime.UtcNow,
+                        Message = $"Entity {entityType} completed with status: {entityProgress.Status}"
+                    });
+                    
+                    await _progressEventPublisher.PublishEntityCompletedAsync(entityCompletedEvent);
+                    
+                    _logger.LogInformation("✅ [ENTITY-COMPLETION] Successfully published entity completed event for {EntityType} in migration {MigrationId}", 
+                        entityType, migrationId);
+                }
+            }
+            catch (Exception publishEx)
+            {
+                _logger.LogWarning(publishEx, "⚠️ [ENTITY-COMPLETION-ERROR] Failed to publish entity completion event for {EntityType} in migration {MigrationId}", 
+                    entityType, migrationId);
+                // Don't throw - entity completion publishing failure shouldn't break migration
+            }
             
             // NOTE: Database persistence is handled by UpdateProgressAsync flow, not needed here
         }
@@ -509,7 +550,8 @@ public class ProgressTracker : IProgressTracker
                     Status = kvp.Value.Status,
                     StartTime = kvp.Value.StartTime,
                     EndTime = kvp.Value.EndTime,
-                    ProcessingTime = kvp.Value.ProcessingTime
+                    ProcessingTime = kvp.Value.ProcessingTime,
+                    ShowTotalCount = kvp.Value.ShowTotalCount // 🎯 UI FLAG: Include display flag
                 }),
             CurrentPhase = original.CurrentPhase,
             CurrentEntity = original.CurrentEntity,
@@ -572,6 +614,7 @@ public class ProgressTracker : IProgressTracker
                         CancelledCount = entityProgress.Value.CancelledCount, // 🚨 CRITICAL FIX: Include CancelledCount in database persistence
                         ProgressPercentage = entityProgress.Value.ProgressPercentage,
                         Status = entityProgress.Value.Status,
+                        ShowTotalCount = entityProgress.Value.ShowTotalCount, // 🎯 UI FLAG: Include display flag in storage
                         StartTime = entityProgress.Value.StartTime,
                         EndTime = entityProgress.Value.EndTime,
                         ProcessingTime = entityProgress.Value.ProcessingTime,
@@ -735,9 +778,9 @@ public class ProgressTracker : IProgressTracker
                 return cachedProgress;
             }
 
-            // 🎯 OPTION 2: SELECTIVE REAL-TIME SYNC
-            // Use chunkincrementevents aggregation ONLY for active migrations (last 10 minutes)
-            // Use primary tables (migrations/entityprogress) for completed/cancelled/old migrations
+            // 🎯 SELECTIVE REAL-TIME SYNC (ENHANCED)
+            // Use chunkincrementevents aggregation ONLY for truly active migrations (running/processing)
+            // Use primary tables (migrations/entityprogress) for ALL finalized migrations (completed/cancelled/failed)
             
             bool isActiveMigration = IsActiveMigration(cachedProgress);
             
@@ -768,6 +811,11 @@ public class ProgressTracker : IProgressTracker
                     // Update entity progress with real-time aggregated data
                     foreach (var (entityType, summary) in aggregatedProgress)
                     {
+                        // 🎯 UI DISPLAY FLAG: Determine if this is a dynamic discovery phase
+                        var isDynamicDiscoveryPhase = entityType.Equals("product-components", StringComparison.OrdinalIgnoreCase) ||
+                                                      entityType.Equals("product-images", StringComparison.OrdinalIgnoreCase) ||
+                                                      entityType.Equals("product-channel-assign", StringComparison.OrdinalIgnoreCase);
+                        
                         enhancedProgress.EntityProgress[entityType] = new EntityProgress
                         {
                             EntityType = entityType,
@@ -785,6 +833,7 @@ public class ProgressTracker : IProgressTracker
                                 : summary.SuccessRate, // Use success rate as fallback
                             Status = summary.TotalProcessed > 0 ? "processing" : "pending",
                             StartTime = summary.FirstChunkStartTime ?? DateTime.UtcNow,
+                            ShowTotalCount = !isDynamicDiscoveryPhase, // 🎯 UI FLAG: Hide total for dynamic discovery
                             EndTime = summary.LastChunkEndTime,
                             ProcessingTime = summary.TotalProcessingTime
                         };
@@ -820,8 +869,8 @@ public class ProgressTracker : IProgressTracker
             else
             {
                 // 🏎️ PERFORMANCE: Use cached/persisted progress for completed/cancelled/old migrations
-                _logger.LogInformation("🏁 COMPLETED-MIGRATION: Using cached/persisted progress for completed migration {MigrationId} (Status: {Status}, LastUpdated: {LastUpdated})", 
-                    migrationId, cachedProgress.Status, cachedProgress.LastUpdated);
+                _logger.LogInformation("🏁 PERSISTED-DATA: Using cached/persisted progress for {Status} migration {MigrationId} (LastUpdated: {LastUpdated}) - ensures accurate final entity statuses", 
+                    cachedProgress.Status, migrationId, cachedProgress.LastUpdated);
                 return cachedProgress;
             }
         }
@@ -839,22 +888,24 @@ public class ProgressTracker : IProgressTracker
     /// <returns>True if migration is active and should use real-time aggregation</returns>
     private static bool IsActiveMigration(MigrationProgress progress)
     {
-        // Consider migration active if:
+        // 🚨 CRITICAL FIX: NEVER treat cancelled/completed migrations as "active" regardless of timing
+        // Cancelled and completed migrations should ALWAYS use storage data for accurate final entity statuses
+        var finalizedStatuses = new[] { "cancelled", "canceled", "completed", "failed" };
+        bool isFinalizedMigration = finalizedStatuses.Contains(progress.Status?.ToLowerInvariant());
+        
+        if (isFinalizedMigration)
+        {
+            return false; // ✅ Always use storage data for finalized migrations
+        }
+        
+        // Consider migration active ONLY if:
         // 1. Status indicates active processing (running, processing, in-progress)
-        // 2. Status indicates recent cancellation (cancelled within last 30 minutes)
-        // 3. OR last updated within the last 10 minutes (recent activity)
+        // 2. OR last updated within the last 10 minutes (recent activity)
         
         var activeStatuses = new[] { "running", "processing", "in-progress", "started" };
         bool hasActiveStatus = activeStatuses.Contains(progress.Status?.ToLowerInvariant());
-        
-        // 🚨 CRITICAL FIX: Recently cancelled migrations should use real-time aggregation 
-        // to get accurate final counts from chunkincrementevents
-        var cancelledStatuses = new[] { "cancelled", "canceled" };
-        bool isRecentlyCancelled = cancelledStatuses.Contains(progress.Status?.ToLowerInvariant()) &&
-                                 progress.LastUpdated > DateTime.UtcNow.AddMinutes(-30);
-        
         bool hasRecentActivity = progress.LastUpdated > DateTime.UtcNow.AddMinutes(-10);
         
-        return hasActiveStatus || isRecentlyCancelled || hasRecentActivity;
+        return hasActiveStatus || hasRecentActivity;
     }
 } 

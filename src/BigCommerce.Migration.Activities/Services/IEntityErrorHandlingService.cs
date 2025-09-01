@@ -16,13 +16,17 @@ public interface IEntityErrorHandlingService
     /// <param name="entities">List of entities being processed</param>
     /// <param name="request">Batch processing request</param>
     /// <param name="errorType">Type of error (fetch, transform, create, etc.)</param>
+    /// <param name="requestPayload">Optional actual request payload sent to API (if null, entities will be serialized)</param>
+    /// <param name="responsePayload">Optional actual response payload from API</param>
     /// <param name="cancellationToken">Cancellation token</param>
     Task LogStructuredMigrationErrorAsync(
         Exception exception, 
         List<Dictionary<string, object>> entities, 
         BatchProcessingRequest request, 
         string errorType,
-        CancellationToken cancellationToken);
+        string? requestPayload = null,
+        string? responsePayload = null,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Logs individual entity errors with context

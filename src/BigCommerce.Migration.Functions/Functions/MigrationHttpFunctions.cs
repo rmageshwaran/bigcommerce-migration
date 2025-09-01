@@ -1846,12 +1846,16 @@ public class MigrationHttpFunctions
             var progress = await _progressTracker.GetLatestAggregatedProgressAsync(migrationId, CancellationToken.None);
             
             // If progress tracker has meaningful data, use it (but skip for completed migrations to ensure fresh data from storage)
-            if (progress != null && progress.TotalEntities > 0 && progress.Status != "completed")
+            if (progress != null && progress.TotalEntities > 0 && !string.Equals(progress.Status, "completed", StringComparison.OrdinalIgnoreCase))
             {
+                _logger.LogInformation("🔄 [GET-DETAILED-PROGRESS] Using progress tracker data for migration {MigrationId} (Status: {Status})", migrationId, progress.Status);
                 return progress;
             }
             
             // Otherwise, reconstruct from storage
+            _logger.LogInformation("🔄 [GET-DETAILED-PROGRESS] Reconstructing from storage for migration {MigrationId} (Progress tracker skipped: Status={Status})", 
+                migrationId, progress?.Status ?? "null");
+            
             var migrationEntry = await _migrationStorageService.GetMigrationAsync(migrationId);
             if (migrationEntry != null)
             {
@@ -1865,8 +1869,8 @@ public class MigrationHttpFunctions
                 
                 foreach (var entry in entityProgressEntries)
                 {
-                    _logger.LogInformation("🔍 [GET-DETAILED-PROGRESS-DEBUG] Migration {MigrationId}: Entry {EntityType} - Success: {Success}, Failed: {Failed}, Skipped: {Skipped}", 
-                        migrationId, entry.EntityType, entry.SuccessCount, entry.FailureCount, entry.SkippedCount);
+                    _logger.LogInformation("🔍 [GET-DETAILED-PROGRESS-DEBUG] Migration {MigrationId}: Entry {EntityType} - Status: '{Status}', Success: {Success}, Failed: {Failed}, Skipped: {Skipped}", 
+                        migrationId, entry.EntityType, entry.Status, entry.SuccessCount, entry.FailureCount, entry.SkippedCount);
                 }
                 
                 foreach (var entry in entityProgressEntries)

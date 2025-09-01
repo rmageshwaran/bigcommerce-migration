@@ -196,6 +196,8 @@ public class ProductMetafieldsCreationStrategyTests
             It.IsAny<List<Dictionary<string, object>>>(),
             It.IsAny<BatchProcessingRequest>(),
             "migration-level",
+            null,
+            null,
             It.IsAny<CancellationToken>()), Times.Once);
     }
 

@@ -304,16 +304,20 @@ public class MigrationQueryFunctions
         try
         {
             // Try to get from progress tracker first
-                            // 🆕 TASK 4.1: Use enhanced progress with real-time aggregated data
-                var progress = await _progressTracker.GetLatestAggregatedProgressAsync(migrationId, CancellationToken.None);
+            // 🆕 TASK 4.1: Use enhanced progress with real-time aggregated data
+            var progress = await _progressTracker.GetLatestAggregatedProgressAsync(migrationId, CancellationToken.None);
             
-            // If progress tracker has meaningful data, use it
-            if (progress != null && progress.TotalEntities > 0)
+            // If progress tracker has meaningful data, use it (but prefer storage for completed migrations)
+            if (progress != null && progress.TotalEntities > 0 && !string.Equals(progress.Status, "completed", StringComparison.OrdinalIgnoreCase))
             {
+                _logger.LogInformation("🔄 [QUERY-DETAILED-PROGRESS] Using progress tracker data for migration {MigrationId} (Status: {Status})", migrationId, progress.Status);
                 return progress;
             }
             
             // Otherwise, reconstruct from storage
+            _logger.LogInformation("🔄 [QUERY-DETAILED-PROGRESS] Reconstructing from storage for migration {MigrationId} (Progress tracker skipped: Status={Status})", 
+                migrationId, progress?.Status ?? "null");
+            
             var migrationEntry = await _migrationStorageService.GetMigrationAsync(migrationId);
             if (migrationEntry != null)
             {
@@ -321,8 +325,14 @@ public class MigrationQueryFunctions
                 var entityProgressEntries = await _migrationStorageService.GetEntityProgressAsync(migrationId);
                 var entityProgress = new Dictionary<string, EntityProgress>();
                 
+                _logger.LogInformation("🔍 [QUERY-DETAILED-PROGRESS-DEBUG] Migration {MigrationId}: Found {EntryCount} entity progress entries from storage", 
+                    migrationId, entityProgressEntries.Count);
+                
                 foreach (var entry in entityProgressEntries)
                 {
+                    _logger.LogInformation("🔍 [QUERY-DETAILED-PROGRESS-DEBUG] Migration {MigrationId}: Entry {EntityType} - Status: '{Status}', Success: {Success}, Failed: {Failed}, Skipped: {Skipped}", 
+                        migrationId, entry.EntityType, entry.Status, entry.SuccessCount, entry.FailureCount, entry.SkippedCount);
+                    
                     entityProgress[entry.EntityType] = new EntityProgress
                     {
                         EntityType = entry.EntityType,

@@ -666,9 +666,9 @@ public class ProcessEntityChunkActivity
                             {
                                 _logger.LogDebug("🔗 [MAPPING-SKIP] Skipping individual EntityMapping for options - using hierarchical mapping instead");
                             }
-                            else if (entityType == "variants")
+                            else if (entityType == "variants" || entityType == "product-metafields")
                             {
-                                _logger.LogDebug("🔗 [MAPPING-SKIP] Skipping individual EntityMapping for variants - leaf entities with no dependents");
+                                _logger.LogDebug("🔗 [MAPPING-SKIP] Skipping individual EntityMapping for {EntityType} - leaf entities with no dependents", entityType);
                             }
                         }
                     }
@@ -733,7 +733,8 @@ public class ProcessEntityChunkActivity
                 ProgressPercentage = entityProgress?.ProgressPercentage ?? progressPercentage,
                 Status = entityProgress?.Status ?? (result.SuccessfulEntities == result.TotalProcessed ? "completed" : "processing"),
                 Message = $"Processed chunk {request.ChunkNumber}/{request.TotalChunks}: {result.SuccessfulEntities}/{result.TotalProcessed} entities (Total: {entityProgress?.ProcessedCount ?? 0}/{entityProgress?.TotalCount ?? 0})",
-                ProcessingTimeMs = (long)(entityProgress?.ProcessingTime.TotalMilliseconds ?? result.ProcessingTime.TotalMilliseconds)
+                ProcessingTimeMs = (long)(entityProgress?.ProcessingTime.TotalMilliseconds ?? result.ProcessingTime.TotalMilliseconds),
+                ShowTotalCount = entityProgress?.ShowTotalCount ?? true // 🎯 UI FLAG: Pass display flag to SignalR event
             };
 
             // Use centralized service with built-in rate limiting and error handling

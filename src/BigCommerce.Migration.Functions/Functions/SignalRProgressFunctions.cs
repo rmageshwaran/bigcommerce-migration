@@ -194,7 +194,9 @@ namespace BigCommerce.Migration.Functions.Functions
                 ProgressEvent? result = eventType switch
                 {
                     "migration-started" => JsonSerializer.Deserialize<MigrationStartedEvent>(queueMessage ?? string.Empty, options),
+                    "entity-started" => JsonSerializer.Deserialize<EntityStartedEvent>(queueMessage ?? string.Empty, options),
                     "chunk-progress" => JsonSerializer.Deserialize<EntityChunkProgressEvent>(queueMessage ?? string.Empty, options),
+                    "entity-completed" => JsonSerializer.Deserialize<EntityCompletedEvent>(queueMessage ?? string.Empty, options), // 🚨 CRITICAL FIX: Add missing entity-completed deserialization
                     "migration-completed" => JsonSerializer.Deserialize<MigrationCompletedEvent>(queueMessage ?? string.Empty, options),
                     "error" => JsonSerializer.Deserialize<ErrorProgressEvent>(queueMessage ?? string.Empty, options),
                     _ => null
@@ -286,12 +288,13 @@ namespace BigCommerce.Migration.Functions.Functions
         {
             return progressEvent.EventType switch
             {
-                "progress" => true,  // Migration progress events
-                "batch" => true,     // Batch progress events  
-                "entity" => true,    // Entity progress events
-                "error" => false,    // Always broadcast errors for debugging
-                "status" => false,   // Always broadcast status changes (includes cancellation status)
-                _ => true           // Default to checking for unknown event types
+                "chunk-progress" => true,      // ✅ Chunk progress events should be filtered for cancelled migrations
+                "entity-completed" => false,   // ✅ Always broadcast entity completion (important for final status)
+                "migration-started" => false,  // ✅ Always broadcast migration start
+                "entity-started" => false,     // ✅ Always broadcast entity start  
+                "migration-completed" => false, // ✅ Always broadcast migration completion
+                "error" => false,              // ✅ Always broadcast errors for debugging
+                _ => true                      // Default to checking for unknown event types
             };
         }
 

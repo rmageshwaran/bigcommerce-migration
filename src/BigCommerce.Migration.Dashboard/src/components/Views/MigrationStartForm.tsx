@@ -16,7 +16,7 @@ import {
 import {
   ArrowForward as ArrowForwardIcon,
 } from '@mui/icons-material';
-import { useDashboard } from '../../context/DashboardContext';
+
 import { notificationService } from '../../services/notificationService';
 import { getApiService } from '../../services/apiService';
 
@@ -57,8 +57,8 @@ const storeConfigurations = {
     displayName: "Staging"
   },
   development: {
-    storeId: "in2msaitrc",
-    accessToken: "bntqbbjvnnap8agkdbo5bekqehb473z",
+    storeId: "tmdsef6c6o",
+    accessToken: "ar247sdrwg6b5oo4c8h2n2nu2yat0w7",
     channelId: "1",
     displayName: "Development"
   },
@@ -160,8 +160,8 @@ export const MigrationStartForm: React.FC = () => {
     try {
       // Get selected entities
       const selectedEntities = Object.entries(formData.selectedEntities)
-        .filter(([_, selected]) => selected)
-        .map(([key, _]) => key);
+        .filter(([, selected]) => selected)
+        .map(([key]) => key);
 
       if (selectedEntities.length === 0) {
         notificationService.error('No Entities Selected', 'Please select at least one entity type to migrate');
@@ -208,6 +208,14 @@ export const MigrationStartForm: React.FC = () => {
           {
             sourceChannel: "1",
             destinationChannel: "1680373"
+          },
+          {
+            sourceChannel: "1242379",
+            destinationChannel: "1"
+          },
+          {
+            sourceChannel: "1756809",
+            destinationChannel: "1"
           }
         ]
       };
@@ -219,8 +227,8 @@ export const MigrationStartForm: React.FC = () => {
       console.log('🎯 [UI-DEBUG] Destination store:', migrationRequest.destinationStore.storeId);
       
       const apiService = getApiService();
-      const response = await apiService.startMigration(migrationRequest);
-      
+      await apiService.startMigration(migrationRequest);
+
       notificationService.success('Migration Started', 'Migration has been started successfully!');
       
       // Reset selected entities

@@ -37,6 +37,11 @@ namespace BigCommerce.Migration.Core.Services
         EntityChunkProgressEvent CreateEntityChunkProgress(string migrationId, EntityChunkProgressOptions options);
         
         /// <summary>
+        /// Creates an EntityCompletedEvent when an entity phase finishes processing
+        /// </summary>
+        EntityCompletedEvent CreateEntityCompleted(string migrationId, EntityCompletedOptions options);
+        
+        /// <summary>
         /// Creates a MigrationCompletedEvent when a migration finishes
         /// </summary>
         MigrationCompletedEvent CreateMigrationCompleted(string migrationId, MigrationCompletedOptions options);
@@ -157,12 +162,52 @@ namespace BigCommerce.Migration.Core.Services
                 TotalEntitiesForType = options.TotalEntitiesForType ?? 0,
                 ProgressPercentage = options.ProgressPercentage ?? CalculateProgressPercentage(options.ChunkNumber, options.TotalChunks),
                 Status = options.Status ?? "completed",
+                ShowTotalCount = options.ShowTotalCount ?? true, // 🎯 UI FLAG: Include display flag in SignalR event
                 ProcessingTime = options.ProcessingTime ?? TimeSpan.Zero,
                 EntitiesPerSecond = options.EntitiesPerSecond,
                 EstimatedTimeRemaining = options.EstimatedTimeRemaining
             };
 
             return chunkEvent;
+        }
+
+        /// <summary>
+        /// Creates an EntityCompletedEvent with auto-populated base properties
+        /// </summary>
+        public EntityCompletedEvent CreateEntityCompleted(string migrationId, EntityCompletedOptions options)
+        {
+            ValidateMigrationId(migrationId);
+            ValidateRequired(options, nameof(options));
+
+            if (string.IsNullOrWhiteSpace(options.EntityType))
+                throw new ArgumentException("EntityType is required", nameof(options));
+
+            var completedEvent = new EntityCompletedEvent
+            {
+                // Base properties (auto-populated)
+                MigrationId = migrationId,
+                Timestamp = _dateTimeProvider.UtcNow,
+                IsCancelled = options.IsCancelled ?? false,
+                CancellationReason = options.CancellationReason,
+                CancelledAt = options.CancelledAt,
+                ConnectionId = options.ConnectionId,
+                GroupName = options.GroupName,
+                
+                // Specific properties
+                EntityType = options.EntityType,
+                TotalProcessed = options.TotalProcessed,
+                TotalSuccess = options.TotalSuccess,
+                TotalFailed = options.TotalFailed,
+                TotalSkipped = options.TotalSkipped,
+                TotalCancelled = options.TotalCancelled,
+                Status = options.Status ?? "completed",
+                ShowTotalCount = options.ShowTotalCount ?? true, // 🎯 UI FLAG: Include display flag in SignalR event
+                ProcessingTimeMs = (long)(options.ProcessingTimeMs ?? 0), // 🎯 FRONTEND-COMPAT: Use milliseconds for frontend compatibility
+                CompletedDateTime = (options.CompletedDateTime ?? _dateTimeProvider.UtcNow).ToString("yyyy-MM-ddTHH:mm:ss.fffZ", System.Globalization.CultureInfo.InvariantCulture),
+                Message = options.Message ?? $"Entity {options.EntityType} completed processing"
+            };
+
+            return completedEvent;
         }
 
         /// <summary>

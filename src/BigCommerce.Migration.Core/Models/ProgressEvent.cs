@@ -17,6 +17,7 @@ namespace BigCommerce.Migration.Core.Models
     [JsonDerivedType(typeof(MigrationStartedEvent), "migration-started")]
     [JsonDerivedType(typeof(EntityStartedEvent), "entity-started")]
     [JsonDerivedType(typeof(EntityChunkProgressEvent), "chunk-progress")]
+    [JsonDerivedType(typeof(EntityCompletedEvent), "entity-completed")]
     [JsonDerivedType(typeof(MigrationCompletedEvent), "migration-completed")]
     [JsonDerivedType(typeof(ErrorProgressEvent), "error")]
     public abstract class ProgressEvent
@@ -150,6 +151,77 @@ namespace BigCommerce.Migration.Core.Models
     }
 
     /// <summary>
+    /// Event fired when an entity phase completes processing
+    /// This provides explicit completion notification instead of inferring from chunk progress
+    /// </summary>
+    public class EntityCompletedEvent : ProgressEvent
+    {
+        /// <summary>
+        /// Initializes a new instance of EntityCompletedEvent
+        /// </summary>
+        public EntityCompletedEvent()
+        {
+            EventType = "entity-completed";
+            HubMethod = "EntityCompleted";
+        }
+
+        /// <summary>
+        /// Type of entity that completed (e.g., "products", "variants", "categories")
+        /// </summary>
+        public string EntityType { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Total entities that were processed for this type
+        /// </summary>
+        public int TotalProcessed { get; set; }
+
+        /// <summary>
+        /// Total entities successfully processed for this type
+        /// </summary>
+        public int TotalSuccess { get; set; }
+
+        /// <summary>
+        /// Total entities that failed processing for this type
+        /// </summary>
+        public int TotalFailed { get; set; }
+
+        /// <summary>
+        /// Total entities that were skipped for this type
+        /// </summary>
+        public int TotalSkipped { get; set; }
+
+        /// <summary>
+        /// Total entities that were cancelled for this type
+        /// </summary>
+        public int TotalCancelled { get; set; }
+
+        /// <summary>
+        /// Final status of the entity processing
+        /// </summary>
+        public string Status { get; set; } = "completed";
+
+        /// <summary>
+        /// Whether to show total count in UI (false for dynamic discovery phases)
+        /// </summary>
+        public bool ShowTotalCount { get; set; } = true;
+
+        /// <summary>
+        /// Total time taken to process this entity type (in milliseconds for frontend compatibility)
+        /// </summary>
+        public long ProcessingTimeMs { get; set; }
+
+        /// <summary>
+        /// Date and time when this entity completed processing
+        /// </summary>
+        public string CompletedDateTime { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Completion message for this entity
+        /// </summary>
+        public string Message { get; set; } = string.Empty;
+    }
+
+    /// <summary>
     /// Event fired when an entity chunk completes processing
     /// This is the main progress event - fired after each chunk is processed
     /// </summary>
@@ -219,6 +291,11 @@ namespace BigCommerce.Migration.Core.Models
         /// Status of the chunk processing
         /// </summary>
         public string Status { get; set; } = "completed";
+
+        /// <summary>
+        /// Whether to show total count in UI (false for dynamic discovery phases)
+        /// </summary>
+        public bool ShowTotalCount { get; set; } = true;
 
         /// <summary>
         /// Time taken to process this chunk
@@ -602,6 +679,72 @@ namespace BigCommerce.Migration.Core.Models
         /// Estimated time remaining for this entity type
         /// </summary>
         public TimeSpan? EstimatedTimeRemaining { get; set; }
+
+        /// <summary>
+        /// Whether to show total count in UI (false for dynamic discovery phases)
+        /// </summary>
+        public bool? ShowTotalCount { get; set; }
+    }
+
+    /// <summary>
+    /// Options for creating an EntityCompletedEvent
+    /// </summary>
+    public class EntityCompletedOptions : ProgressOptionsBase
+    {
+        /// <summary>
+        /// Type of entity that completed (required)
+        /// </summary>
+        public string EntityType { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Total entities that were processed for this type
+        /// </summary>
+        public int TotalProcessed { get; set; }
+
+        /// <summary>
+        /// Total entities successfully processed for this type
+        /// </summary>
+        public int TotalSuccess { get; set; }
+
+        /// <summary>
+        /// Total entities that failed processing for this type
+        /// </summary>
+        public int TotalFailed { get; set; }
+
+        /// <summary>
+        /// Total entities that were skipped for this type
+        /// </summary>
+        public int TotalSkipped { get; set; }
+
+        /// <summary>
+        /// Total entities that were cancelled for this type
+        /// </summary>
+        public int TotalCancelled { get; set; }
+
+        /// <summary>
+        /// Final status of the entity processing
+        /// </summary>
+        public string? Status { get; set; }
+
+        /// <summary>
+        /// Whether to show total count in UI (false for dynamic discovery phases)
+        /// </summary>
+        public bool? ShowTotalCount { get; set; }
+
+        /// <summary>
+        /// Total time taken to process this entity type (in milliseconds for frontend compatibility)
+        /// </summary>
+        public long? ProcessingTimeMs { get; set; }
+
+        /// <summary>
+        /// Date and time when this entity completed processing
+        /// </summary>
+        public DateTime? CompletedDateTime { get; set; }
+
+        /// <summary>
+        /// Completion message for this entity
+        /// </summary>
+        public string? Message { get; set; }
     }
 
     /// <summary>

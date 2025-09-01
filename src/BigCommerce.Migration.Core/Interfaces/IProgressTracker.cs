@@ -351,6 +351,11 @@ public class EntityProgress
     public string Status { get; set; } = string.Empty;
     
     /// <summary>
+    /// Whether to show total count in UI (false for dynamic discovery phases)
+    /// </summary>
+    public bool ShowTotalCount { get; set; } = true;
+    
+    /// <summary>
     /// Start time for entity processing
     /// </summary>
     public DateTime StartTime { get; set; }

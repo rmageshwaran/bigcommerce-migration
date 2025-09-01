@@ -31,7 +31,9 @@ public class EntityErrorHandlingService : IEntityErrorHandlingService
         List<Dictionary<string, object>> entities, 
         BatchProcessingRequest request, 
         string errorType,
-        CancellationToken cancellationToken)
+        string? requestPayload = null,
+        string? responsePayload = null,
+        CancellationToken cancellationToken = default)
     {
         if (exception == null)
             throw new ArgumentNullException(nameof(exception));
@@ -44,17 +46,17 @@ public class EntityErrorHandlingService : IEntityErrorHandlingService
             _logger.LogError(exception, "Structured migration error for {EntityType} in migration {MigrationId}, error type: {ErrorType}", 
                 request.EntityType, request.MigrationId, errorType);
 
-            // Extract response payload from exception
-            var responsePayload = ExtractResponsePayloadFromException(exception);
+            // Use provided response payload or extract from exception
+            responsePayload ??= ExtractResponsePayloadFromException(exception);
             
-            // Create request payload from entities data (if available)
-            string? requestPayload = null;
+            // Use provided request payload or create from entities data
             PayloadReference? requestPayloadRef = null;
             PayloadReference? responsePayloadRef = null;
             
-            if (entities != null && entities.Any())
+            if (!string.IsNullOrEmpty(requestPayload) || (entities != null && entities.Any()))
             {
-                requestPayload = JsonSerializer.Serialize(entities, new JsonSerializerOptions 
+                // Use provided request payload if available, otherwise serialize entities
+                var finalRequestPayload = requestPayload ?? JsonSerializer.Serialize(entities, new JsonSerializerOptions 
                 { 
                     WriteIndented = true,
                     PropertyNamingPolicy = JsonNamingPolicy.CamelCase
@@ -65,7 +67,7 @@ public class EntityErrorHandlingService : IEntityErrorHandlingService
                 (requestPayloadRef, responsePayloadRef) = await StoreErrorPayloadsAsync(
                     request.MigrationId, 
                     requestId, 
-                    requestPayload, 
+                    finalRequestPayload, 
                     responsePayload, 
                     $"{request.EntityType}_{errorType}",
                     cancellationToken);

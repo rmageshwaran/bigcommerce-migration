@@ -106,7 +106,8 @@ public class UpdateEntityProgressActivity
                     
                     // 🎯 DYNAMIC DISCOVERY FIX: For phases without proper discovery, set TotalCount = actual entities processed
                     var isDynamicDiscoveryPhase = entityType.Equals("product-components", StringComparison.OrdinalIgnoreCase) ||
-                                                  entityType.Equals("product-images", StringComparison.OrdinalIgnoreCase);
+                                                  entityType.Equals("product-images", StringComparison.OrdinalIgnoreCase) ||
+                                                  entityType.Equals("product-channel-assign", StringComparison.OrdinalIgnoreCase);
                     
                     var finalTotalCount = realEntityProgress.TotalCount;
                     if (isDynamicDiscoveryPhase)
@@ -117,6 +118,9 @@ public class UpdateEntityProgressActivity
                         _logger.LogInformation("🎯 [DYNAMIC-DISCOVERY] Fixed TotalCount for {EntityType}: {OriginalTotal} → {NewTotal} (Success={Success} + Failed={Failed} + Skipped={Skipped}) for migration {MigrationId}",
                             entityType, realEntityProgress.TotalCount, finalTotalCount, realEntityProgress.SuccessCount, realEntityProgress.FailureCount, realEntityProgress.SkippedCount, migrationId);
                     }
+                    
+                    // 🎯 UI DISPLAY FLAG: Set ShowTotalCount flag for frontend display logic
+                    realEntityProgress.ShowTotalCount = !isDynamicDiscoveryPhase;
                     
                     // Create enhanced update with real counts
                     var enhancedUpdate = new ProgressUpdate

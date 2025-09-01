@@ -104,6 +104,12 @@ namespace BigCommerce.Migration.Infrastructure.Services
         }
 
         /// <inheritdoc />
+        public async Task PublishEntityCompletedAsync(EntityCompletedEvent completedEvent, CancellationToken cancellationToken = default)
+        {
+            await PublishAsync(completedEvent, cancellationToken).ConfigureAwait(false);
+        }
+
+        /// <inheritdoc />
         public async Task PublishMigrationCompletedAsync(MigrationCompletedEvent completedEvent, CancellationToken cancellationToken = default)
         {
             await PublishAsync(completedEvent, cancellationToken).ConfigureAwait(false);

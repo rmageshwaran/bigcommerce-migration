@@ -400,6 +400,7 @@ export interface EnhancedMigrationDisplayData {
   totalSuccess: number;
   totalFailed: number;
   totalSkipped: number;
+  totalCancelled?: number;
   entities: EntityDisplayData[];
   status: MigrationStatus;
   lastUpdated: Date;
@@ -412,11 +413,13 @@ export interface EntityDisplayData {
   successCount: number;
   failedCount: number;
   skippedCount: number;
+  cancelledCount?: number; // Optional cancelled entities count
   progressPercentage: number;
   status: 'processing' | 'completed' | 'cancelled' | 'failed' | 'pending';
   currentChunk?: number;
   totalChunks?: number;
   processingSpeed?: number; // entities per second
+  showTotalCount?: boolean; // Flag to control whether to display total count (for dynamic discovery phases)
 }
 
 // Simplified SignalR Event Types for Phase 3
@@ -457,6 +460,21 @@ export interface EntityChunkProgressEvent {
   status: string;
   message: string;
   processingTimeMs: number;
+}
+
+export interface EntityCompletedEvent {
+  migrationId: string;
+  entityType: string;
+  totalProcessed: number;
+  totalSuccess: number;
+  totalFailed: number;
+  totalSkipped: number;
+  totalCancelled: number;
+  status: string;
+  showTotalCount: boolean;
+  processingTimeMs: number; // milliseconds (matches backend field name)
+  completedDateTime: string;
+  message: string;
 }
 
 export interface MigrationCompletedEvent {

@@ -869,6 +869,7 @@ public class MigrationHttpFunctions
                         destination = $"{migrationEntry.DestinationStoreId} ({entityProgress.Value.SuccessCount})",
                         status = entityProgress.Value.Status,
                         totalEntities = entityProgress.Value.TotalCount,
+                        processedEntities = entityProgress.Value.ProcessedCount, // 🚨 ADD: Include processedCount to avoid UI calculation
                         successfulEntities = entityProgress.Value.SuccessCount,
                         failedEntities = entityProgress.Value.FailureCount,
                         skippedEntities = entityProgress.Value.SkippedCount, // 🚨 FIX: Use actual SkippedCount from EntityProgress
@@ -1654,7 +1655,7 @@ public class MigrationHttpFunctions
         }
 
         // Validate entity types
-        var validEntityTypes = new[] { "categories", "products", "brands", "variants", "modifiers" };
+        var validEntityTypes = new[] { "categories", "products", "brands", "variants", "modifiers", "options", "reviews" };
         var invalidEntities = migrationRequest.Entities.Where(e => !validEntityTypes.Contains(e.ToLower())).ToList();
         if (invalidEntities.Any())
         {
@@ -1694,7 +1695,7 @@ public class MigrationHttpFunctions
             }
 
             // Validate entity types
-            var validEntityTypes = new[] { "categories", "products", "brands", "variants", "modifiers" };
+            var validEntityTypes = new[] { "categories", "products", "brands", "variants", "modifiers", "options", "reviews" };
             var invalidEntities = migrationRequest.Entities.Where(e => !validEntityTypes.Contains(e.ToLower())).ToList();
             if (invalidEntities.Any())
             {

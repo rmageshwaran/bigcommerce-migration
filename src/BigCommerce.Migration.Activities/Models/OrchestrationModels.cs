@@ -222,7 +222,7 @@ public class EntityMigrationRequest
     
     private static readonly string[] ValidEntityTypes = 
     {
-        "categories", "products", "brands", "variants", "modifiers"
+        "categories", "products", "brands", "variants", "modifiers", "options", "reviews"
     };
     
     /// <summary>
@@ -249,7 +249,7 @@ public class EntityMigrationRequest
         if (string.IsNullOrWhiteSpace(EntityType))
             errors.Add("EntityType is required");
         else if (!ValidEntityTypes.Contains(EntityType.ToLowerInvariant()))
-            errors.Add("EntityType must be one of: categories, products, brands, variants, images, modifiers");
+            errors.Add("EntityType must be one of: categories, products, brands, variants, modifiers, options, reviews");
             
         if (BatchSize <= 0)
             errors.Add("BatchSize must be greater than 0");

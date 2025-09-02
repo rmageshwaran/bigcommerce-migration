@@ -64,16 +64,23 @@ export const useMigrationProgress = (
       setProgress(prev => {
         if (!prev) return prev;
         
-        // Update entity progress
+        // 🎯 COMPONENT PROGRESS: Filter out product-components - only track individual components
+        if (eventData.entityType?.toLowerCase() === 'product-components') {
+          console.log('🎯 [useMigrationProgress] Filtering out product-components chunk progress - individual component tracking used instead');
+          return prev; // Don't update for product-components
+        }
+
+        // Update entity progress - use correct field names from SignalR events
         const updatedEntityProgress = { ...prev.entityProgress };
         updatedEntityProgress[eventData.entityType] = {
           entityType: eventData.entityType,
           totalCount: eventData.totalEntitiesForType,
-          processedCount: eventData.cumulativeProcessed + eventData.cumulativeFailed,
-          successCount: eventData.cumulativeProcessed,
-          failureCount: eventData.cumulativeFailed,
-          skippedCount: 0,
-          cancelledCount: 0,
+          // 🚨 FIX: Use correct field names from SignalR (totalProcessed, totalSuccess, etc.)
+          processedCount: eventData.totalProcessed, // Already includes all processed (success + failed + skipped + cancelled)
+          successCount: eventData.totalSuccess,     // Already calculated as successful only
+          failureCount: eventData.totalFailed,      // Failed entities
+          skippedCount: eventData.totalSkipped,     // Skipped entities  
+          cancelledCount: eventData.totalCancelled, // Cancelled entities
           progressPercentage: eventData.progressPercentage,
           status: eventData.status,
           startTime: prev.startTime,

@@ -36,24 +36,39 @@ public static class EntityMigrationDurableOrchestrator
         var migrationId = input.MigrationId;
         var entityType = input.EntityType;
         
-        // 🆕 PRODUCT-COMPONENTS SPECIAL HANDLING: Send entity-started events for all component types
+        // 🎯 PRODUCT-COMPONENTS EFFICIENT HANDLING: Fetch once, track components individually
+        // Single API fetch with include="options,modifiers,reviews" but separate progress tracking per component type
         if (entityType.Equals("product-components", StringComparison.OrdinalIgnoreCase))
         {
-            logger.LogInformation("🔧 Product-components phase starting - broadcasting entity-started events for all component types (progressive discovery)");
+            logger.LogInformation("🔧 Product-components phase starting - single fetch, individual component progress tracking");
             
+            // Initialize individual component progress tracking
             var componentTypes = new[] { "options", "modifiers", "reviews" };
             
             foreach (var componentType in componentTypes)
             {
+                // 1. Send EntityStarted events for UI real-time updates
                 await context.CallActivityAsync("BroadcastEntityStartedActivity", new
                 {
                     MigrationId = migrationId,
                     EntityType = componentType,
                     TotalCount = 0, // Progressive discovery - total unknown until processing
-                    Message = $"{componentType} migration started - total count unknown (progressive discovery)"
+                    Message = $"{componentType} migration started - discovered during product-components fetch"
                 });
                 
-                logger.LogInformation("🎯 Broadcasted entity-started for {ComponentType} with totalCount=0 (progressive discovery)", componentType);
+                // 2. 🎯 CRITICAL: Create EntityProgress database entries for individual components
+                await context.CallActivityAsync("StartEntityProcessingActivity", new
+                {
+                    MigrationId = migrationId,
+                    EntityType = componentType,
+                    TotalCount = 0, // Progressive discovery - will be updated after extraction
+                    Timestamp = context.CurrentUtcDateTime,
+                    IsCancelled = false,
+                    CancellationReason = string.Empty,
+                    CancelledAt = DateTime.MinValue
+                });
+                
+                logger.LogInformation("🎯 Initialized progress tracking for {ComponentType} with database entry creation", componentType);
             }
         }
         
@@ -230,46 +245,70 @@ public static class EntityMigrationDurableOrchestrator
             // 🚨 FIX: Set TotalEntities from discovery result (or keep as 0 for progressive discovery)
             result.TotalEntities = discoverResult.TotalCount;
 
-            // 🆕 BROADCAST ENTITY STARTED EVENT: After discovery, broadcast individual entity start with real count
-            await context.CallActivityAsync("BroadcastEntityStartedActivity", new
+            // 🎯 COMPONENT PROGRESS: For product-components, skip main EntityStarted event (individual component events already sent)
+            if (!entityType.Equals("product-components", StringComparison.OrdinalIgnoreCase))
             {
-                MigrationId = migrationId,
-                EntityType = entityType,
-                TotalCount = discoverResult.TotalCount,
-                Message = $"{entityType} discovery completed - starting processing of {discoverResult.TotalCount} entities"
-            });
-
-            // Step 5: Start entity progress tracking
-            await context.CallActivityAsync(
-                "StartEntityProcessingActivity",
-                new StartEntityProcessingRequest
+                // 🆕 BROADCAST ENTITY STARTED EVENT: After discovery, broadcast individual entity start with real count
+                await context.CallActivityAsync("BroadcastEntityStartedActivity", new
                 {
                     MigrationId = migrationId,
                     EntityType = entityType,
                     TotalCount = discoverResult.TotalCount,
-                    Timestamp = context.CurrentUtcDateTime,
-                    IsCancelled = cancellationState.IsCancelled,
-                    CancellationReason = cancellationState.CancellationReason,
-                    CancelledAt = cancellationState.CancelledAt
+                    Message = $"{entityType} discovery completed - starting processing of {discoverResult.TotalCount} entities"
                 });
+            }
+            else
+            {
+                logger.LogInformation("🎯 Skipping BroadcastEntityStartedActivity for product-components - individual component EntityStarted events already sent");
+            }
 
-            // Step 6: Update initial progress
-            await context.CallActivityAsync(
-                "UpdateEntityProgressActivity",
-                new UpdateEntityProgressRequest
-                {
-                    MigrationId = migrationId,
-                    EntityType = entityType,
-                    Phase = "Processing",
-                    TotalEntities = discoverResult.TotalCount,
-                    ProcessedEntities = 0,
-                    SuccessfulEntities = 0,
-                    FailedEntities = 0,
-                    Timestamp = context.CurrentUtcDateTime,
-                    IsCancelled = cancellationState.IsCancelled,
-                    CancellationReason = cancellationState.CancellationReason,
-                    CancelledAt = cancellationState.CancelledAt
-                });
+            // Step 5: Start entity progress tracking
+            // 🎯 SPECIAL HANDLING: For product-components, EntityProgress entries are created for individual components only
+            if (!entityType.Equals("product-components", StringComparison.OrdinalIgnoreCase))
+            {
+                await context.CallActivityAsync(
+                    "StartEntityProcessingActivity",
+                    new StartEntityProcessingRequest
+                    {
+                        MigrationId = migrationId,
+                        EntityType = entityType,
+                        TotalCount = discoverResult.TotalCount,
+                        Timestamp = context.CurrentUtcDateTime,
+                        IsCancelled = cancellationState.IsCancelled,
+                        CancellationReason = cancellationState.CancellationReason,
+                        CancelledAt = cancellationState.CancelledAt
+                    });
+            }
+            else
+            {
+                logger.LogInformation("🎯 Skipping StartEntityProcessingActivity for product-components - individual component entries created instead");
+            }
+
+            // Step 6: Update initial progress  
+            // 🎯 SPECIAL HANDLING: For product-components, initial progress updates are handled by individual components
+            if (!entityType.Equals("product-components", StringComparison.OrdinalIgnoreCase))
+            {
+                await context.CallActivityAsync(
+                    "UpdateEntityProgressActivity",
+                    new UpdateEntityProgressRequest
+                    {
+                        MigrationId = migrationId,
+                        EntityType = entityType,
+                        Phase = "Processing",
+                        TotalEntities = discoverResult.TotalCount,
+                        ProcessedEntities = 0,
+                        SuccessfulEntities = 0,
+                        FailedEntities = 0,
+                        Timestamp = context.CurrentUtcDateTime,
+                        IsCancelled = cancellationState.IsCancelled,
+                        CancellationReason = cancellationState.CancellationReason,
+                        CancelledAt = cancellationState.CancelledAt
+                    });
+            }
+            else
+            {
+                logger.LogInformation("🎯 Skipping UpdateEntityProgressActivity for product-components - individual component progress handled separately");
+            }
 
             // 🚀 **STEP 7: SMART PROCESSING** - Hybrid approach for optimal performance
             var entityIds = discoverResult?.EntityIds ?? new List<string>();

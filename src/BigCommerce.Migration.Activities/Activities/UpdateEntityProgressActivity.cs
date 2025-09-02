@@ -105,7 +105,9 @@ public class UpdateEntityProgressActivity
                         realEntityProgress.SkippedCount, realEntityProgress.CancelledCount);
                     
                     // 🎯 DYNAMIC DISCOVERY FIX: For phases without proper discovery, set TotalCount = actual entities processed
-                    var isDynamicDiscoveryPhase = entityType.Equals("product-components", StringComparison.OrdinalIgnoreCase) ||
+                    var isDynamicDiscoveryPhase = entityType.Equals("options", StringComparison.OrdinalIgnoreCase) ||
+                                                  entityType.Equals("modifiers", StringComparison.OrdinalIgnoreCase) ||
+                                                  entityType.Equals("reviews", StringComparison.OrdinalIgnoreCase) ||
                                                   entityType.Equals("product-images", StringComparison.OrdinalIgnoreCase) ||
                                                   entityType.Equals("product-channel-assign", StringComparison.OrdinalIgnoreCase);
                     

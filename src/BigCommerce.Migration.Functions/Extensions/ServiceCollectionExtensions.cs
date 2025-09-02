@@ -560,6 +560,9 @@ public static class ServiceCollectionExtensions
         // Automatically resolves entity dependencies and triggers phased processing
         services.AddSingleton<IEntityDependencyResolver, EntityDependencyResolver>();
         
+        // ProductComponentsMigrationPipeline registration moved back to Activities project
+        // DI registration should stay in Activities project where the implementation is
+        
         // ✅ **P2.5: Phase 2 Enhanced Parallel Processing Pipeline** (Required for 17.0x throughput)
         // These services were moved from Orchestration project to ensure proper DI resolution
         // 🆕 TASK 3.2: Enhanced with batch-level incremental progress tracking

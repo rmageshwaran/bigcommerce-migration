@@ -42,12 +42,15 @@ public class BroadcastMigrationStartedActivity
             _logger.LogInformation("Broadcasting migration started event for MigrationId: {MigrationId}, Source: {SourceStore}, Destination: {DestinationStore}",
                 request.MigrationId, request.SourceStore, request.DestinationStore);
 
-            // Broadcast the migration started event with full entity list (counts will be 0 initially)
+            // 🎯 COMPONENT PROGRESS: Transform entities list for UI - replace product-components with individual components
+            var transformedEntities = TransformEntitiesForComponentTracking(request.Entities ?? new List<EntityInfo>());
+            
+            // Broadcast the migration started event with transformed entity list (counts will be 0 initially)
             await _centralizedBroadcastService.BroadcastMigrationStartedAsync(
                 request.MigrationId, 
                 request.SourceStore, 
                 request.DestinationStore, 
-                request.Entities ?? new List<EntityInfo>());
+                transformedEntities);
 
             _logger.LogInformation("Successfully broadcasted migration started event for MigrationId: {MigrationId}",
                 request.MigrationId);
@@ -72,6 +75,47 @@ public class BroadcastMigrationStartedActivity
                 BroadcastTimestamp = DateTime.UtcNow
             };
         }
+    }
+
+    /// <summary>
+    /// Transforms entities list for UI display - replaces product-components with individual options, modifiers, reviews
+    /// This allows efficient processing (single product-components phase) while providing granular UI visibility
+    /// </summary>
+    /// <param name="entities">Original entities list from orchestrator</param>
+    /// <returns>Transformed entities list with individual components</returns>
+    private List<EntityInfo> TransformEntitiesForComponentTracking(List<EntityInfo> entities)
+    {
+        var transformedEntities = new List<EntityInfo>();
+
+        foreach (var entity in entities)
+        {
+            if (entity.EntityType.Equals("product-components", StringComparison.OrdinalIgnoreCase))
+            {
+                // 🎯 REPLACE: product-components with individual component types for UI visibility
+                _logger.LogInformation("🔄 Transforming product-components into individual component entities for UI tracking");
+                
+                var componentTypes = new[] { "options", "modifiers", "reviews" };
+                foreach (var componentType in componentTypes)
+                {
+                    transformedEntities.Add(new EntityInfo
+                    {
+                        EntityType = componentType,
+                        TotalCount = 0, // Will be updated by individual EntityStarted events
+                        EstimatedDuration = null
+                    });
+                }
+            }
+            else
+            {
+                // Keep other entities as-is
+                transformedEntities.Add(entity);
+            }
+        }
+
+        _logger.LogInformation("🔄 Entity transformation complete: {OriginalCount} → {TransformedCount} entities", 
+            entities.Count, transformedEntities.Count);
+
+        return transformedEntities;
     }
 }
 

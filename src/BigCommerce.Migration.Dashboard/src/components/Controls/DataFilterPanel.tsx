@@ -79,7 +79,7 @@ const initialFilters: FilterState = {
 };
 
 const statusOptions: MigrationStatus[] = ['pending', 'running', 'completed', 'failed', 'cancelled'];
-const entityTypeOptions = ['products', 'categories', 'brands', 'variants', 'images', 'modifiers'];
+const entityTypeOptions = ['products', 'categories', 'brands', 'variants', 'images', 'modifiers', 'options', 'reviews'];
 const sortByOptions = [
   { value: 'name', label: 'Name' },
   { value: 'status', label: 'Status' },

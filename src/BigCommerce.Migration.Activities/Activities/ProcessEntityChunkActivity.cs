@@ -807,11 +807,10 @@ public class ProcessEntityChunkActivity
             switch (entityType)
             {
                 case "product-components":
-                case "options":
-                case "modifiers":
-                case "reviews":
-                    // Special pipeline for product components (includes individual component types)
-                    _logger.LogInformation("🔗 [CHUNK-{ChunkNumber}] Routing {EntityType} to ProductComponentsMigrationPipeline for component extraction and processing", 
+                    // 🎯 EFFICIENT COMPONENT PROCESSING: Single fetch, individual progress tracking
+                    // ProductComponentsMigrationPipeline handles fetching products with include="options,modifiers,reviews"
+                    // and publishes individual progress events for options, modifiers, and reviews
+                    _logger.LogInformation("🔗 [CHUNK-{ChunkNumber}] Routing {EntityType} to ProductComponentsMigrationPipeline for efficient component processing", 
                         chunkNumber, batchRequest.EntityType);
                     
                     return await _productComponentsPipeline.ProcessProductComponentsAsync(
@@ -821,6 +820,19 @@ public class ProcessEntityChunkActivity
                         batchRequest.DestinationStore,
                         batchRequest.EntityType,
                         CancellationToken.None);
+
+                case "options":
+                case "modifiers":  
+                case "reviews":
+                    // 🚫 ARCHITECTURE ERROR: Individual component types should not be processed separately
+                    // They are processed together in the product-components phase for efficiency
+                    // This prevents duplicate API fetches and maintains data consistency
+                    _logger.LogError("❌ [CHUNK-{ChunkNumber}] ARCHITECTURE ERROR: {EntityType} should not be processed individually. " +
+                                   "Components are processed together in product-components phase for efficiency.", 
+                        chunkNumber, batchRequest.EntityType);
+                    
+                    throw new InvalidOperationException($"Invalid entity routing: {batchRequest.EntityType} should not be processed separately. " +
+                        "Individual components (options, modifiers, reviews) are processed together in the product-components phase to avoid duplicate API calls.");
 
                 case "products":
                 case "brands":
@@ -893,6 +905,16 @@ public class ProcessEntityChunkActivity
                 request.ChunkNumber, result.SuccessfulEntities, result.FailedEntities, 
                 result.SkippedEntities, result.CancelledEntities, request.StartIndex, request.ChunkSize,
                 sourceStoreId, destinationStoreId);
+
+            // 🚨 FIX: Skip parent-level chunkincrementevents for product-components
+            // ProductComponentsMigrationPipeline handles individual component tracking (options, modifiers, reviews)
+            // to avoid duplication and provide more granular progress visibility
+            if (request.EntityType.Equals("product-components", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogInformation("⏭️ [CHUNK-{ChunkNumber}] INCREMENTAL-PROGRESS: Skipping parent-level chunkincrementevents for {EntityType} - individual component tracking used instead", 
+                    request.ChunkNumber, request.EntityType);
+                return;
+            }
 
             // Call the ProgressTracker's IncrementProgressAsync method with all required data
             _logger.LogInformation("📤 [CHUNK-{ChunkNumber}] INCREMENTAL-PROGRESS: Calling ProgressTracker.IncrementProgressAsync for {MigrationId}:{EntityType}",

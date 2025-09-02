@@ -271,7 +271,7 @@ export const useEnhancedMigrationProgress = (migrationId: string): UseEnhancedMi
       if (!prev.migrationData) return prev;
 
       // 🚨 SAFETY CHECK: Ensure event has valid data
-      // 🔧 FIX: Use correct property names from actual chunk events (handle both cases)
+      // ✅ FIX: Use correct property names from SignalR events (camelCase from SignalRMessageConverter)
       const entityType = event.entityType || (event as any).EntityType;
       const totalProcessed = (event as any).totalProcessed || (event as any).TotalProcessed || 0;
       const totalSuccess = (event as any).totalSuccess || (event as any).TotalSuccess || 0;
@@ -280,6 +280,7 @@ export const useEnhancedMigrationProgress = (migrationId: string): UseEnhancedMi
       const totalCancelled = (event as any).totalCancelled || (event as any).TotalCancelled || 0;
       const progressPercentage = (event as any).progressPercentage || (event as any).ProgressPercentage || 0;
       const showTotalCount = (event as any).showTotalCount ?? (event as any).ShowTotalCount ?? true; // 🎯 UI FLAG: Get display flag from SignalR
+      const totalEntitiesForType = (event as any).totalEntitiesForType || (event as any).TotalEntitiesForType || 0;
       
       console.log(`🔍 [DEBUG] event.entityType:`, entityType);
       console.log(`🔍 [DEBUG] event.totalProcessed:`, totalProcessed);
@@ -301,7 +302,7 @@ export const useEnhancedMigrationProgress = (migrationId: string): UseEnhancedMi
           // 🎯 PROGRESSIVE DISCOVERY: For component types, total may be unknown (0) - show as ???
           if (totalCount === 0) {
             // Check if this is a component type with progressive discovery
-            const isComponentType = ['options', 'modifiers', 'images', 'reviews', 'product-components'].includes(entityType?.toLowerCase() || '');
+            const isComponentType = ['options', 'modifiers', 'images', 'reviews'].includes(entityType?.toLowerCase() || '');
             
             if (isComponentType) {
               console.log(`📊 [PROGRESSIVE] Component type ${entityType} - total unknown, showing as ???`);
@@ -575,7 +576,47 @@ export const useEnhancedMigrationProgress = (migrationId: string): UseEnhancedMi
             console.warn('🚫 [DEBUG] Filtering out entity with invalid entityType:', entityType);
             return false;
           }
+          
+          // 🎯 COMPONENT PROGRESS: Filter out product-components - only show individual components (options, modifiers, reviews)
+          if (entityType?.toLowerCase() === 'product-components') {
+            console.log('🎯 [DEBUG] Filtering out product-components - individual component tracking used instead');
+            return false;
+          }
+          
           return true;
+        })
+        .sort(([entityTypeA], [entityTypeB]) => {
+          // 🎯 ENTITY DISPLAY ORDER: Sort entities by processing phase order for better UX
+          const entityOrder = [
+            'products',              // Phase 1: Core products
+            'options',               // Phase 2a: Product options (individual component tracking)
+            'modifiers',             // Phase 2b: Product modifiers (individual component tracking)
+            'reviews',               // Phase 2c: Product reviews (individual component tracking)
+            'product-related',       // Phase 3: Related products updates
+            'product-images',        // Phase 4: Product images migration
+            'product-channel-assign',// Phase 5: Product channel assignments
+            'product-metafields',    // Phase 6: Product metafields
+            'variants',              // Phase 7: Product variants
+            'categories',            // Other entity types
+            'brands',
+            'customers',
+            'orders'
+          ];
+          
+          const indexA = entityOrder.indexOf(entityTypeA.toLowerCase());
+          const indexB = entityOrder.indexOf(entityTypeB.toLowerCase());
+          
+          // If both entities are in the order list, use that order
+          if (indexA !== -1 && indexB !== -1) {
+            return indexA - indexB;
+          }
+          
+          // If only one is in the order list, prioritize it
+          if (indexA !== -1) return -1;
+          if (indexB !== -1) return 1;
+          
+          // If neither is in the order list, use alphabetical
+          return entityTypeA.localeCompare(entityTypeB);
         })
         .map(([entityType, progress]) => ({
           entityType,

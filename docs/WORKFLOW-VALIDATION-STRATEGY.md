@@ -79,10 +79,15 @@ public class {ComponentName}WorkflowContext
 - [ ] Product mappings stored and retrievable
 - [ ] Downstream phases can find product IDs
 
-#### **Phase 2: Options/Modifiers Migration**  
+#### **Phase 2: Product Components Migration (Individual Tracking)**  
+- [ ] Single fetch with include="options,modifiers,reviews" (efficient API usage)
+- [ ] Individual progress tracking: Options, Modifiers, Reviews displayed separately  
 - [ ] Options created from real BigCommerce responses
+- [ ] Modifiers created with proper option dependencies
+- [ ] Reviews created with product associations
 - [ ] Mapping data stored in correct JSON format
-- [ ] Variant creation can find option/value IDs
+- [ ] Variant creation can find option/value IDs from Phase 2
+- [ ] UI displays separate progress bars for each component type
 
 #### **Phase 3: Variants Migration**
 - [ ] Can lookup product IDs from Phase 1
@@ -115,21 +120,21 @@ public class {ComponentName}WorkflowContext
 
 ---
 
-## 📝 **Example: Options Mapping Validation**
+## 📝 **Example: Individual Component Progress Tracking Validation**
 
 ### **The Problem**
-Options created but mapping data not stored → Variants can't find option IDs → Migration fails
+Combined product-components tracking provided no visibility into which specific component (options/modifiers/reviews) was failing → Difficult troubleshooting
 
 ### **The Solution**
 ```csharp
 [Fact]
-public void ValidateOptionsMappingWorkflow_MustWork()
+public void ValidateIndividualComponentProgressTracking_MustWork()
 {
-    // 1. Use REAL BigCommerce response format
-    var bigCommerceResponse = GetYourExactAPIResponse();
+    // 1. Use REAL BigCommerce response format with components
+    var bigCommerceResponse = GetProductsWithComponentsResponse();
     
-    // 2. Execute REAL workflow
-    ExecuteOptionsMappingStorage(bigCommerceResponse);
+    // 2. Execute REAL workflow with individual tracking
+    ExecuteComponentLevelProgressTracking(bigCommerceResponse);
     
     // 3. Validate CRITICAL requirements
     var canVariantsFindMappings = ValidateVariantCanFindOptionIDs();
@@ -137,13 +142,22 @@ public void ValidateOptionsMappingWorkflow_MustWork()
     
     var usesCorrectApiPattern = ValidateApiCallsUseIApiRequestHandler();
     Assert.True(usesCorrectApiPattern, "❌ API CALLS BYPASS RATE LIMITING");
+    
+    // 4. Validate individual component progress tracking
+    var individualProgressEventsPublished = ValidateIndividualComponentProgressEvents();
+    Assert.True(individualProgressEventsPublished, "❌ COMPONENT PROGRESS VISIBILITY MISSING");
+    
+    var noApiDuplication = ValidateSingleAPIFetchWithComponents();
+    Assert.True(noApiDuplication, "❌ DUPLICATE API CALLS DETECTED");
 }
 ```
 
 ### **Result**
-- ✅ Found and fixed JsonElement vs List<object> issue
-- ✅ Validated JSON format compatibility
-- ✅ Confirmed variant creation can find mappings
+- ✅ Individual component progress tracking implemented
+- ✅ Single API fetch efficiency maintained  
+- ✅ UI displays separate progress bars for options, modifiers, reviews
+- ✅ Enhanced troubleshooting capability
+- ✅ Backward compatibility preserved
 - ✅ Ready for production
 
 ---

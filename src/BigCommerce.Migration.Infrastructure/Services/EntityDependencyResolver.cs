@@ -99,7 +99,7 @@ public class EntityDependencyResolver : IEntityDependencyResolver
             return new List<string>
             {
                 "products",              // Phase 1: Core products (250/page)
-                "product-components",    // Phase 2: Options, modifiers, reviews (10/page)
+                "product-components",    // Phase 2: Fetch once, process options/modifiers/reviews separately with individual tracking
                 "product-related",       // Phase 3: Related products updates (provides timing gap for option mappings)
                 "product-images",        // Phase 4: Product images migration (individual product updates)
                 "product-channel-assign", // Phase 5: Product channel assignments (bulk API updates)
@@ -162,9 +162,9 @@ public class EntityDependencyResolver : IEntityDependencyResolver
                 PhaseName = "Product Components",
                 PhaseNumber = 2,
                 PageSize = 10, // Reduced due to comprehensive includes
-                Include = "options,modifiers,reviews",
+                Include = "options,modifiers,reviews", // Fetch all components in single API call
                 CreatesNewEntities = true,
-                TargetEntityTypes = new List<string> { "options", "modifiers", "reviews" },
+                TargetEntityTypes = new List<string> { "options", "modifiers", "reviews" }, // Creates all three component types
                 RequiresPreviousPhaseCompletion = true
             },
             
@@ -180,14 +180,14 @@ public class EntityDependencyResolver : IEntityDependencyResolver
                 RequiresPreviousPhaseCompletion = true
             },
             
-            // ✨ Individual component type configurations
+            // ✨ Individual component type configurations for pipeline routing
             ["options"] = new EntityPhaseConfiguration
             {
                 PhaseType = "options",
                 PhaseName = "Product Options",
-                PhaseNumber = 2,
-                PageSize = 10, // Reduced due to comprehensive includes
-                Include = "options", // Include all to get full product data
+                PhaseNumber = 2, // Same as product-components since they're processed together
+                PageSize = 10, // Same as product-components
+                Include = "options,modifiers,reviews", // Fetch all components for efficiency
                 CreatesNewEntities = true,
                 TargetEntityTypes = new List<string> { "options" },
                 RequiresPreviousPhaseCompletion = true
@@ -196,10 +196,10 @@ public class EntityDependencyResolver : IEntityDependencyResolver
             ["modifiers"] = new EntityPhaseConfiguration
             {
                 PhaseType = "modifiers",
-                PhaseName = "Product Modifiers",
-                PhaseNumber = 2,
-                PageSize = 10,
-                Include = "modifiers",
+                PhaseName = "Product Modifiers", 
+                PhaseNumber = 2, // Same as product-components since they're processed together
+                PageSize = 10, // Same as product-components
+                Include = "options,modifiers,reviews", // Fetch all components for efficiency
                 CreatesNewEntities = true,
                 TargetEntityTypes = new List<string> { "modifiers" },
                 RequiresPreviousPhaseCompletion = true
@@ -209,9 +209,9 @@ public class EntityDependencyResolver : IEntityDependencyResolver
             {
                 PhaseType = "reviews",
                 PhaseName = "Product Reviews",
-                PhaseNumber = 2,
-                PageSize = 10,
-                Include = "reviews",
+                PhaseNumber = 2, // Same as product-components since they're processed together
+                PageSize = 10, // Same as product-components
+                Include = "options,modifiers,reviews", // Fetch all components for efficiency
                 CreatesNewEntities = true,
                 TargetEntityTypes = new List<string> { "reviews" },
                 RequiresPreviousPhaseCompletion = true
@@ -233,7 +233,7 @@ public class EntityDependencyResolver : IEntityDependencyResolver
             {
                 PhaseType = "product-images",
                 PhaseName = "Product Images",
-                PhaseNumber = 4, // Phase 4 (after product-related, before product-channel-assign)
+                PhaseNumber = 4, // Phase 4 (after product-related)
                 PageSize = 20, // Products per discovery batch
                 Include = "", // No include needed - uses EntityMappings discovery
                 CreatesNewEntities = false, // Updates existing products with images
@@ -243,7 +243,7 @@ public class EntityDependencyResolver : IEntityDependencyResolver
             
             ["product-channel-assign"] = new EntityPhaseConfiguration
             {
-                PhaseType = "product-channel-assign",
+                PhaseType = "product-channel-assign", 
                 PhaseName = "Product Channel Assignments",
                 PhaseNumber = 5, // Phase 5 (after product-images, before variants)
                 PageSize = 250, // Products per discovery batch (similar to variants)
@@ -256,7 +256,7 @@ public class EntityDependencyResolver : IEntityDependencyResolver
             ["product-metafields"] = new EntityPhaseConfiguration
             {
                 PhaseType = "product-metafields",
-                PhaseName = "Product Metafields",
+                PhaseName = "Product Metafields", 
                 PhaseNumber = 6, // Phase 6 - before variants (now Phase 7)
                 PageSize = 250, // Use max API limit for efficiency
                 Include = "", // No includes needed - endpoint doesn't support includes

@@ -74,7 +74,7 @@ interface EntitySummary {
   successCount: number;
   failureCount: number;
   skippedCount: number;
-
+  cancelledCount: number; // 🚨 ADD: Include cancelled count
   status: string; // 🔥 ADD: Use actual status from API/database instead of calculating
 }
 
@@ -165,15 +165,26 @@ export const MigrationDetailView: React.FC = () => {
       
       const rawEntities = Array.isArray(summaryArr.entities) ? summaryArr.entities : [];
       
-      // Transform the API data to match our UI interface
-      const transformedEntities: EntitySummary[] = rawEntities.map((entity: any) => ({
+      // Transform the API data to match our UI interface  
+      // 🎯 COMPONENT PROGRESS: Filter out product-components from entity display
+      const filteredEntities = rawEntities.filter((entity: any) => {
+        const entityType = entity.entity || entity.entityType;
+        if (entityType?.toLowerCase() === 'product-components') {
+          console.log('🎯 [MigrationDetailView] Filtering out product-components - individual component tracking used instead');
+          return false;
+        }
+        return true;
+      });
+      
+      const transformedEntities: EntitySummary[] = filteredEntities.map((entity: any) => ({
         entityType: entity.entity || 'Unknown',
         totalCount: entity.totalEntities || 0,
-        processedCount: (entity.successfulEntities || 0) + (entity.failedEntities || 0) + (entity.skippedEntities || 0),
+        // 🚨 FIX: Use backend-calculated processedCount instead of manual calculation
+        processedCount: entity.processedEntities || ((entity.successfulEntities || 0) + (entity.failedEntities || 0) + (entity.skippedEntities || 0) + (entity.cancelledEntities || 0)),
         successCount: entity.successfulEntities || 0,
         failureCount: entity.failedEntities || 0,
         skippedCount: entity.skippedEntities || 0,  // 🚨 FIX: Map skippedEntities to skippedCount
-
+        cancelledCount: entity.cancelledEntities || 0, // 🚨 ADD: Include cancelled count
         status: entity.status || 'pending', // 🔥 USE: Actual status from API/database instead of calculating
       }));
       

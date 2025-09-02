@@ -214,7 +214,9 @@ public class ProgressTracker : IProgressTracker
                 if (!progress.EntityProgress.ContainsKey(entityType))
                 {
                     // 🎯 UI DISPLAY FLAG: Determine if this is a dynamic discovery phase
-                    var isDynamicDiscoveryPhase = entityType.Equals("product-components", StringComparison.OrdinalIgnoreCase) ||
+                    var isDynamicDiscoveryPhase = entityType.Equals("options", StringComparison.OrdinalIgnoreCase) ||
+                                                  entityType.Equals("modifiers", StringComparison.OrdinalIgnoreCase) ||
+                                                  entityType.Equals("reviews", StringComparison.OrdinalIgnoreCase) ||
                                                   entityType.Equals("product-images", StringComparison.OrdinalIgnoreCase) ||
                                                   entityType.Equals("product-channel-assign", StringComparison.OrdinalIgnoreCase);
                     
@@ -812,7 +814,9 @@ public class ProgressTracker : IProgressTracker
                     foreach (var (entityType, summary) in aggregatedProgress)
                     {
                         // 🎯 UI DISPLAY FLAG: Determine if this is a dynamic discovery phase
-                        var isDynamicDiscoveryPhase = entityType.Equals("product-components", StringComparison.OrdinalIgnoreCase) ||
+                        var isDynamicDiscoveryPhase = entityType.Equals("options", StringComparison.OrdinalIgnoreCase) ||
+                                                      entityType.Equals("modifiers", StringComparison.OrdinalIgnoreCase) ||
+                                                      entityType.Equals("reviews", StringComparison.OrdinalIgnoreCase) ||
                                                       entityType.Equals("product-images", StringComparison.OrdinalIgnoreCase) ||
                                                       entityType.Equals("product-channel-assign", StringComparison.OrdinalIgnoreCase);
                         
@@ -888,17 +892,31 @@ public class ProgressTracker : IProgressTracker
     /// <returns>True if migration is active and should use real-time aggregation</returns>
     private static bool IsActiveMigration(MigrationProgress progress)
     {
-        // 🚨 CRITICAL FIX: NEVER treat cancelled/completed migrations as "active" regardless of timing
-        // Cancelled and completed migrations should ALWAYS use storage data for accurate final entity statuses
-        var finalizedStatuses = new[] { "cancelled", "canceled", "completed", "failed" };
-        bool isFinalizedMigration = finalizedStatuses.Contains(progress.Status?.ToLowerInvariant());
+        // 🚨 FIX: Keep using real-time data during entity completion phase
+        // Don't switch to cached data too early - wait until ALL entities are truly completed
         
-        if (isFinalizedMigration)
+        // Check if migration was cancelled - cancelled migrations should use storage data
+        var cancelledStatuses = new[] { "cancelled", "canceled", "failed" };
+        bool isCancelledMigration = cancelledStatuses.Contains(progress.Status?.ToLowerInvariant());
+        
+        if (isCancelledMigration)
         {
-            return false; // ✅ Always use storage data for finalized migrations
+            return false; // ✅ Use storage data for cancelled/failed migrations
         }
         
-        // Consider migration active ONLY if:
+        // 🚨 CRITICAL FIX: For "completed" migrations, check if recent activity (within 5 minutes)
+        // This allows UpdateEntityProgressActivity to transfer final counts during completion phase
+        if (progress.Status?.ToLowerInvariant() == "completed")
+        {
+            bool hasVeryRecentActivity = progress.LastUpdated > DateTime.UtcNow.AddMinutes(-5);
+            if (hasVeryRecentActivity)
+            {
+                return true; // ✅ Keep using real-time data during completion phase
+            }
+            return false; // ✅ Use storage data for truly completed migrations
+        }
+        
+        // Consider migration active if:
         // 1. Status indicates active processing (running, processing, in-progress)
         // 2. OR last updated within the last 10 minutes (recent activity)
         

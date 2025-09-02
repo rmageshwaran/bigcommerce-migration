@@ -28,6 +28,7 @@ This guide ensures that AI assistants **ALWAYS** follow established patterns, re
 - [ ] **Error Handling** - Will modify error handling patterns
 - [ ] **Testing** - Will require new/updated tests
 - [ ] **Frontend** - Will affect React dashboard
+- [ ] **Progress Tracking** - Will modify progress tracking and SignalR events
 - [ ] **Infrastructure** - Will change deployment or configuration
 
 ---

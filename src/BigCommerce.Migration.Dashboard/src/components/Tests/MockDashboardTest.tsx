@@ -95,15 +95,37 @@ export const MockDashboardTest: React.FC = () => {
         skippedCount: 0
       },
               {
-          entityType: 'product-components',
+          entityType: 'options',
           status: 'completed',
           progressPercentage: 100.0,
-          processedCount: 7447,
-          totalCount: 7447,
-          successCount: 7447,
+          processedCount: 2847,
+          totalCount: 2847,
+          successCount: 2847,
           failedCount: 0,
           skippedCount: 0,
-          showTotalCount: false // Dynamic discovery phase
+          showTotalCount: true // Component discovery phase
+        },
+        {
+          entityType: 'modifiers',
+          status: 'completed',
+          progressPercentage: 100.0,
+          processedCount: 2100,
+          totalCount: 2100,
+          successCount: 2100,
+          failedCount: 0,
+          skippedCount: 0,
+          showTotalCount: true // Component discovery phase
+        },
+        {
+          entityType: 'reviews',
+          status: 'completed',
+          progressPercentage: 100.0,
+          processedCount: 2500,
+          totalCount: 2500,
+          successCount: 2500,
+          failedCount: 0,
+          skippedCount: 0,
+          showTotalCount: true // Component discovery phase
         },
         {
           entityType: 'product-related',
@@ -238,15 +260,37 @@ export const MockDashboardTest: React.FC = () => {
           showTotalCount: true // Static discovery phase
         },
         {
-          entityType: 'product-components',
+          entityType: 'options',
           status: 'completed',
           progressPercentage: 100.0,
-          processedCount: 7447,
-          totalCount: 7447,
-          successCount: 7447,
+          processedCount: 2847,
+          totalCount: 2847,
+          successCount: 2847,
           failedCount: 0,
           skippedCount: 0,
-          showTotalCount: false // Dynamic discovery phase
+          showTotalCount: true // Component discovery phase
+        },
+        {
+          entityType: 'modifiers',
+          status: 'completed',
+          progressPercentage: 100.0,
+          processedCount: 2100,
+          totalCount: 2100,
+          successCount: 2100,
+          failedCount: 0,
+          skippedCount: 0,
+          showTotalCount: true // Component discovery phase
+        },
+        {
+          entityType: 'reviews',
+          status: 'completed',
+          progressPercentage: 100.0,
+          processedCount: 2500,
+          totalCount: 2500,
+          successCount: 2500,
+          failedCount: 0,
+          skippedCount: 0,
+          showTotalCount: true // Component discovery phase
         },
         {
           entityType: 'product-related',

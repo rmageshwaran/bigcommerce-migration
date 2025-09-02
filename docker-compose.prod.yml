@@ -163,9 +163,9 @@ services:
       - ParallelProcessing__subBatchConfigurations__variants__chunkSize=250
       - ParallelProcessing__subBatchConfigurations__variants__pageSize=250
       - ParallelProcessing__subBatchConfigurations__variants__subBatchSize=50
-      - ParallelProcessing__subBatchConfigurations__variants__maxConcurrency=5
+      - ParallelProcessing__subBatchConfigurations__variants__maxConcurrency=3
       - ParallelProcessing__subBatchConfigurations__variants__enableSubBatching=true
-      - ParallelProcessing__subBatchConfigurations__variants__subBatchDelayMs=100
+      - ParallelProcessing__subBatchConfigurations__variants__subBatchDelayMs=250
       - ParallelProcessing__subBatchConfigurations__variants__processSubBatchesSequentially=false
       - ParallelProcessing__subBatchConfigurations__variants__include=
       

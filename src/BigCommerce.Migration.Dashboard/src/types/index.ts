@@ -86,6 +86,8 @@ export interface EntityConfiguration {
   variants: boolean;
   images: boolean;
   modifiers: boolean;
+  options: boolean;
+  reviews: boolean;
   batchSizes: Record<string, number>;
 }
 

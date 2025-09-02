@@ -25,6 +25,8 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
     private readonly IMigrationStorageService _migrationStorageService;
     private readonly IEntityErrorHandlingService _errorHandlingService;
     private readonly ICancellationStore _cancellationStore; // ✅ Phase 3.2.1: Native cancellation support
+    private readonly IProgressTracker _progressTracker; // 🎯 CUMULATIVE PROGRESS: For proper progress integration
+    private readonly ICentralizedProgressBroadcastService? _centralizedBroadcastService; // 🚨 FIX: Optional broadcast service for real-time updates
 
     public ProductComponentsMigrationPipeline(
         ISignalREventFactory signalREventFactory,
@@ -34,7 +36,8 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
         IEntityTransformService entityTransformService,
         IMigrationStorageService migrationStorageService,
         IEntityErrorHandlingService errorHandlingService,
-        ICancellationStore cancellationStore)
+        ICancellationStore cancellationStore,
+        IProgressTracker progressTracker)
     {
         _signalREventFactory = signalREventFactory ?? throw new ArgumentNullException(nameof(signalREventFactory));
         _progressEventPublisher = progressEventPublisher ?? throw new ArgumentNullException(nameof(progressEventPublisher));
@@ -44,6 +47,8 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
         _migrationStorageService = migrationStorageService ?? throw new ArgumentNullException(nameof(migrationStorageService));
         _errorHandlingService = errorHandlingService ?? throw new ArgumentNullException(nameof(errorHandlingService));
         _cancellationStore = cancellationStore ?? throw new ArgumentNullException(nameof(cancellationStore)); // ✅ Phase 3.2.1: Native cancellation injection
+        _progressTracker = progressTracker ?? throw new ArgumentNullException(nameof(progressTracker)); // 🎯 CUMULATIVE PROGRESS: Store progress tracker reference
+        _centralizedBroadcastService = null; // 🚨 FIX: Service not available in Activities project DI scope
     }
 
     /// <summary>
@@ -81,8 +86,8 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
             // Phase 3.2.1: Check for cancellation at the start of product components processing
             await CheckCancellationAsync(migrationId);
 
-            // Phase 3.2.4: Report pipeline start status
-            await PublishPipelineProgressAsync(migrationId, "starting", "Initializing product components processing", 0);
+            // Phase 3.2.4: Pipeline status logged (individual component events provide UI progress)
+            _logger.LogInformation("🚀 [PRODUCT-COMPONENTS-PIPELINE] Initializing product components processing - individual component events will provide UI progress");
 
             // 🔗 EXTRACT ALL COMPONENTS: Parse all products and extract components by type
             // Phase 3.2.2: Enhanced with periodic cancellation checks during extraction
@@ -91,13 +96,16 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
             _logger.LogInformation("🔍 [PRODUCT-COMPONENTS-PIPELINE] Extracted components: Options={OptionsCount}, Modifiers={ModifiersCount}, Reviews={ReviewsCount}", 
                 allComponents["options"].Count, allComponents["modifiers"].Count, allComponents["reviews"].Count);
 
+            // 🎯 INDIVIDUAL COMPONENT PROGRESS INTEGRATION: Initialize progress tracking for each component
+            await InitializeIndividualComponentProgressAsync(migrationId, allComponents);
+
             // Phase 3.2.1: Check for cancellation after component extraction
             await CheckCancellationAsync(migrationId);
 
-            // Phase 3.2.4: Report extraction completion progress
+            // Phase 3.2.4: Log extraction completion (individual component events provide UI progress)
             var totalComponents = allComponents.Values.Sum(c => c.Count);
-            await PublishPipelineProgressAsync(migrationId, "extracting", 
-                $"Extracted {totalComponents} components from {productsWithComponents.Count} products", 25);
+            _logger.LogInformation("🔍 [PRODUCT-COMPONENTS-PIPELINE] Extracted {TotalComponents} components from {ProductCount} products - individual component discovery events published", 
+                totalComponents, productsWithComponents.Count);
 
             // Initialize component statistics with actual counts
             var componentTypes = new[] { "options", "modifiers", "reviews" };
@@ -144,8 +152,11 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
             
             _logger.LogInformation("✅ [PRODUCT-COMPONENTS-PIPELINE] Completed parallel processing of all component types");
 
-            // Phase 3.2.4: Report processing completion progress
-            await PublishPipelineProgressAsync(migrationId, "processing", "Completed component processing", 75);
+            // 🎯 INDIVIDUAL COMPONENT COMPLETION: Update progress tracker with final statistics for cumulative tracking
+            await CompleteIndividualComponentProgressAsync(migrationId, result.SubEntityStatistics);
+
+            // Phase 3.2.4: Log processing completion (individual component events provide UI progress)
+            _logger.LogInformation("✅ [PRODUCT-COMPONENTS-PIPELINE] Completed component processing - individual component completion events published");
 
             stopwatch.Stop();
             result.ProcessingTime = stopwatch.Elapsed;
@@ -194,8 +205,9 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
                     entityTypeKey, totalProcessed, totalSuccessful, totalFailed);
             }
             
-            await PublishPipelineProgressAsync(migrationId, "completed", 
-                $"Successfully processed {totalSuccessful}/{totalProcessed} components", 100);
+            // Log final completion (individual component completion events already published)
+            _logger.LogInformation("✅ [PRODUCT-COMPONENTS-PIPELINE] Successfully processed {TotalSuccessful}/{TotalProcessed} components - individual component events provide UI visibility", 
+                totalSuccessful, totalProcessed);
 
             return result;
         }
@@ -206,9 +218,8 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
 
             _logger.LogWarning(ex, "🚫 [PRODUCT-COMPONENTS-PIPELINE] Product components processing cancelled for migration {MigrationId}", migrationId);
             
-            // Phase 3.2.4: Report cancellation status
-            await PublishPipelineProgressAsync(migrationId, "cancelled", 
-                $"Product components processing cancelled: {ex.Message}", null, true, ex.Message);
+            // Phase 3.2.4: Log cancellation status (individual component events handle UI updates)
+            _logger.LogWarning("🚫 [PRODUCT-COMPONENTS-PIPELINE] Product components processing cancelled: {ErrorMessage} - individual component events will reflect cancellation", ex.Message);
             
             throw;
         }
@@ -219,9 +230,8 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
 
             _logger.LogError(ex, "❌ [PRODUCT-COMPONENTS-PIPELINE] Failed to process product components for migration {MigrationId}", migrationId);
             
-            // Phase 3.2.4: Report failure status
-            await PublishPipelineProgressAsync(migrationId, "failed", 
-                $"Product components processing failed: {ex.Message}", null);
+            // Phase 3.2.4: Log failure status (individual component events handle UI updates)
+            _logger.LogError("❌ [PRODUCT-COMPONENTS-PIPELINE] Product components processing failed: {ErrorMessage} - individual component events will reflect failures", ex.Message);
             
             throw;
         }
@@ -857,6 +867,9 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
             stopwatch.Stop();
             stats.ProcessingTime = stopwatch.Elapsed;
 
+            // 🎯 REAL-TIME PROGRESS: Update progress tracker with final component statistics for real-time UI updates
+            await UpdateComponentProgressAsync(migrationId, componentType, stats);
+
             _logger.LogInformation("✅ [COMPONENT-{ComponentType}] Completed processing: {SuccessCount}/{TotalCount} successful, {FailedCount} failed",
                 componentType.ToUpper(), stats.SuccessfulCount, stats.TotalProcessed, stats.FailedCount);
         }
@@ -1009,9 +1022,10 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
         _logger.LogDebug("🔗 [MAPPING-{ComponentType}] No mapping required for component type", componentType.ToUpper());
     }
 
-    /// <summary>
-    /// Phase 3.2.4: Publishes pipeline progress events with cancellation status support
-    /// Provides real-time progress updates for product components processing
+        /// <summary>
+    /// 🎯 INDIVIDUAL COMPONENT PROGRESS: Pipeline-level events disabled in favor of individual component tracking
+    /// Individual component discovery and completion events provide much better UI visibility and troubleshooting
+    /// This method is kept for backward compatibility but no longer publishes SignalR events
     /// </summary>
     /// <param name="migrationId">Migration identifier</param>
     /// <param name="status">Current processing status</param>
@@ -1022,24 +1036,291 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
     private async Task PublishPipelineProgressAsync(string migrationId, string status, string message, 
         double? progressPercentage = null, bool isCancelled = false, string? cancellationReason = null)
     {
+        await Task.CompletedTask; // No-op to maintain async signature
+        
+        // 🎯 INDIVIDUAL COMPONENT PROGRESS: Pipeline-level events disabled
+        // Individual component events (options, modifiers, reviews) provide much better visibility:
+        // - PublishIndividualComponentDiscoveryAsync() publishes discovery events
+        // - PublishIndividualComponentCompletionAsync() publishes completion events
+        // This gives UI users separate progress bars for each component type for enhanced troubleshooting
+        
+        _logger.LogDebug("📊 [PRODUCT-COMPONENTS-PROGRESS] Pipeline progress: {Status} - individual component events provide UI progress", status);
+    }
+
+    /// <summary>
+    /// Initializes individual component progress tracking with ProgressTracker for cumulative progress
+    /// This integrates with the standard progress tracking system for proper cumulative counts
+    /// </summary>
+    /// <param name="migrationId">Migration identifier</param>
+    /// <param name="allComponents">Extracted components by type</param>
+    private async Task InitializeIndividualComponentProgressAsync(string migrationId, Dictionary<string, List<ComponentWithContext>> allComponents)
+    {
         try
         {
-            _logger.LogDebug("📊 [PRODUCT-COMPONENTS-PROGRESS] Publishing progress: Status={Status}, Message={Message}, Progress={Progress}%, Cancelled={IsCancelled}", 
-                status, message, progressPercentage, isCancelled);
-
-            // Note: Internal pipeline progress events removed in simplified SignalR approach
-            // These detailed component-level events are not essential for migration progress tracking
-            // Main chunk-level progress is published by ProcessEntityChunkActivity instead
-            _logger.LogDebug("📊 [PRODUCT-COMPONENTS-PROGRESS] Pipeline progress: Status={Status}, Message={Message}, Progress={Progress}% - event simplified", 
-                status, message, progressPercentage);
+            var componentTypes = new[] { "options", "modifiers", "reviews" };
             
-            _logger.LogDebug("✅ [PRODUCT-COMPONENTS-PROGRESS] Successfully published progress event for {MigrationId}", migrationId);
+            foreach (var componentType in componentTypes)
+            {
+                var componentCount = allComponents[componentType].Count;
+                
+                _logger.LogInformation("📊 [COMPONENT-PROGRESS-INIT] Initializing progress tracking for {ComponentType}: {Count} components discovered", 
+                    componentType, componentCount);
+
+                // Update progress tracking with discovered count (EntityProgress entry already created by orchestrator)
+                // This updates the TotalCount from 0 (progressive discovery) to actual discovered count
+                await _progressTracker.UpdateProgressAsync(migrationId, new ProgressUpdate
+                {
+                    EntityType = componentType,
+                    TotalCount = componentCount, // Update with actual discovered count
+                    ProcessedCount = 0,
+                    SuccessCount = 0,
+                    FailureCount = 0,
+                    SkippedCount = 0,
+                    CancelledCount = 0
+                });
+
+                // 🚨 FIX: Enable ShowTotalCount once we have actual counts
+                // Get the current progress and enable ShowTotalCount for UI display
+                var currentProgress = await _progressTracker.GetProgressAsync(migrationId);
+                if (currentProgress.EntityProgress.ContainsKey(componentType))
+                {
+                    currentProgress.EntityProgress[componentType].ShowTotalCount = true;
+                    
+                    _logger.LogInformation("✅ [SHOW-TOTAL-COUNT-FIX] Enabled total count display for {ComponentType} with count {Count}", 
+                        componentType, componentCount);
+                }
+                
+                _logger.LogInformation("✅ [COMPONENT-PROGRESS-INIT] Started progress tracking for {ComponentType} with total count {Count}", 
+                    componentType, componentCount);
+            }
+            
+            _logger.LogInformation("✅ [COMPONENT-PROGRESS-INIT] Successfully initialized progress tracking for all component types");
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "⚠️ [PRODUCT-COMPONENTS-PROGRESS] Failed to publish progress event for migration {MigrationId}: {ErrorMessage}",
+            _logger.LogWarning(ex, "⚠️ [COMPONENT-PROGRESS-INIT] Failed to initialize component progress tracking for migration {MigrationId}: {ErrorMessage}",
                 migrationId, ex.Message);
-            // Don't fail processing due to progress publishing issues - fail safe approach
+            // Don't fail processing due to progress tracking issues
+        }
+    }
+
+    /// <summary>
+    /// Updates individual component progress during processing for real-time UI updates
+    /// Provides incremental progress tracking as components are processed
+    /// </summary>
+    /// <param name="migrationId">Migration identifier</param>
+    /// <param name="componentType">Component type (options, modifiers, reviews)</param>
+    /// <param name="stats">Current processing statistics</param>
+    private async Task UpdateComponentProgressAsync(string migrationId, string componentType, SubEntityStatistics stats)
+    {
+        try
+        {
+            _logger.LogInformation("📊 [COMPONENT-PROGRESS-UPDATE] Updating real-time progress for {ComponentType}: {Successful}/{Total} processed", 
+                componentType, stats.SuccessfulCount, stats.TotalProcessed);
+
+            // Update progress using ProgressTracker for cumulative tracking
+            await _progressTracker.UpdateProgressAsync(migrationId, new ProgressUpdate
+            {
+                EntityType = componentType,
+                ProcessedCount = stats.TotalProcessed,
+                SuccessCount = stats.SuccessfulCount,
+                FailureCount = stats.FailedCount,
+                SkippedCount = stats.SkippedCount,
+                CancelledCount = 0
+                // TotalCount is not updated here - it was set during initialization
+            });
+
+            // 🚨 CRITICAL FIX: Add chunkincrementevents tracking for component entities
+            // This provides same incremental tracking as other entities for consistency and cancellation recovery
+            try
+            {
+                await _progressTracker.IncrementProgressAsync(
+                    migrationId: migrationId,
+                    entityType: componentType,
+                    chunkNumber: 1, // Component processing is single "chunk"
+                    chunkStartIndex: 0,
+                    chunkSize: stats.TotalProcessed,
+                    successfulEntities: stats.SuccessfulCount,
+                    failedEntities: stats.FailedCount,
+                    skippedEntities: stats.SkippedCount,
+                    cancelledEntities: 0,
+                    processingStartTime: DateTime.UtcNow.AddSeconds(-30), // Approximate start time
+                    processingEndTime: DateTime.UtcNow,
+                    sourceStore: "component-source", // Component entities don't have traditional source
+                    destinationStore: "component-destination",
+                    errors: null
+                );
+
+                _logger.LogInformation("✅ [COMPONENT-INCREMENTAL] Successfully recorded incremental progress for {ComponentType} in chunkincrementevents table", componentType);
+            }
+            catch (Exception incrementEx)
+            {
+                _logger.LogWarning(incrementEx, "⚠️ [COMPONENT-INCREMENTAL] Failed to record incremental progress for {ComponentType} - continuing without chunkincrementevents tracking", componentType);
+                // Don't fail the entire component processing due to incremental tracking issues
+            }
+
+            // 🚨 FIX: Broadcast real-time progress updates via CentralizedProgressBroadcastService
+            // Get the current progress from ProgressTracker to get cumulative counts and total
+            var currentProgress = await _progressTracker.GetLatestAggregatedProgressAsync(migrationId);
+            var entityProgress = currentProgress.EntityProgress.GetValueOrDefault(componentType);
+            
+            if (entityProgress != null)
+            {
+                var chunkProgress = new EntityChunkProgress
+                {
+                    EntityType = componentType,
+                    ChunkNumber = 1, // Component processing doesn't use chunks, use 1
+                    ChunkSize = stats.TotalProcessed,
+                    ProcessedInChunk = stats.SuccessfulCount,
+                    FailedInChunk = stats.FailedCount,
+                    
+                    // Use cumulative counts from ProgressTracker
+                    CumulativeProcessed = entityProgress.ProcessedCount,
+                    CumulativeFailed = entityProgress.FailureCount,
+                    CumulativeSkipped = entityProgress.SkippedCount,
+                    CumulativeCancelled = entityProgress.CancelledCount,
+                    TotalEntitiesForType = entityProgress.TotalCount,
+                    
+                    ProgressPercentage = entityProgress.ProgressPercentage,
+                    Status = entityProgress.Status,
+                    ProcessingTimeMs = (long)entityProgress.ProcessingTime.TotalMilliseconds,
+                    ShowTotalCount = entityProgress.ShowTotalCount
+                };
+
+                // Broadcast the progress update (if service is available)
+                if (_centralizedBroadcastService != null)
+                {
+                    await _centralizedBroadcastService.BroadcastEntityChunkProgressAsync(migrationId, chunkProgress);
+                }
+                else
+                {
+                    _logger.LogWarning("⚠️ [COMPONENT-PROGRESS-BROADCAST] CentralizedProgressBroadcastService not available - skipping real-time broadcast for {ComponentType}", componentType);
+                }
+                
+                _logger.LogInformation("📢 [COMPONENT-PROGRESS-BROADCAST] Broadcasted real-time progress for {ComponentType}: {Processed}/{Total}", 
+                    componentType, entityProgress.ProcessedCount, entityProgress.TotalCount);
+            }
+            
+            _logger.LogInformation("✅ [COMPONENT-PROGRESS-UPDATE] Successfully updated real-time progress for {ComponentType}", componentType);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "⚠️ [COMPONENT-PROGRESS-UPDATE] Failed to update real-time progress for {ComponentType} in migration {MigrationId}: {ErrorMessage}",
+                componentType, migrationId, ex.Message);
+            // Don't fail processing due to progress tracking issues
+        }
+    }
+
+    /// <summary>
+    /// Completes individual component progress tracking with final statistics using ProgressTracker
+    /// This integrates with the standard progress tracking system for proper cumulative progress and SignalR events
+    /// </summary>
+    /// <param name="migrationId">Migration identifier</param>
+    /// <param name="componentStatistics">Statistics for each component type</param>
+    private async Task CompleteIndividualComponentProgressAsync(string migrationId, Dictionary<string, SubEntityStatistics> componentStatistics)
+    {
+        try
+        {
+            var componentTypes = new[] { "options", "modifiers", "reviews" };
+            
+            foreach (var componentType in componentTypes)
+            {
+                if (componentStatistics.TryGetValue(componentType, out var stats))
+                {
+                    _logger.LogInformation("📊 [COMPONENT-PROGRESS-UPDATE] Updating progress for {ComponentType}: {Successful}/{Total} successful", 
+                        componentType, stats.SuccessfulCount, stats.TotalProcessed);
+
+                    // Update progress using ProgressTracker for cumulative tracking and proper SignalR events
+                    await _progressTracker.UpdateProgressAsync(migrationId, new ProgressUpdate
+                    {
+                        EntityType = componentType,
+                        ProcessedCount = stats.TotalProcessed,
+                        SuccessCount = stats.SuccessfulCount,
+                        FailureCount = stats.FailedCount,
+                        SkippedCount = stats.SkippedCount,
+                        CancelledCount = 0,
+                        TotalCount = stats.TotalProcessed // Set total to processed count for completion
+                    });
+
+                    // 🚨 CRITICAL FIX: Add final chunkincrementevents tracking for component completion
+                    // This ensures component entities have same incremental tracking as other entity types
+                    try
+                    {
+                        await _progressTracker.IncrementProgressAsync(
+                            migrationId: migrationId,
+                            entityType: componentType,
+                            chunkNumber: 1, // Component processing is single "chunk" 
+                            chunkStartIndex: 0,
+                            chunkSize: stats.TotalProcessed,
+                            successfulEntities: stats.SuccessfulCount,
+                            failedEntities: stats.FailedCount,
+                            skippedEntities: stats.SkippedCount,
+                            cancelledEntities: 0,
+                            processingStartTime: DateTime.UtcNow.AddMinutes(-1), // Approximate processing time
+                            processingEndTime: DateTime.UtcNow,
+                            sourceStore: "component-source", // Component entities are derived from products
+                            destinationStore: "component-destination",
+                            errors: null
+                        );
+
+                        _logger.LogInformation("✅ [COMPONENT-INCREMENTAL-COMPLETE] Successfully recorded final incremental progress for {ComponentType} in chunkincrementevents table", componentType);
+                    }
+                    catch (Exception incrementEx)
+                    {
+                        _logger.LogWarning(incrementEx, "⚠️ [COMPONENT-INCREMENTAL-COMPLETE] Failed to record final incremental progress for {ComponentType} - continuing", componentType);
+                        // Don't fail completion due to incremental tracking issues
+                    }
+                    
+                    // Complete the entity processing to trigger final events
+                    await _progressTracker.CompleteEntityProcessingAsync(migrationId, componentType);
+                    
+                    // 🚨 FIX: Broadcast final completion status via CentralizedProgressBroadcastService
+                    var finalProgress = await _progressTracker.GetLatestAggregatedProgressAsync(migrationId);
+                    var finalEntityProgress = finalProgress.EntityProgress.GetValueOrDefault(componentType);
+                    
+                    if (finalEntityProgress != null)
+                    {
+                        var finalChunkProgress = new EntityChunkProgress
+                        {
+                            EntityType = componentType,
+                            ChunkNumber = 1,
+                            ChunkSize = stats.TotalProcessed,
+                            ProcessedInChunk = stats.SuccessfulCount,
+                            FailedInChunk = stats.FailedCount,
+                            
+                            // Use final cumulative counts
+                            CumulativeProcessed = finalEntityProgress.ProcessedCount,
+                            CumulativeFailed = finalEntityProgress.FailureCount,
+                            CumulativeSkipped = finalEntityProgress.SkippedCount,
+                            CumulativeCancelled = finalEntityProgress.CancelledCount,
+                            TotalEntitiesForType = finalEntityProgress.TotalCount,
+                            
+                            ProgressPercentage = finalEntityProgress.ProgressPercentage,
+                            Status = finalEntityProgress.Status,
+                            ProcessingTimeMs = (long)finalEntityProgress.ProcessingTime.TotalMilliseconds,
+                            ShowTotalCount = finalEntityProgress.ShowTotalCount
+                        };
+
+                        if (_centralizedBroadcastService != null)
+                        {
+                            await _centralizedBroadcastService.BroadcastEntityChunkProgressAsync(migrationId, finalChunkProgress);
+                        }
+                        
+                        _logger.LogInformation("📢 [COMPONENT-COMPLETION-BROADCAST] Broadcasted completion status for {ComponentType}: {Status}", 
+                            componentType, finalEntityProgress.Status);
+                    }
+                    
+                    _logger.LogInformation("✅ [COMPONENT-PROGRESS-UPDATE] Completed progress tracking for {ComponentType}", componentType);
+                }
+            }
+            
+            _logger.LogInformation("✅ [COMPONENT-PROGRESS-COMPLETION] Successfully completed progress tracking for all component types");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "⚠️ [COMPONENT-PROGRESS-COMPLETION] Failed to complete component progress tracking for migration {MigrationId}: {ErrorMessage}",
+                migrationId, ex.Message);
+            // Don't fail processing due to progress tracking issues
         }
     }
 

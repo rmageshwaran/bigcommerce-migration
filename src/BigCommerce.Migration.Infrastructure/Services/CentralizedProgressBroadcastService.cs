@@ -15,16 +15,18 @@ namespace BigCommerce.Migration.Infrastructure.Services
     /// This is the SINGLE point of truth for all real-time progress communication.
     /// 
     /// Key Features:
-    /// - Rate limiting to prevent event spam (2-second intervals per migration)
+    /// - Rate limiting to prevent event spam (1-second intervals per entity type)
     /// - Clean event structure (only 4 essential event types)
     /// - Chunk-level progress tracking only (no sub-batch noise)
     /// - Thread-safe operation for concurrent migrations
+    /// - Per-entity-type rate limiting allows concurrent entity updates
     /// 
     /// Architecture Benefits:
     /// - ~95% reduction in SignalR events (from hundreds to ~10-20 per migration)
     /// - Single responsibility for all progress broadcasting
     /// - Consistent event structure across all entities
     /// - Eliminates duplicate/redundant progress updates
+    /// - Real-time updates for all entity types simultaneously
     /// </summary>
     public class CentralizedProgressBroadcastService : ICentralizedProgressBroadcastService
     {
@@ -33,9 +35,9 @@ namespace BigCommerce.Migration.Infrastructure.Services
         private readonly ILogger<CentralizedProgressBroadcastService> _logger;
         private readonly IDateTimeProvider _dateTimeProvider;
 
-        // Rate limiting to prevent spam (chunk-level only)
+        // Rate limiting to prevent spam (per-entity-type, not per-migration)
         private readonly ConcurrentDictionary<string, DateTime> _lastBroadcastTimes = new();
-        private readonly TimeSpan _minBroadcastInterval = TimeSpan.FromSeconds(2);
+        private readonly TimeSpan _minBroadcastInterval = TimeSpan.FromSeconds(1); // Reduced from 2s to 1s for better real-time experience
 
         /// <summary>
         /// Initializes a new instance of the CentralizedProgressBroadcastService.
@@ -135,10 +137,12 @@ namespace BigCommerce.Migration.Infrastructure.Services
                 return;
             }
 
-            // Rate limit per migration to chunk-level updates only
-            if (!ShouldBroadcast(migrationId))
+            // Rate limit per entity type (not per migration) to allow concurrent entity updates
+            var rateLimitKey = $"{migrationId}:{progress.EntityType}";
+            if (!ShouldBroadcast(rateLimitKey))
             {
-                _logger.LogDebug("Skipping broadcast for migration {MigrationId} due to rate limiting", migrationId);
+                _logger.LogDebug("Skipping broadcast for migration {MigrationId}, entity {EntityType} due to rate limiting", 
+                    migrationId, progress.EntityType);
                 return;
             }
 
@@ -159,13 +163,13 @@ namespace BigCommerce.Migration.Infrastructure.Services
                     Status = progress.Status,
                     ProcessingTime = TimeSpan.FromMilliseconds(progress.ProcessingTimeMs),
                     ProgressPercentage = progress.ProgressPercentage,
-                    ShowTotalCount = progress.ShowTotalCount // 🎯 UI FLAG: Pass display flag through SignalR
+                    ShowTotalCount = progress.ShowTotalCount // 🎯 UI FLAG: Keep original ShowTotalCount logic for dynamic discovery entities
                 });
 
                 await _publisher.PublishEntityChunkProgressAsync(progressEvent, cancellationToken).ConfigureAwait(false);
 
-                // Update rate limiting timestamp
-                _lastBroadcastTimes[migrationId] = _dateTimeProvider.UtcNow;
+                // Update rate limiting timestamp for this entity type
+                _lastBroadcastTimes[rateLimitKey] = _dateTimeProvider.UtcNow;
 
                 _logger.LogDebug("Broadcasting chunk progress for {MigrationId}: {EntityType} chunk {ChunkNumber} ({ProcessedInChunk}/{ChunkSize} processed, {ProgressPercentage:F1}% total)",
                     migrationId, progress.EntityType, progress.ChunkNumber, progress.ProcessedInChunk, progress.ChunkSize, progress.ProgressPercentage);
@@ -298,13 +302,14 @@ namespace BigCommerce.Migration.Infrastructure.Services
 
         /// <summary>
         /// Determines if a broadcast should occur based on rate limiting rules.
-        /// Rate limits chunk progress broadcasts to every 2 seconds per migration.
+        /// Rate limits chunk progress broadcasts to every 1 second per entity type (not per migration).
+        /// This allows concurrent entity types to broadcast simultaneously.
         /// </summary>
-        private bool ShouldBroadcast(string migrationId)
+        private bool ShouldBroadcast(string rateLimitKey)
         {
-            if (!_lastBroadcastTimes.TryGetValue(migrationId, out var lastBroadcastTime))
+            if (!_lastBroadcastTimes.TryGetValue(rateLimitKey, out var lastBroadcastTime))
             {
-                return true; // First broadcast for this migration
+                return true; // First broadcast for this entity type
             }
 
             var timeSinceLastBroadcast = _dateTimeProvider.UtcNow - lastBroadcastTime;

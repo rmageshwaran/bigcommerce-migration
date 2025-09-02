@@ -159,9 +159,9 @@
         "chunkSize": 3,
         "pageSize": 3,
         "subBatchSize": 1,
-        "maxConcurrency": 1,
+        "maxConcurrency": 3,
         "enableSubBatching": true,
-        "subBatchDelayMs": 2000,
+        "subBatchDelayMs": 250,
         "processSubBatchesSequentially": true,
         "include": ""
       },

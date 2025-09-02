@@ -104,6 +104,8 @@ const entityTypeOptions = [
   'variants',
   'images',
   'modifiers',
+  'options',
+  'reviews',
 ];
 
 export const HistoryView: React.FC = () => {

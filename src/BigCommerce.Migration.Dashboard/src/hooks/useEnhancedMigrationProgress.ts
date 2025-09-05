@@ -167,11 +167,13 @@ export const useEnhancedMigrationProgress = (migrationId: string): UseEnhancedMi
         successCount: 0,
         failedCount: 0,
         skippedCount: 0,
+        cancelledCount: 0, // ✅ FIX: Initialize cancelled count
         progressPercentage: 0,
         status: 'pending' as const,
         currentChunk: 0,
         totalChunks: 0,
-        processingSpeed: 0
+        processingSpeed: 0,
+        showTotalCount: true // ✅ FIX: Initialize showTotalCount flag
       }));
 
     setState(prev => ({
@@ -187,6 +189,7 @@ export const useEnhancedMigrationProgress = (migrationId: string): UseEnhancedMi
         totalSuccess: 0,
         totalFailed: 0,
         totalSkipped: 0,
+        totalCancelled: 0, // ✅ FIX: Initialize cancelled total
         entities: entitiesData,
         status: 'running' as MigrationStatus,
         lastUpdated: new Date()
@@ -245,11 +248,13 @@ export const useEnhancedMigrationProgress = (migrationId: string): UseEnhancedMi
           successCount: 0,
           failedCount: 0,
           skippedCount: 0,
+          cancelledCount: 0, // ✅ FIX: Initialize cancelled count
           progressPercentage: 0,
           status: 'pending' as const,
           currentChunk: 0,
           totalChunks: 0,
-          processingSpeed: 0
+          processingSpeed: 0,
+          showTotalCount: true // ✅ FIX: Initialize showTotalCount flag
         };
         updatedEntities = [...prev.migrationData.entities, newEntity];
       }
@@ -332,6 +337,7 @@ export const useEnhancedMigrationProgress = (migrationId: string): UseEnhancedMi
             successCount: totalSuccess,
             failedCount: totalFailed,
             skippedCount: totalSkipped,
+            cancelledCount: totalCancelled, // ✅ FIX: Add missing cancelled count mapping
             progressPercentage: progressPercentage,
             showTotalCount: showTotalCount, // 🎯 UI FLAG: Set display flag from SignalR event
             status: (() => {
@@ -368,6 +374,7 @@ export const useEnhancedMigrationProgress = (migrationId: string): UseEnhancedMi
       const totalSuccessAcrossTypes = updatedEntities.reduce((sum, entity) => sum + entity.successCount, 0);
       const totalFailedAcrossTypes = updatedEntities.reduce((sum, entity) => sum + entity.failedCount, 0);
       const totalSkippedAcrossTypes = updatedEntities.reduce((sum, entity) => sum + entity.skippedCount, 0);
+      const totalCancelledAcrossTypes = updatedEntities.reduce((sum, entity) => sum + (entity.cancelledCount || 0), 0);
       const overallProgress = totalEntitiesAcrossTypes > 0 ? (totalProcessedAcrossTypes / totalEntitiesAcrossTypes) * 100 : 0;
 
       return {
@@ -380,6 +387,7 @@ export const useEnhancedMigrationProgress = (migrationId: string): UseEnhancedMi
           totalSuccess: totalSuccessAcrossTypes,
           totalFailed: totalFailedAcrossTypes,
           totalSkipped: totalSkippedAcrossTypes,
+          totalCancelled: totalCancelledAcrossTypes,
           lastUpdated: new Date()
         },
         lastUpdated: new Date()
@@ -699,6 +707,7 @@ export const useEnhancedMigrationProgress = (migrationId: string): UseEnhancedMi
         totalSuccess: migrationData?.successfulEntities || 0,
         totalFailed: migrationData?.failedEntities || 0,
         totalSkipped: migrationData?.skippedEntities || 0,
+        totalCancelled: migrationData?.cancelledEntities || 0, // ✅ FIX: Add cancelled entities total
         entities,
         status: migrationData?.status || 'unknown',
         lastUpdated: migrationData?.lastUpdated ? new Date(migrationData.lastUpdated) : new Date()

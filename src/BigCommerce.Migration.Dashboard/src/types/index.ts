@@ -402,7 +402,7 @@ export interface EnhancedMigrationDisplayData {
   totalSuccess: number;
   totalFailed: number;
   totalSkipped: number;
-  totalCancelled?: number;
+  totalCancelled: number;
   entities: EntityDisplayData[];
   status: MigrationStatus;
   lastUpdated: Date;
@@ -455,11 +455,16 @@ export interface EntityChunkProgressEvent {
   chunkSize: number;
   processedInChunk: number;
   failedInChunk: number;
-  cumulativeProcessed: number;
-  cumulativeFailed: number;
+  // Cumulative counts across all chunks (matches backend camelCase conversion)
+  totalProcessed: number;
+  totalSuccess: number;
+  totalFailed: number;
+  totalSkipped: number;
+  totalCancelled: number;
   totalEntitiesForType: number;
   progressPercentage: number;
   status: string;
+  showTotalCount: boolean;
   message: string;
   processingTimeMs: number;
 }

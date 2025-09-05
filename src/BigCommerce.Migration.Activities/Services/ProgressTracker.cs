@@ -327,6 +327,19 @@ public class ProgressTracker : IProgressTracker
                 var entityProgress = progress.EntityProgress.ContainsKey(entityType) ? progress.EntityProgress[entityType] : null;
                 if (entityProgress != null)
                 {
+                    // 🎯 COMPONENT TYPES: Skip entity-completed publishing for component types
+                    // CentralizedProgressBroadcastService handles their broadcasting to prevent event conflicts
+                    var isComponentType = entityType.Equals("options", StringComparison.OrdinalIgnoreCase) ||
+                                         entityType.Equals("modifiers", StringComparison.OrdinalIgnoreCase) ||
+                                         entityType.Equals("reviews", StringComparison.OrdinalIgnoreCase);
+                    
+                    if (isComponentType)
+                    {
+                        _logger.LogInformation("🎯 [ENTITY-COMPLETION] Skipping entity-completed event for {EntityType} - handled by CentralizedProgressBroadcastService to prevent UI conflicts", 
+                            entityType);
+                        return; // Skip duplicate publishing for component types
+                    }
+                    
                     _logger.LogInformation("📢 [ENTITY-COMPLETION] Publishing entity completed event for {EntityType} in migration {MigrationId} (Status: {Status})", 
                         entityType, migrationId, entityProgress.Status);
                     

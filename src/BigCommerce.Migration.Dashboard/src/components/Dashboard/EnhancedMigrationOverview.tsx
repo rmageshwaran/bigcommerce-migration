@@ -116,7 +116,7 @@ export const EnhancedMigrationOverview: React.FC<EnhancedMigrationOverviewProps>
 
   const formatEntityCounts = (entity: EntityDisplayData) => {
     console.log(`🔢 [DEBUG] formatEntityCounts called with entity:`, entity);
-    const { processedCount, totalCount, successCount, failedCount, skippedCount, showTotalCount } = entity;
+    const { processedCount, totalCount, successCount, failedCount, skippedCount, cancelledCount, showTotalCount } = entity;
     
     // Check if we should show total count based on backend flag
     const shouldShowTotal = showTotalCount !== false; // Default to true if not specified
@@ -126,10 +126,16 @@ export const EnhancedMigrationOverview: React.FC<EnhancedMigrationOverviewProps>
     const successDisplay = successCount.toLocaleString();
     const failedDisplay = failedCount.toLocaleString();
     const skippedDisplay = skippedCount.toLocaleString();
+    const cancelledDisplay = (cancelledCount || 0).toLocaleString();
+    
+    // Include cancelled count in display if > 0
+    const detailCounts = cancelledCount && cancelledCount > 0 
+      ? `✅ ${successDisplay}  ❌ ${failedDisplay}  ⏭️ ${skippedDisplay}  🚫 ${cancelledDisplay}`
+      : `✅ ${successDisplay}  ❌ ${failedDisplay}  ⏭️ ${skippedDisplay}`;
     
     const result = shouldShowTotal 
-      ? `${processedDisplay}/${totalDisplay}  |  ✅ ${successDisplay}  ❌ ${failedDisplay}  ⏭️ ${skippedDisplay}`
-      : `✅ ${successDisplay}  ❌ ${failedDisplay}  ⏭️ ${skippedDisplay}`;
+      ? `${processedDisplay}/${totalDisplay}  |  ${detailCounts}`
+      : detailCounts;
     
     console.log(`🔢 [DEBUG] formatEntityCounts result:`, result);
     return result;

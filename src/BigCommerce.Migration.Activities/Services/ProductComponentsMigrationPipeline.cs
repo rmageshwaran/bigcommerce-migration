@@ -26,7 +26,7 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
     private readonly IEntityErrorHandlingService _errorHandlingService;
     private readonly ICancellationStore _cancellationStore; // ✅ Phase 3.2.1: Native cancellation support
     private readonly IProgressTracker _progressTracker; // 🎯 CUMULATIVE PROGRESS: For proper progress integration
-    private readonly ICentralizedProgressBroadcastService? _centralizedBroadcastService; // 🚨 FIX: Optional broadcast service for real-time updates
+    private readonly ICentralizedProgressBroadcastService _centralizedBroadcastService; // ✅ FIX: Properly injected broadcast service for real-time updates
 
     public ProductComponentsMigrationPipeline(
         ISignalREventFactory signalREventFactory,
@@ -37,7 +37,8 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
         IMigrationStorageService migrationStorageService,
         IEntityErrorHandlingService errorHandlingService,
         ICancellationStore cancellationStore,
-        IProgressTracker progressTracker)
+        IProgressTracker progressTracker,
+        ICentralizedProgressBroadcastService centralizedBroadcastService)
     {
         _signalREventFactory = signalREventFactory ?? throw new ArgumentNullException(nameof(signalREventFactory));
         _progressEventPublisher = progressEventPublisher ?? throw new ArgumentNullException(nameof(progressEventPublisher));
@@ -48,7 +49,7 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
         _errorHandlingService = errorHandlingService ?? throw new ArgumentNullException(nameof(errorHandlingService));
         _cancellationStore = cancellationStore ?? throw new ArgumentNullException(nameof(cancellationStore)); // ✅ Phase 3.2.1: Native cancellation injection
         _progressTracker = progressTracker ?? throw new ArgumentNullException(nameof(progressTracker)); // 🎯 CUMULATIVE PROGRESS: Store progress tracker reference
-        _centralizedBroadcastService = null; // 🚨 FIX: Service not available in Activities project DI scope
+        _centralizedBroadcastService = centralizedBroadcastService ?? throw new ArgumentNullException(nameof(centralizedBroadcastService)); // ✅ FIX: Proper injection of centralized broadcast service
     }
 
     /// <summary>
@@ -1131,20 +1132,23 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
 
                 // Update progress tracking with discovered count (EntityProgress entry already created by orchestrator)
                 // This updates the TotalCount from 0 (progressive discovery) to actual discovered count
+                // ✅ CRITICAL FIX: Only update TotalCount, don't reset ProcessedCount to 0 (preserves any existing cumulative data)
+                var currentProgress = await _progressTracker.GetLatestAggregatedProgressAsync(migrationId);
+                var existingProgress = currentProgress.EntityProgress.GetValueOrDefault(componentType);
+                
                 await _progressTracker.UpdateProgressAsync(migrationId, new ProgressUpdate
                 {
                     EntityType = componentType,
                     TotalCount = componentCount, // Update with actual discovered count
-                    ProcessedCount = 0,
-                    SuccessCount = 0,
-                    FailureCount = 0,
-                    SkippedCount = 0,
-                    CancelledCount = 0
+                    ProcessedCount = existingProgress?.ProcessedCount ?? 0, // Preserve existing cumulative data
+                    SuccessCount = existingProgress?.SuccessCount ?? 0,     // Preserve existing cumulative data
+                    FailureCount = existingProgress?.FailureCount ?? 0,     // Preserve existing cumulative data
+                    SkippedCount = existingProgress?.SkippedCount ?? 0,     // Preserve existing cumulative data
+                    CancelledCount = existingProgress?.CancelledCount ?? 0  // Preserve existing cumulative data
                 });
 
-                // 🚨 FIX: Enable ShowTotalCount once we have actual counts
+                // 🚨 FIX: Enable ShowTotalCount once we have actual counts  
                 // Get the current progress and enable ShowTotalCount for UI display
-                var currentProgress = await _progressTracker.GetProgressAsync(migrationId);
                 if (currentProgress.EntityProgress.ContainsKey(componentType))
                 {
                     currentProgress.EntityProgress[componentType].ShowTotalCount = true;
@@ -1182,27 +1186,45 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
                 componentType, stats.SuccessfulCount, stats.TotalProcessed);
 
             // Update progress using ProgressTracker for cumulative tracking
-            await _progressTracker.UpdateProgressAsync(migrationId, new ProgressUpdate
+            // First get the real-time cumulative data from chunkincrementevents
+            var currentProgress = await _progressTracker.GetLatestAggregatedProgressAsync(migrationId);
+            var cumulativeEntityProgress = currentProgress.EntityProgress.GetValueOrDefault(componentType);
+            
+            if (cumulativeEntityProgress != null)
             {
-                EntityType = componentType,
-                ProcessedCount = stats.TotalProcessed,
-                SuccessCount = stats.SuccessfulCount,
-                FailureCount = stats.FailedCount,
-                SkippedCount = stats.SkippedCount,
-                CancelledCount = 0
-                // TotalCount is not updated here - it was set during initialization
-            });
+                // Update entityprogress table with cumulative counts to prevent data loss on cancellation
+                await _progressTracker.UpdateProgressAsync(migrationId, new ProgressUpdate
+                {
+                    EntityType = componentType,
+                    ProcessedCount = cumulativeEntityProgress.ProcessedCount, // Cumulative from all chunks
+                    SuccessCount = cumulativeEntityProgress.SuccessCount,     // Cumulative from all chunks  
+                    FailureCount = cumulativeEntityProgress.FailureCount,     // Cumulative from all chunks
+                    SkippedCount = cumulativeEntityProgress.SkippedCount,     // Cumulative from all chunks
+                    CancelledCount = cumulativeEntityProgress.CancelledCount, // Cumulative from all chunks
+                    TotalCount = cumulativeEntityProgress.ProcessedCount      // ✅ FIX: For dynamic discovery, TotalCount = ProcessedCount
+                });
+                
+                _logger.LogInformation("✅ [COMPONENT-PROGRESS-PERSIST] Updated entityprogress table with cumulative counts for {ComponentType}: TotalCount={TotalCount}, ProcessedCount={Processed}, SuccessCount={Success}", 
+                    componentType, cumulativeEntityProgress.ProcessedCount, cumulativeEntityProgress.ProcessedCount, cumulativeEntityProgress.SuccessCount);
+                
+                // Note: UpdateProgressAsync above automatically persists to database via ProgressTracker.PersistProgressToStorageAsync
+                // This ensures entityprogress table has real-time cumulative counts like other phases
+            }
 
             // 🚨 CRITICAL FIX: Add chunkincrementevents tracking for component entities
             // This provides same incremental tracking as other entities for consistency and cancellation recovery
             try
             {
+                // For dynamic discovery, ChunkSize represents the processing window (typically 10 products per chunk)
+                // not the component count discovered, since components are discovered dynamically per product
+                var productChunkSize = 10; // Default product-components chunk size
+                
                 await _progressTracker.IncrementProgressAsync(
                     migrationId: migrationId,
                     entityType: componentType,
                     chunkNumber: 1, // Component processing is single "chunk"
                     chunkStartIndex: 0,
-                    chunkSize: stats.TotalProcessed,
+                    chunkSize: productChunkSize, // Use product count as processing window size
                     successfulEntities: stats.SuccessfulCount,
                     failedEntities: stats.FailedCount,
                     skippedEntities: stats.SkippedCount,
@@ -1224,8 +1246,8 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
 
             // 🚨 FIX: Broadcast real-time progress updates via CentralizedProgressBroadcastService
             // Get the current progress from ProgressTracker to get cumulative counts and total
-            var currentProgress = await _progressTracker.GetLatestAggregatedProgressAsync(migrationId);
-            var entityProgress = currentProgress.EntityProgress.GetValueOrDefault(componentType);
+            var latestProgress = await _progressTracker.GetLatestAggregatedProgressAsync(migrationId);
+            var entityProgress = latestProgress.EntityProgress.GetValueOrDefault(componentType);
             
             if (entityProgress != null)
             {
@@ -1233,7 +1255,7 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
                 {
                     EntityType = componentType,
                     ChunkNumber = 1, // Component processing doesn't use chunks, use 1
-                    ChunkSize = stats.TotalProcessed,
+                    ChunkSize = 10, // Default product-components chunk size (processing window)
                     ProcessedInChunk = stats.SuccessfulCount,
                     FailedInChunk = stats.FailedCount,
                     
@@ -1250,15 +1272,8 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
                     ShowTotalCount = entityProgress.ShowTotalCount
                 };
 
-                // Broadcast the progress update (if service is available)
-                if (_centralizedBroadcastService != null)
-                {
-                    await _centralizedBroadcastService.BroadcastEntityChunkProgressAsync(migrationId, chunkProgress);
-                }
-                else
-                {
-                    _logger.LogWarning("⚠️ [COMPONENT-PROGRESS-BROADCAST] CentralizedProgressBroadcastService not available - skipping real-time broadcast for {ComponentType}", componentType);
-                }
+                // Broadcast the progress update using the injected service
+                await _centralizedBroadcastService.BroadcastEntityChunkProgressAsync(migrationId, chunkProgress);
                 
                 _logger.LogInformation("📢 [COMPONENT-PROGRESS-BROADCAST] Broadcasted real-time progress for {ComponentType}: {Processed}/{Total}", 
                     componentType, entityProgress.ProcessedCount, entityProgress.TotalCount);
@@ -1296,17 +1311,10 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
                         componentType, stats.TotalProcessed, stats.SuccessfulCount, stats.FailedCount);
                     _logger.LogInformation("🔍 [ENHANCED-METHOD-DEBUG] About to call final ProgressTracker.UpdateProgressAsync for {ComponentType}", componentType);
 
-                    // Update progress using ProgressTracker for cumulative tracking and proper SignalR events
-                    await _progressTracker.UpdateProgressAsync(migrationId, new ProgressUpdate
-                    {
-                        EntityType = componentType,
-                        ProcessedCount = stats.TotalProcessed,
-                        SuccessCount = stats.SuccessfulCount,
-                        FailureCount = stats.FailedCount,
-                        SkippedCount = stats.SkippedCount,
-                        CancelledCount = 0,
-                        TotalCount = stats.TotalProcessed // Set total to processed count for completion
-                    });
+                    // 🚨 CRITICAL FIX: Ensure ALL component types get cumulative updates
+                    // For zero-count components, UpdateComponentProgressAsync was never called during processing
+                    // so we need to call it here to ensure they get proper cumulative data
+                    await UpdateComponentProgressAsync(migrationId, componentType, stats);
 
                     // 🚨 CRITICAL FIX: Add final chunkincrementevents tracking for component completion
                     // This ensures component entities have same incremental tracking as other entity types
@@ -1317,7 +1325,7 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
                             entityType: componentType,
                             chunkNumber: 1, // Component processing is single "chunk" 
                             chunkStartIndex: 0,
-                            chunkSize: stats.TotalProcessed,
+                            chunkSize: 10, // Default product-components chunk size (processing window)
                             successfulEntities: stats.SuccessfulCount,
                             failedEntities: stats.FailedCount,
                             skippedEntities: stats.SkippedCount,
@@ -1337,44 +1345,11 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
                         // Don't fail completion due to incremental tracking issues
                     }
                     
-                    // Complete the entity processing to trigger final events
-                    await _progressTracker.CompleteEntityProcessingAsync(migrationId, componentType);
+                    // Note: Final completion events are handled by CentralizedProgressBroadcastService below
+                    // No need to call CompleteEntityProcessingAsync as it would create duplicate entity-completed events
                     
-                    // 🚨 FIX: Broadcast final completion status via CentralizedProgressBroadcastService
-                    var finalProgress = await _progressTracker.GetLatestAggregatedProgressAsync(migrationId);
-                    var finalEntityProgress = finalProgress.EntityProgress.GetValueOrDefault(componentType);
-                    
-                    if (finalEntityProgress != null)
-                    {
-                        var finalChunkProgress = new EntityChunkProgress
-                        {
-                            EntityType = componentType,
-                            ChunkNumber = 1,
-                            ChunkSize = stats.TotalProcessed,
-                            ProcessedInChunk = stats.SuccessfulCount,
-                            FailedInChunk = stats.FailedCount,
-                            
-                            // Use final cumulative counts
-                            CumulativeProcessed = finalEntityProgress.ProcessedCount,
-                            CumulativeFailed = finalEntityProgress.FailureCount,
-                            CumulativeSkipped = finalEntityProgress.SkippedCount,
-                            CumulativeCancelled = finalEntityProgress.CancelledCount,
-                            TotalEntitiesForType = finalEntityProgress.TotalCount,
-                            
-                            ProgressPercentage = finalEntityProgress.ProgressPercentage,
-                            Status = finalEntityProgress.Status,
-                            ProcessingTimeMs = (long)finalEntityProgress.ProcessingTime.TotalMilliseconds,
-                            ShowTotalCount = finalEntityProgress.ShowTotalCount
-                        };
-
-                        if (_centralizedBroadcastService != null)
-                        {
-                            await _centralizedBroadcastService.BroadcastEntityChunkProgressAsync(migrationId, finalChunkProgress);
-                        }
-                        
-                        _logger.LogInformation("📢 [COMPONENT-COMPLETION-BROADCAST] Broadcasted completion status for {ComponentType}: {Status}", 
-                            componentType, finalEntityProgress.Status);
-                    }
+                    // Final broadcasting handled by UpdateComponentProgressAsync above
+                    // No duplicate broadcasting needed to prevent UI event conflicts
                     
                     _logger.LogInformation("✅ [COMPONENT-PROGRESS-UPDATE] Completed progress tracking for {ComponentType}", componentType);
                 }

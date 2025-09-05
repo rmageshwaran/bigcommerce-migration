@@ -216,11 +216,18 @@ export const useEnhancedMigrationProgress = (migrationId: string): UseEnhancedMi
     setState(prev => {
       if (!prev.migrationData) return prev;
       
+      // 🔍 DEBUG: Log entity comparison for troubleshooting
+      console.log(`🔍 [handleEntityStarted] Looking for entityType: "${entityType}" in existing entities:`, 
+        prev.migrationData.entities.map(e => e.entityType));
+      
       const existingEntityIndex = prev.migrationData.entities.findIndex(e => e.entityType?.toLowerCase() === entityType?.toLowerCase());
+      
+      console.log(`🔍 [handleEntityStarted] Found existing entity at index: ${existingEntityIndex} for entityType: "${entityType}"`);
       
       let updatedEntities;
       if (existingEntityIndex >= 0) {
         // Update existing entity
+        console.log(`✅ [handleEntityStarted] Updating existing entity: "${entityType}" with totalCount: ${totalCount}`);
         updatedEntities = prev.migrationData.entities.map((entity, index) => 
           index === existingEntityIndex ? {
             ...entity,
@@ -229,7 +236,8 @@ export const useEnhancedMigrationProgress = (migrationId: string): UseEnhancedMi
           } : entity
         );
       } else {
-        // Add new entity (for component types)
+        // Only add new entity if it truly doesn't exist (for component types discovered during processing)
+        console.log(`⚠️ [handleEntityStarted] Adding new entity: "${entityType}" with totalCount: ${totalCount}`);
         const newEntity: EntityDisplayData = {
           entityType: entityType,
           totalCount: totalCount,
@@ -405,11 +413,16 @@ export const useEnhancedMigrationProgress = (migrationId: string): UseEnhancedMi
     setState(prev => {
       if (!prev.migrationData) return prev;
       
+      // 🔍 DEBUG: Log entity array before update
+      console.log(`🔍 [handleEntityCompleted] Existing entities for "${entityType}":`, 
+        prev.migrationData.entities.filter(e => e.entityType?.toLowerCase() === (entityType || '').toLowerCase()));
+      
       const updatedEntities = prev.migrationData.entities.map(entity => {
         if (entity.entityType.toLowerCase() === (entityType || '').toLowerCase()) {
+          console.log(`✅ [handleEntityCompleted] Updating entity "${entity.entityType}" - OLD: totalCount=${entity.totalCount}, successCount=${entity.successCount} → NEW: totalCount=${totalProcessed}, successCount=${totalSuccess}`);
           return {
             ...entity,
-            totalCount: entity.totalCount, // Keep existing total count
+            totalCount: totalProcessed || (totalSuccess + totalFailed + totalSkipped + totalCancelled), // Use SignalR final count
             processedCount: totalProcessed || totalSuccess + totalFailed + totalSkipped + totalCancelled,
             successCount: totalSuccess,
             failedCount: totalFailed,
@@ -761,7 +774,9 @@ export const useEnhancedMigrationProgress = (migrationId: string): UseEnhancedMi
       unsubscribeCancelled();
       unsubscribeConnectionState();
     };
-  }, [migrationId, migrationFromContext, handleMigrationStarted, handleEntityStarted, handleEntityChunkProgress, handleEntityCompleted, handleMigrationCompleted, handleError, handleMigrationCancelled, handleConnectionStateChange, refreshData]);
+  }, [migrationId, migrationFromContext, handleMigrationStarted, handleEntityStarted, handleEntityChunkProgress, handleEntityCompleted, handleError, handleMigrationCancelled, handleConnectionStateChange, refreshData]);
+  // NOTE: handleMigrationCompleted excluded from dependencies to prevent automatic refreshData() calls
+  // when migration-completed events are received, which was causing entity count doubling issues
 
   return {
     ...state,

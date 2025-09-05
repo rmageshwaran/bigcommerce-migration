@@ -87,27 +87,61 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
             await CheckCancellationAsync(migrationId);
 
             // Phase 3.2.4: Pipeline status logged (individual component events provide UI progress)
-            _logger.LogInformation("🚀 [PRODUCT-COMPONENTS-PIPELINE] Initializing product components processing - individual component events will provide UI progress");
+                    _logger.LogInformation("🚀 [PRODUCT-COMPONENTS-PIPELINE] ===== STARTING PRODUCT-COMPONENTS WORKFLOW ===== MigrationId: {MigrationId}, Products: {ProductCount}", migrationId, productsWithComponents.Count);
 
-            // 🔗 EXTRACT ALL COMPONENTS: Parse all products and extract components by type
-            // Phase 3.2.2: Enhanced with periodic cancellation checks during extraction
-            var allComponents = await ExtractAllComponentsFromProductsAsync(productsWithComponents, migrationId);
-            
-            _logger.LogInformation("🔍 [PRODUCT-COMPONENTS-PIPELINE] Extracted components: Options={OptionsCount}, Modifiers={ModifiersCount}, Reviews={ReviewsCount}", 
-                allComponents["options"].Count, allComponents["modifiers"].Count, allComponents["reviews"].Count);
+        // 🔗 EXTRACT ALL COMPONENTS: Parse all products and extract components by type
+        // Phase 3.2.2: Enhanced with periodic cancellation checks during extraction
+        _logger.LogInformation("🔍 [WORKFLOW-DEBUG] STEP 1: Starting component extraction from {ProductCount} products", productsWithComponents.Count);
+        var allComponents = await ExtractAllComponentsFromProductsAsync(productsWithComponents, migrationId);
+        
+        _logger.LogInformation("🔍 [WORKFLOW-DEBUG] STEP 2: Component extraction completed - Options={OptionsCount}, Modifiers={ModifiersCount}, Reviews={ReviewsCount}", 
+            allComponents["options"].Count, allComponents["modifiers"].Count, allComponents["reviews"].Count);
 
-            // 🎯 INDIVIDUAL COMPONENT PROGRESS INTEGRATION: Initialize progress tracking for each component
+        // 🔍 DEBUG: Check if we have any components before proceeding
+        var totalComponents = allComponents.Values.Sum(c => c.Count);
+        _logger.LogInformation("🔍 [WORKFLOW-DEBUG] STEP 2.1: Total components extracted: {TotalComponents}", totalComponents);
+
+        // 🔍 DEBUG: Check allComponents structure
+        _logger.LogInformation("🔍 [WORKFLOW-DEBUG] STEP 2.2: Component breakdown - Options={Options}, Modifiers={Modifiers}, Reviews={Reviews}", 
+            allComponents.ContainsKey("options") ? allComponents["options"].Count : -1,
+            allComponents.ContainsKey("modifiers") ? allComponents["modifiers"].Count : -1, 
+            allComponents.ContainsKey("reviews") ? allComponents["reviews"].Count : -1);
+
+        // 🔍 DEBUG: Check if we'll proceed or return early
+        if (totalComponents == 0)
+        {
+            _logger.LogWarning("⚠️ [WORKFLOW-DEBUG] STEP 2.3: No components found, but proceeding with enhanced methods for consistency");
+        }
+        else
+        {
+            _logger.LogInformation("🔍 [WORKFLOW-DEBUG] STEP 2.3: Components found, proceeding with full workflow");
+        }
+
+        // 🎯 INDIVIDUAL COMPONENT PROGRESS INTEGRATION: Initialize progress tracking for each component
+        _logger.LogInformation("🔍 [WORKFLOW-DEBUG] STEP 3: Calling InitializeIndividualComponentProgressAsync to update entityprogress table");
+        
+        try
+        {
             await InitializeIndividualComponentProgressAsync(migrationId, allComponents);
+            _logger.LogInformation("🔍 [WORKFLOW-DEBUG] STEP 3 COMPLETED: InitializeIndividualComponentProgressAsync finished");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("❌ [WORKFLOW-ERROR] STEP 3 FAILED: InitializeIndividualComponentProgressAsync threw exception: {Exception}", ex.Message);
+            throw;
+        }
 
             // Phase 3.2.1: Check for cancellation after component extraction
+            _logger.LogInformation("🔍 [WORKFLOW-DEBUG] STEP 4: About to check for cancellation");
             await CheckCancellationAsync(migrationId);
+            _logger.LogInformation("🔍 [WORKFLOW-DEBUG] STEP 4 COMPLETED: Cancellation check passed");
 
             // Phase 3.2.4: Log extraction completion (individual component events provide UI progress)
-            var totalComponents = allComponents.Values.Sum(c => c.Count);
             _logger.LogInformation("🔍 [PRODUCT-COMPONENTS-PIPELINE] Extracted {TotalComponents} components from {ProductCount} products - individual component discovery events published", 
                 totalComponents, productsWithComponents.Count);
 
             // Initialize component statistics with actual counts
+            _logger.LogInformation("🔍 [WORKFLOW-DEBUG] STEP 4.1: Initializing component statistics");
             var componentTypes = new[] { "options", "modifiers", "reviews" };
             foreach (var componentType in componentTypes)
             {
@@ -119,15 +153,21 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
                     FailedCount = 0,
                     ProcessingTime = TimeSpan.Zero
                 };
+                _logger.LogInformation("🔍 [WORKFLOW-DEBUG] STEP 4.1.{ComponentType}: Initialized stats - TotalProcessed={Count}", 
+                    componentType.ToUpper(), allComponents[componentType].Count);
             }
+            _logger.LogInformation("🔍 [WORKFLOW-DEBUG] STEP 4.1 COMPLETED: Component statistics initialized");
 
             // 🚀 PARALLEL PROCESSING: Process each component type in parallel
+            _logger.LogInformation("🔍 [WORKFLOW-DEBUG] STEP 5: Starting parallel processing of component types");
             var processingTasks = new List<Task>();
             
             foreach (var componentType in componentTypes)
             {
                 // Phase 3.2.1: Check for cancellation before each component type processing
+                _logger.LogInformation("🔍 [WORKFLOW-DEBUG] STEP 5.{ComponentType}: About to check cancellation for {ComponentType}", componentType.ToUpper(), componentType);
                 await CheckCancellationAsync(migrationId);
+                _logger.LogInformation("🔍 [WORKFLOW-DEBUG] STEP 5.{ComponentType}: Cancellation check passed for {ComponentType}", componentType.ToUpper(), componentType);
 
                 var components = allComponents[componentType];
                 if (components.Any())
@@ -148,12 +188,25 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
             }
 
             // Wait for all component types to complete processing
+            _logger.LogInformation("🔍 [WORKFLOW-DEBUG] STEP 5.1: About to wait for all {TaskCount} processing tasks to complete", processingTasks.Count);
             await Task.WhenAll(processingTasks);
+            _logger.LogInformation("🔍 [WORKFLOW-DEBUG] STEP 5.1 COMPLETED: All processing tasks completed successfully");
             
             _logger.LogInformation("✅ [PRODUCT-COMPONENTS-PIPELINE] Completed parallel processing of all component types");
 
             // 🎯 INDIVIDUAL COMPONENT COMPLETION: Update progress tracker with final statistics for cumulative tracking
-            await CompleteIndividualComponentProgressAsync(migrationId, result.SubEntityStatistics);
+            _logger.LogInformation("🔍 [WORKFLOW-DEBUG] STEP 6: Calling CompleteIndividualComponentProgressAsync to finalize entityprogress table");
+            
+            try
+            {
+                await CompleteIndividualComponentProgressAsync(migrationId, result.SubEntityStatistics);
+                _logger.LogInformation("🔍 [WORKFLOW-DEBUG] STEP 6 COMPLETED: CompleteIndividualComponentProgressAsync finished");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("❌ [WORKFLOW-ERROR] STEP 6 FAILED: CompleteIndividualComponentProgressAsync threw exception: {Exception}", ex.Message);
+                throw;
+            }
 
             // Phase 3.2.4: Log processing completion (individual component events provide UI progress)
             _logger.LogInformation("✅ [PRODUCT-COMPONENTS-PIPELINE] Completed component processing - individual component completion events published");
@@ -161,7 +214,11 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
             stopwatch.Stop();
             result.ProcessingTime = stopwatch.Elapsed;
 
-
+            _logger.LogInformation("🔍 [WORKFLOW-DEBUG] STEP 7: Pipeline completed, preparing final results");
+            _logger.LogInformation("🔍 [WORKFLOW-DEBUG] STEP 7: Final statistics - Options: {OptionsSuccess}/{OptionsTotal}, Modifiers: {ModifiersSuccess}/{ModifiersTotal}, Reviews: {ReviewsSuccess}/{ReviewsTotal}",
+                result.SubEntityStatistics["options"].SuccessfulCount, result.SubEntityStatistics["options"].TotalProcessed,
+                result.SubEntityStatistics["modifiers"].SuccessfulCount, result.SubEntityStatistics["modifiers"].TotalProcessed,
+                result.SubEntityStatistics["reviews"].SuccessfulCount, result.SubEntityStatistics["reviews"].TotalProcessed);
 
             _logger.LogInformation("✅ [PRODUCT-COMPONENTS-PIPELINE] Completed product components migration for {ProductCount} products. " +
                                  "Options: {OptionsCount}, Modifiers: {ModifiersCount}, Reviews: {ReviewsCount}. " +
@@ -868,7 +925,10 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
             stats.ProcessingTime = stopwatch.Elapsed;
 
             // 🎯 REAL-TIME PROGRESS: Update progress tracker with final component statistics for real-time UI updates
+            _logger.LogInformation("🔍 [WORKFLOW-DEBUG] STEP 5: Calling UpdateComponentProgressAsync for {ComponentType} with stats: Processed={Processed}, Success={Success}, Failed={Failed}", 
+                componentType, stats.TotalProcessed, stats.SuccessfulCount, stats.FailedCount);
             await UpdateComponentProgressAsync(migrationId, componentType, stats);
+            _logger.LogInformation("🔍 [WORKFLOW-DEBUG] STEP 5 COMPLETED: UpdateComponentProgressAsync finished for {ComponentType}", componentType);
 
             _logger.LogInformation("✅ [COMPONENT-{ComponentType}] Completed processing: {SuccessCount}/{TotalCount} successful, {FailedCount} failed",
                 componentType.ToUpper(), stats.SuccessfulCount, stats.TotalProcessed, stats.FailedCount);
@@ -1055,16 +1115,19 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
     /// <param name="allComponents">Extracted components by type</param>
     private async Task InitializeIndividualComponentProgressAsync(string migrationId, Dictionary<string, List<ComponentWithContext>> allComponents)
     {
+        _logger.LogInformation("🔍 [ENHANCED-METHOD-DEBUG] ===== InitializeIndividualComponentProgressAsync CALLED ===== MigrationId: {MigrationId}", migrationId);
         try
         {
             var componentTypes = new[] { "options", "modifiers", "reviews" };
+            _logger.LogInformation("🔍 [ENHANCED-METHOD-DEBUG] Processing {ComponentCount} component types: {ComponentTypes}", componentTypes.Length, string.Join(", ", componentTypes));
             
             foreach (var componentType in componentTypes)
             {
                 var componentCount = allComponents[componentType].Count;
                 
-                _logger.LogInformation("📊 [COMPONENT-PROGRESS-INIT] Initializing progress tracking for {ComponentType}: {Count} components discovered", 
+                _logger.LogInformation("📊 [COMPONENT-PROGRESS-INIT] ===== UPDATING ENTITYPROGRESS TABLE ===== ComponentType: {ComponentType}, Count: {Count}", 
                     componentType, componentCount);
+                _logger.LogInformation("🔍 [ENHANCED-METHOD-DEBUG] About to call ProgressTracker.UpdateProgressAsync for {ComponentType}", componentType);
 
                 // Update progress tracking with discovered count (EntityProgress entry already created by orchestrator)
                 // This updates the TotalCount from 0 (progressive discovery) to actual discovered count
@@ -1219,16 +1282,19 @@ public class ProductComponentsMigrationPipeline : IProductComponentsMigrationPip
     /// <param name="componentStatistics">Statistics for each component type</param>
     private async Task CompleteIndividualComponentProgressAsync(string migrationId, Dictionary<string, SubEntityStatistics> componentStatistics)
     {
+        _logger.LogInformation("🔍 [ENHANCED-METHOD-DEBUG] ===== CompleteIndividualComponentProgressAsync CALLED ===== MigrationId: {MigrationId}", migrationId);
         try
         {
             var componentTypes = new[] { "options", "modifiers", "reviews" };
+            _logger.LogInformation("🔍 [ENHANCED-METHOD-DEBUG] Finalizing progress for {ComponentCount} component types", componentTypes.Length);
             
             foreach (var componentType in componentTypes)
             {
                 if (componentStatistics.TryGetValue(componentType, out var stats))
                 {
-                    _logger.LogInformation("📊 [COMPONENT-PROGRESS-UPDATE] Updating progress for {ComponentType}: {Successful}/{Total} successful", 
-                        componentType, stats.SuccessfulCount, stats.TotalProcessed);
+                    _logger.LogInformation("📊 [COMPONENT-PROGRESS-UPDATE] ===== FINALIZING ENTITYPROGRESS TABLE ===== ComponentType: {ComponentType}, Processed: {Processed}, Success: {Success}, Failed: {Failed}", 
+                        componentType, stats.TotalProcessed, stats.SuccessfulCount, stats.FailedCount);
+                    _logger.LogInformation("🔍 [ENHANCED-METHOD-DEBUG] About to call final ProgressTracker.UpdateProgressAsync for {ComponentType}", componentType);
 
                     // Update progress using ProgressTracker for cumulative tracking and proper SignalR events
                     await _progressTracker.UpdateProgressAsync(migrationId, new ProgressUpdate

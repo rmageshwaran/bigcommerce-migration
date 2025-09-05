@@ -701,6 +701,13 @@ public class ProcessEntityChunkActivity
             // 🎯 PHASE 2: Use CentralizedProgressBroadcastService for all progress broadcasting
             // This provides rate limiting, consistent event structure, and single source of truth
             
+            // 🚨 FIX: Skip SignalR publishing for product-components - individual components handle their own progress
+            if (request.EntityType.Equals("product-components", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogInformation("🎯 [CHUNK-{ChunkNumber}] Skipping SignalR progress for product-components - individual components broadcast their own progress", request.ChunkNumber);
+                return;
+            }
+            
             // Get accurate cumulative progress from the progress tracker
             var migrationProgress = await _progressTracker.GetLatestAggregatedProgressAsync(request.MigrationId);
             var entityProgress = migrationProgress.EntityProgress.GetValueOrDefault(request.EntityType);
@@ -810,16 +817,21 @@ public class ProcessEntityChunkActivity
                     // 🎯 EFFICIENT COMPONENT PROCESSING: Single fetch, individual progress tracking
                     // ProductComponentsMigrationPipeline handles fetching products with include="options,modifiers,reviews"
                     // and publishes individual progress events for options, modifiers, and reviews
-                    _logger.LogInformation("🔗 [CHUNK-{ChunkNumber}] Routing {EntityType} to ProductComponentsMigrationPipeline for efficient component processing", 
-                        chunkNumber, batchRequest.EntityType);
+                    _logger.LogInformation("🔗 [CHUNK-{ChunkNumber}] ===== ROUTING TO PRODUCT-COMPONENTS PIPELINE ===== EntityType: {EntityType}, EntityCount: {EntityCount}, MigrationId: {MigrationId}", 
+                        chunkNumber, batchRequest.EntityType, entities.Count, batchRequest.MigrationId);
                     
-                    return await _productComponentsPipeline.ProcessProductComponentsAsync(
+                    _logger.LogInformation("🔍 [ROUTING-DEBUG] About to call ProductComponentsMigrationPipeline.ProcessProductComponentsAsync");
+                    var result = await _productComponentsPipeline.ProcessProductComponentsAsync(
                         entities,
                         batchRequest.MigrationId,
                         batchRequest.SourceStore,
                         batchRequest.DestinationStore,
                         batchRequest.EntityType,
                         CancellationToken.None);
+                    _logger.LogInformation("🔍 [ROUTING-DEBUG] ProductComponentsMigrationPipeline.ProcessProductComponentsAsync completed - Processed: {Processed}, Duration: {Duration}ms", 
+                        result.TotalProcessed, result.ProcessingTime.TotalMilliseconds);
+                    
+                    return result;
 
                 case "options":
                 case "modifiers":  

@@ -288,6 +288,18 @@ export class SignalRService {
       this.notifyListeners('migrationProgress', eventData);
     });
 
+    this.connection.on('EntityCompleted', (eventData: any) => {
+      console.log('✅ [DEBUG] SignalR: Entity Completed received', eventData);
+      console.log('✅ [DEBUG] EntityCompleted structure:', {
+        entityType: eventData?.entityType,
+        totalProcessed: eventData?.totalProcessed,
+        totalSuccess: eventData?.totalSuccess,
+        totalFailed: eventData?.totalFailed,
+        allKeys: eventData ? Object.keys(eventData) : []
+      });
+      this.notifyListeners('entity-completed', eventData);
+    });
+
     this.connection.on('MigrationCompleted', (eventData: any) => {
       console.log('✅ SignalR: Migration Completed', eventData);
       this.notifyListeners('migration-completed', eventData);

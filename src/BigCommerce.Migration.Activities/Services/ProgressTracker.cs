@@ -46,6 +46,15 @@ public class ProgressTracker : IProgressTracker
     /// <inheritdoc />
     public async Task UpdateProgressAsync(string migrationId, ProgressUpdate update, CancellationToken cancellationToken = default)
     {
+        // 🔍 DEBUG: Log all component entity updates
+        if (update?.EntityType != null && (update.EntityType.Equals("options", StringComparison.OrdinalIgnoreCase) ||
+                                          update.EntityType.Equals("modifiers", StringComparison.OrdinalIgnoreCase) ||
+                                          update.EntityType.Equals("reviews", StringComparison.OrdinalIgnoreCase)))
+        {
+            _logger.LogInformation("🔍 [PROGRESSTRACKER-DEBUG] ===== UpdateProgressAsync CALLED FOR COMPONENT ===== EntityType: {EntityType}, ProcessedCount: {ProcessedCount}, SuccessCount: {SuccessCount}, TotalCount: {TotalCount}", 
+                update.EntityType, update.ProcessedCount, update.SuccessCount, update.TotalCount);
+        }
+        
         cancellationToken.ThrowIfCancellationRequested();
         
         if (string.IsNullOrEmpty(migrationId))
@@ -602,6 +611,15 @@ public class ProgressTracker : IProgressTracker
             // Persist entity-level progress data
             foreach (var entityProgress in progress.EntityProgress)
             {
+                // 🔍 DEBUG: Log component entity persistence
+                if (entityProgress.Key.Equals("options", StringComparison.OrdinalIgnoreCase) ||
+                    entityProgress.Key.Equals("modifiers", StringComparison.OrdinalIgnoreCase) ||
+                    entityProgress.Key.Equals("reviews", StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogInformation("🔍 [PERSISTENCE-DEBUG] ===== PERSISTING COMPONENT TO DATABASE ===== EntityType: {EntityType}, ProcessedCount: {ProcessedCount}, SuccessCount: {SuccessCount}, TotalCount: {TotalCount}", 
+                        entityProgress.Key, entityProgress.Value.ProcessedCount, entityProgress.Value.SuccessCount, entityProgress.Value.TotalCount);
+                }
+                
                 try
                 {
                     var entityProgressEntry = new EntityProgressEntry
@@ -759,6 +777,10 @@ public class ProgressTracker : IProgressTracker
             // Don't throw - incremental progress failures should not break migration
         }
     }
+
+    /// <summary>
+    /// REVERTED: Composite entity approach not needed - focus on individual component row updates
+    /// </summary>
 
     /// <inheritdoc />
     public async Task<MigrationProgress> GetLatestAggregatedProgressAsync(string migrationId, CancellationToken cancellationToken = default)

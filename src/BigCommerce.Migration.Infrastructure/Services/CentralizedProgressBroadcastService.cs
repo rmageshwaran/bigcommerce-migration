@@ -163,7 +163,7 @@ namespace BigCommerce.Migration.Infrastructure.Services
                     Status = progress.Status,
                     ProcessingTime = TimeSpan.FromMilliseconds(progress.ProcessingTimeMs),
                     ProgressPercentage = progress.ProgressPercentage,
-                    ShowTotalCount = progress.ShowTotalCount // 🎯 UI FLAG: Keep original ShowTotalCount logic for dynamic discovery entities
+                    ShowTotalCount = progress.ShowTotalCount // 🎯 UI FLAG: Use database value for ShowTotalCount (already correct in entityprogress table)
                 });
 
                 await _publisher.PublishEntityChunkProgressAsync(progressEvent, cancellationToken).ConfigureAwait(false);

@@ -1,6 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Threading.Tasks;
 using BigCommerce.Migration.Core.Models;
 
 namespace BigCommerce.Migration.Core.Interfaces
@@ -18,9 +15,8 @@ namespace BigCommerce.Migration.Core.Interfaces
         /// </summary>
         /// <param name="migrationId">Migration ID</param>
         /// <param name="migrationRequest">Migration request details</param>
-        /// <param name="categoryTreeContext">Category tree context for the migration</param>
         /// <returns>Queue message ready for output binding</returns>
-        QueueMessage CreateMigrationStartMessage(string migrationId, MigrationRequest migrationRequest, CategoryTreeContext? categoryTreeContext = null);
+        QueueMessage CreateMigrationStartMessage(string migrationId, MigrationRequest migrationRequest);
 
         /// <summary>
         /// Creates an entity batch processing message for queue output binding
@@ -118,9 +114,8 @@ namespace BigCommerce.Migration.Core.Interfaces
         /// </summary>
         /// <param name="migrationId">Migration ID</param>
         /// <param name="migrationRequest">Migration request</param>
-        /// <param name="categoryTreeContext">Category tree context for the migration</param>
         /// <returns>Task representing the send operation</returns>
-        Task SendMigrationStartMessageAsync(string migrationId, MigrationRequest migrationRequest, CategoryTreeContext? categoryTreeContext = null);
+        Task SendMigrationStartMessageAsync(string migrationId, MigrationRequest migrationRequest);
 
 
 

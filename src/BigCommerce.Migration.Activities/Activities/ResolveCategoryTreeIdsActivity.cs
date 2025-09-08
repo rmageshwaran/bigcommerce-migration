@@ -33,22 +33,31 @@ public class ResolveCategoryTreeIdsActivity
     {
         try
         {
+            if (request?.MigrationRequest?.SourceStore == null || request?.MigrationRequest?.DestinationStore == null)
+            {
+                _logger.LogError("No Source Store, Destination Store provided for migration {MigrationId}. Category migration will be skipped.", request.MigrationId);
+                return new CategoryTreeContext();
+            }
+
             _logger.LogInformation("🌳 [RESOLVE-TREE] ⭐ STARTING: Resolving category tree IDs for migration {MigrationId}", request.MigrationId);
 
             var channelMapping = request.MigrationRequest.ChannelMapping;
             if (channelMapping is null || !channelMapping.Any())
             {
-                _logger.LogWarning("No channel mappings provided for migration {MigrationId}. Category migration will be skipped.", request.MigrationId);
+                _logger.LogError("No channel mappings provided for migration {MigrationId}. Category migration will be skipped.", request.MigrationId);
                 return new CategoryTreeContext();
             }
 
             var sourceChannelIds = channelMapping.Select(m => m.SourceChannel).Distinct().ToList();
+
             var destinationChannelIds = channelMapping.Select(m => m.DestinationChannel).Distinct().ToList();
 
             var sourceTrees = await GetTreesForChannels(request.MigrationRequest.SourceStore, sourceChannelIds, "source");
+
             var destinationTrees = await GetTreesForChannels(request.MigrationRequest.DestinationStore, destinationChannelIds, "destination");
 
-            var result = request.CategoryTreeContext ?? new CategoryTreeContext();
+            var result = new CategoryTreeContext();
+
             foreach (var mapping in channelMapping)
             {
                 if (sourceTrees.TryGetValue(mapping.SourceChannel, out var sourceTreeId) &&
@@ -104,5 +113,4 @@ public class ResolveCategoryTreeIdsRequest
 {
     public string MigrationId { get; set; } = string.Empty;
     public MigrationRequest MigrationRequest { get; set; } = new();
-    public CategoryTreeContext? CategoryTreeContext { get; set; }
-} 
+}

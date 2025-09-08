@@ -68,25 +68,7 @@ public static class MigrationDurableOrchestrator
                     string.Join(", ", input.MigrationRequest.Entities));
             }
 
-            // Step 1: Initialize Migration
-            logger.LogInformation("Step 1: Initializing migration for MigrationId: {MigrationId}", migrationId);
-            var initializeResult = await context.CallActivityAsync<InitializeMigrationResult>(
-                "InitializeMigration", 
-                new InitializeMigrationRequest 
-                { 
-                    MigrationRequest = input.MigrationRequest ?? new MigrationRequest(),
-                    CategoryTreeContext = input.CategoryTreeContext
-                });
-
-            if (!initializeResult.IsSuccess)
-            {
-                result.Status = "Failed";
-                result.ErrorMessage = $"Migration initialization failed: {initializeResult.ErrorMessage}";
-                result.EndTime = context.CurrentUtcDateTime;
-                return result;
-            }
-
-            // Step 2: Validate Migration Stores
+            // Step 1: Validate Migration Stores
             logger.LogInformation("Step 2: Validating migration stores for MigrationId: {MigrationId}", migrationId);
             var validateResult = await context.CallActivityAsync<ValidateStoresResult>(
                 "ValidateMigrationStores",
@@ -104,7 +86,7 @@ public static class MigrationDurableOrchestrator
                 return result;
             }
 
-            // Step 3: Resolve Category Tree IDs
+            // Step 2: Resolve Category Tree IDs
             logger.LogInformation("Step 3: Resolving category tree IDs for MigrationId: {MigrationId}", migrationId);
             var resolvedCategoryTreeContext = await context.CallActivityAsync<CategoryTreeContext>(
                 "ResolveCategoryTreeIds",
@@ -112,13 +94,9 @@ public static class MigrationDurableOrchestrator
                 {
                     MigrationId = migrationId,
                     MigrationRequest = input.MigrationRequest ?? new MigrationRequest(),
-                    CategoryTreeContext = input.CategoryTreeContext
                 });
 
-            // Update the input context with resolved tree IDs
-            input.CategoryTreeContext = resolvedCategoryTreeContext;
-
-            // Step 4: Check for cancellation before starting entity processing
+            // Step 3: Check for cancellation before starting entity processing
             var cancellationResult = await context.CallActivityAsync<(bool IsCancelled, string Reason)>("CheckCancellationFlag", migrationId);
             var isCancelled = cancellationResult.IsCancelled;
             if (isCancelled)
@@ -135,7 +113,7 @@ public static class MigrationDurableOrchestrator
                 };
             }
 
-            // Step 4.5: Phase 3.1 - Orchestrator collision detection
+            // Step 4: Orchestrator collision detection
             logger.LogInformation("Step 4.5: Checking for orchestrator instance collisions for MigrationId: {MigrationId}", migrationId);
             var collisionResult = await context.CallActivityAsync<OrchestratorCollisionResult>(
                 "OrchestratorCollisionDetectionActivity",
@@ -162,7 +140,7 @@ public static class MigrationDurableOrchestrator
                         CancelledAt = context.CurrentUtcDateTime
                     });
                 
-                // Phase 4.1: Return standardized result (consistent with enhanced cancellation)
+                // Phase 4.2: Return standardized result (consistent with enhanced cancellation)
                 logger.LogInformation("Creating collision cancellation result for migration: {MigrationId}", migrationId);
                 return new MigrationOrchestrationResult
                 {
@@ -181,8 +159,6 @@ public static class MigrationDurableOrchestrator
 
             logger.LogInformation("Successfully acquired orchestrator lock for migration: {MigrationId}, instance: {InstanceId}", 
                 migrationId, instanceId);
-
-            // Simplified cancellation handling - we'll check via activities
 
             // Step 5: Resolve entity dependencies using EntityDependencyResolver
             var entityOrder = await context.CallActivityAsync<List<string>>(
@@ -308,10 +284,9 @@ public static class MigrationDurableOrchestrator
                     EntityType = entityType,
                     SourceStore = input.MigrationRequest?.SourceStore ?? new StoreConfiguration(),
                     DestinationStore = input.MigrationRequest?.DestinationStore ?? new StoreConfiguration(),
-                    CategoryTreeContext = input.CategoryTreeContext ?? new CategoryTreeContext(),
+                    CategoryTreeContext = resolvedCategoryTreeContext,
                     Settings = input.MigrationRequest?.Settings,
                     ChannelMapping = input.MigrationRequest?.ChannelMapping, // ✅ Pass ChannelMapping from UI
-                    // 🚫 CANCELLATION FIX: Propagate cancellation state to child orchestrators
                     IsCancelled = cancellationState.IsCancelled,
                     CancellationReason = cancellationState.CancellationReason,
                     CancelledAt = cancellationState.CancelledAt
@@ -777,7 +752,6 @@ public class MigrationOrchestrationRequest
 {
     public string MigrationId { get; set; } = string.Empty;
     public MigrationRequest MigrationRequest { get; set; } = new();
-    public CategoryTreeContext? CategoryTreeContext { get; set; }
 }
 
 /// <summary>

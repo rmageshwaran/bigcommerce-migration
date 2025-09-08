@@ -1,10 +1,9 @@
 using Azure.Storage.Queues;
+using BigCommerce.Migration.Core.Interfaces;
+using BigCommerce.Migration.Core.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
-using BigCommerce.Migration.Core.Interfaces;
-using BigCommerce.Migration.Core.Models;
-using AzureQueueMessage = Azure.Storage.Queues.Models.QueueMessage;
 
 namespace BigCommerce.Migration.Infrastructure.Services;
 
@@ -47,9 +46,8 @@ public class QueueService : IQueueService
     /// </summary>
     /// <param name="migrationId">Migration ID</param>
     /// <param name="migrationRequest">Migration request details</param>
-    /// <param name="categoryTreeContext">Category tree context for the migration</param>
     /// <returns>Queue message ready for output binding</returns>
-    public Core.Models.QueueMessage CreateMigrationStartMessage(string migrationId, MigrationRequest migrationRequest, CategoryTreeContext? categoryTreeContext = null)
+    public Core.Models.QueueMessage CreateMigrationStartMessage(string migrationId, MigrationRequest migrationRequest)
     {
         try
         {
@@ -60,7 +58,6 @@ public class QueueService : IQueueService
                 MessageType = "MigrationStart",
                 MigrationId = migrationId,
                 MigrationRequest = migrationRequest,
-                CategoryTreeContext = categoryTreeContext,
                 CreatedAt = DateTime.UtcNow,
                 Version = "1.0"
             };
@@ -746,11 +743,10 @@ public class QueueService : IQueueService
     /// </summary>
     /// <param name="migrationId">Migration ID</param>
     /// <param name="migrationRequest">Migration request</param>
-    /// <param name="categoryTreeContext">Category tree context for the migration</param>
     /// <returns>Task representing the send operation</returns>
-    public async Task SendMigrationStartMessageAsync(string migrationId, MigrationRequest migrationRequest, CategoryTreeContext? categoryTreeContext = null)
+    public async Task SendMigrationStartMessageAsync(string migrationId, MigrationRequest migrationRequest)
     {
-        var queueMessage = CreateMigrationStartMessage(migrationId, migrationRequest, categoryTreeContext);
+        var queueMessage = CreateMigrationStartMessage(migrationId, migrationRequest);
         await SendMessageAsync(MigrationStartQueueName, queueMessage);
         
         _logger.LogInformation("Migration start message sent to queue for MigrationId: {MigrationId}", migrationId);

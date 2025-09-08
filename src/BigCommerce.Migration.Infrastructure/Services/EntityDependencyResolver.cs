@@ -102,7 +102,7 @@ public class EntityDependencyResolver : IEntityDependencyResolver
                 "product-components",    // Phase 2: Fetch once, process options/modifiers/reviews separately with individual tracking
                 "product-related",       // Phase 3: Related products updates (provides timing gap for option mappings)
                 "product-images",        // Phase 4: Product images migration (individual product updates)
-                "product-channel-assign", // Phase 5: Product channel assignments (bulk API updates)
+                "product-channel-assign",// Phase 5: Product channel assignments (bulk API updates)
                 "product-metafields",    // Phase 6: Product metafields (no dependencies)
                 "variants"               // Phase 7: Product variants ✅ MOVED TO LAST - ensures all dependencies completed
             };

@@ -118,7 +118,7 @@ public class MigrationManagementFunctions : BaseFunction
             Logger.LogInformation("Migration entry stored successfully. MigrationId: {MigrationId}", migrationId);
 
             // Send migration start message to queue for processing
-            await _queueService.SendMigrationStartMessageAsync(migrationId, migrationRequest, null);
+            await _queueService.SendMigrationStartMessageAsync(migrationId, migrationRequest);
             Logger.LogInformation("Migration start message sent to queue for processing. MigrationId: {MigrationId}", migrationId);
 
             // Log migration start event to OpenSearch

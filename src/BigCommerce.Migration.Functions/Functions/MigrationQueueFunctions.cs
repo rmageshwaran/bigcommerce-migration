@@ -149,7 +149,6 @@ public class MigrationQueueFunctions
             {
                 MigrationId = migrationId,
                 MigrationRequest = migrationData.MigrationRequest,
-                CategoryTreeContext = migrationData.CategoryTreeContext
             };
 
             // Start the migration orchestrator
@@ -316,5 +315,4 @@ public class MigrationStartData
 {
     public string MigrationId { get; set; } = string.Empty;
     public MigrationRequest MigrationRequest { get; set; } = new();
-    public CategoryTreeContext? CategoryTreeContext { get; set; }
 } 

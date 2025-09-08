@@ -1,15 +1,14 @@
+using BigCommerce.Migration.Core.Interfaces;
+using BigCommerce.Migration.Core.Models;
+using BigCommerce.Migration.Core.Services;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
+using Microsoft.Azure.WebJobs.Extensions.OpenApi.Core.Attributes;
+using Microsoft.DurableTask.Client;
 using Microsoft.Extensions.Logging;
+using Microsoft.OpenApi.Models;
 using System.Net;
 using System.Text.Json;
-using BigCommerce.Migration.Core.Models;
-using BigCommerce.Migration.Core.Interfaces;
-using BigCommerce.Migration.Core.Services;
-using Microsoft.Azure.WebJobs.Extensions.OpenApi.Core.Attributes;
-using Microsoft.OpenApi.Models;
-using Microsoft.DurableTask.Client;
-using Microsoft.DurableTask;
 
 namespace BigCommerce.Migration.Functions.Functions;
 
@@ -136,8 +135,6 @@ public class MigrationHttpFunctions
                 return await CreateErrorResponse(req, HttpStatusCode.BadRequest, validationResult.ErrorMessage, migrationId);
             }
 
-
-
             // Create migration entry for Azure Storage
             var migrationEntry = new Core.Models.MigrationEntry
             {
@@ -155,7 +152,7 @@ public class MigrationHttpFunctions
             _logger.LogInformation("Migration entry stored successfully. MigrationId: {MigrationId}", migrationId);
 
             // Send migration start message to queue for processing (no category tree context - resolved later)
-            await _queueService.SendMigrationStartMessageAsync(migrationId, migrationRequest, null);
+            await _queueService.SendMigrationStartMessageAsync(migrationId, migrationRequest);
             _logger.LogInformation("Migration start message sent to queue for processing. MigrationId: {MigrationId}", migrationId);
 
             // Log migration start event to OpenSearch
@@ -1654,85 +1651,6 @@ public class MigrationHttpFunctions
         }
 
         return new ValidationResult { IsValid = true };
-    }
-
-    /// <summary>
-    /// DEPRECATED: Full validation with store connectivity testing (moved to orchestrator)
-    /// Validates the migration request and store configurations
-    /// </summary>
-    /// <param name="migrationRequest">Migration request to validate</param>
-    /// <param name="migrationId">Migration ID for logging</param>
-    /// <returns>Validation result</returns>
-    private async Task<ValidationResult> ValidateMigrationRequest(MigrationRequest migrationRequest, string migrationId)
-    {
-        try
-        {
-            // Validate source store configuration
-            if (migrationRequest.SourceStore == null || !migrationRequest.SourceStore.IsValid())
-            {
-                return new ValidationResult { IsValid = false, ErrorMessage = "Invalid source store configuration" };
-            }
-
-            // Validate destination store configuration
-            if (migrationRequest.DestinationStore == null || !migrationRequest.DestinationStore.IsValid())
-            {
-                return new ValidationResult { IsValid = false, ErrorMessage = "Invalid destination store configuration" };
-            }
-
-            // Validate entities list
-            if (!migrationRequest.Entities.Any())
-            {
-                return new ValidationResult { IsValid = false, ErrorMessage = "At least one entity type must be specified" };
-            }
-
-            // Validate entity types
-            var validEntityTypes = new[] { "categories", "products", "brands", "variants", "modifiers", "options", "reviews" };
-            var invalidEntities = migrationRequest.Entities.Where(e => !validEntityTypes.Contains(e.ToLower())).ToList();
-            if (invalidEntities.Any())
-            {
-                return new ValidationResult { IsValid = false, ErrorMessage = $"Invalid entity types: {string.Join(", ", invalidEntities)}" };
-            }
-
-            // Test source store connectivity
-            _logger.LogInformation("Testing source store connectivity. MigrationId: {MigrationId}", migrationId);
-            try
-            {
-                var sourceStoreHealthy = await _bigCommerceApiClient.IsHealthyAsync(migrationRequest.SourceStore);
-                if (!sourceStoreHealthy)
-                {
-                    return new ValidationResult { IsValid = false, ErrorMessage = "Unable to connect to source store" };
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to connect to source store. MigrationId: {MigrationId}", migrationId);
-                return new ValidationResult { IsValid = false, ErrorMessage = "Unable to connect to source store: " + ex.Message };
-            }
-
-            // Test destination store connectivity
-            _logger.LogInformation("Testing destination store connectivity. MigrationId: {MigrationId}", migrationId);
-            try
-            {
-                var destinationStoreHealthy = await _bigCommerceApiClient.IsHealthyAsync(migrationRequest.DestinationStore);
-                if (!destinationStoreHealthy)
-                {
-                    return new ValidationResult { IsValid = false, ErrorMessage = "Unable to connect to destination store" };
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to connect to destination store. MigrationId: {MigrationId}", migrationId);
-                return new ValidationResult { IsValid = false, ErrorMessage = "Unable to connect to destination store: " + ex.Message };
-            }
-
-            _logger.LogInformation("Migration request validation successful. MigrationId: {MigrationId}", migrationId);
-            return new ValidationResult { IsValid = true };
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Unexpected error during migration request validation. MigrationId: {MigrationId}", migrationId);
-            return new ValidationResult { IsValid = false, ErrorMessage = "Validation failed due to internal error" };
-        }
     }
 
     /// <summary>

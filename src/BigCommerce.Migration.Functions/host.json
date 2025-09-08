@@ -8,13 +8,13 @@
       }
     },
     "logLevel": {
-      "default": "Information",
-      "Microsoft": "Warning",
-      "Microsoft.Hosting.Lifetime": "Information",
+      "default": "Error",
+      "Microsoft": "Error",
+      "Microsoft.Hosting.Lifetime": "Error",
       "BigCommerce.Migration": "Information",
       "BigCommerce.Migration.Activities": "Information",
       "DurableTask": "Warning",
-      "Microsoft.Azure.WebJobs": "Warning"
+      "Microsoft.Azure.WebJobs": "Error"
     },
     "console": {
       "isEnabled": true

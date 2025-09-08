@@ -12,11 +12,6 @@ EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "BigCommerce.Migration.Functions", "src\BigCommerce.Migration.Functions\BigCommerce.Migration.Functions.csproj", "{2C146AA0-C2E0-4A29-B5AA-1F8C6379FFA7}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "docs", "docs", "{F7038A76-2C94-4F26-A3B6-4E2B6A4B7E8C}"
-	ProjectSection(SolutionItems) = preProject
-		docs\Architecture-Documentation.md = docs\Architecture-Documentation.md
-		docs\DOCUMENTATION-SUMMARY.md = docs\DOCUMENTATION-SUMMARY.md
-		README.md = README.md
-	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "iac", "iac", "{D4B5F0C5-1A8F-4F4A-8F7D-8E4C3F2E1A9B}"
 	ProjectSection(SolutionItems) = preProject
@@ -24,13 +19,6 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "iac", "iac", "{D4B5F0C5-1A8
 		iac\terraform.dev.tfvars = iac\terraform.dev.tfvars
 		iac\terraform.prod.tfvars = iac\terraform.prod.tfvars
 		iac\variables.tf = iac\variables.tf
-	EndProjectSection
-EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "cicd", "cicd", "{E7D6C4B3-2A1F-4E2A-9C8B-7F5E9D1C3A7E}"
-	ProjectSection(SolutionItems) = preProject
-		azure-pipelines-dev.yml = azure-pipelines-dev.yml
-		azure-pipelines-prod.yml = azure-pipelines-prod.yml
-		docker-compose.yml = docker-compose.yml
 	EndProjectSection
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BigCommerce.Migration.Activities", "src\BigCommerce.Migration.Activities\BigCommerce.Migration.Activities.csproj", "{A4DD5E25-92A5-473E-BFD2-4530B7E5A8F8}"

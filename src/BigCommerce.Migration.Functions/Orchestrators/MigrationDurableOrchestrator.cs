@@ -111,8 +111,7 @@ public static class MigrationDurableOrchestrator
                 new ResolveCategoryTreeIdsRequest
                 {
                     MigrationId = migrationId,
-                    SourceStore = input.MigrationRequest?.SourceStore ?? new StoreConfiguration(),
-                    DestinationStore = input.MigrationRequest?.DestinationStore ?? new StoreConfiguration(),
+                    MigrationRequest = input.MigrationRequest ?? new MigrationRequest(),
                     CategoryTreeContext = input.CategoryTreeContext
                 });
 

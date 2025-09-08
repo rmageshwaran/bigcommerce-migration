@@ -360,9 +360,8 @@ public static class EntityMigrationDurableOrchestrator
             }
             else
             {
-                logger.LogInformation("🔄 [ORCHESTRATOR] 📋 CategoryTreeContext: SourceTreeId='{SourceTreeId}', DestinationTreeId='{DestinationTreeId}' for {EntityType} in migration {MigrationId}", 
-                    input.CategoryTreeContext.SourceCategoryTreeId ?? "NULL", 
-                    input.CategoryTreeContext.DestinationCategoryTreeId ?? "NULL",
+                logger.LogInformation("🔄 [ORCHESTRATOR] 📋 CategoryTreeContext: Mappings='{Mappings}' for {EntityType} in migration {MigrationId}", 
+                    string.Join(", ", input.CategoryTreeContext.CategoryTreeIdMapping.Select(kv => $"{kv.Key}->{kv.Value}")),
                     entityType, migrationId);
             }
             

@@ -58,6 +58,18 @@ public class CategoryApiService : ICategoryApiClient
     }
 
     /// <summary>
+    /// Gets category trees for a specific store and a list of channels
+    /// </summary>
+    /// <param name="storeConfig">Store configuration with credentials</param>
+    /// <param name="channelIds">A list of channel IDs to filter the trees by</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>List of category trees</returns>
+    public Task<List<Dictionary<string, object>>> GetCategoryTreesAsync(StoreConfiguration storeConfig, List<string> channelIds, CancellationToken cancellationToken = default)
+    {
+        throw new NotImplementedException();
+    }
+
+    /// <summary>
     /// Gets categories from a specific category tree
     /// </summary>
     /// <param name="storeConfig">Store configuration with credentials</param>

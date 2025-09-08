@@ -21,6 +21,7 @@ public interface IEntityFetchStrategy
     /// <param name="entityIds">List of entity IDs to fetch</param>
     /// <param name="migrationId">Migration identifier</param>
     /// <param name="sourceStore">Source store configuration</param>
+    /// <param name="discoveredEntities">A list of previously discovered entities to be used instead of fetching from the API.</param>
     /// <param name="categoryTreeContext">Category tree context (for categories)</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>List of fetched entities, or empty list if no entities found</returns>
@@ -28,6 +29,7 @@ public interface IEntityFetchStrategy
         List<string> entityIds,
         string migrationId,
         StoreConfiguration sourceStore,
+        List<Dictionary<string, object>>? discoveredEntities = null,
         CategoryTreeContext? categoryTreeContext = null,
         CancellationToken cancellationToken = default);
 } 

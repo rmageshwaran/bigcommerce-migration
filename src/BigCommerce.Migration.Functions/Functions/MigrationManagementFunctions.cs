@@ -107,8 +107,6 @@ public class MigrationManagementFunctions : BaseFunction
                 Id = migrationId,
                 SourceStoreId = migrationRequest.SourceStore?.StoreId ?? string.Empty,
                 DestinationStoreId = migrationRequest.DestinationStore?.StoreId ?? string.Empty,
-                SourceChannelId = migrationRequest.SourceStore?.ChannelId ?? string.Empty,
-                DestinationChannelId = migrationRequest.DestinationStore?.ChannelId ?? string.Empty,
                 Entities = migrationRequest.Entities,
                 Status = Core.Models.MigrationStatus.Queued,
                 CreatedAt = DateTime.UtcNow,
@@ -128,8 +126,6 @@ public class MigrationManagementFunctions : BaseFunction
             {
                 sourceStore = migrationRequest.SourceStore?.StoreId ?? string.Empty,
                 destinationStore = migrationRequest.DestinationStore?.StoreId ?? string.Empty,
-                sourceChannel = migrationRequest.SourceStore?.ChannelId ?? string.Empty,
-                destinationChannel = migrationRequest.DestinationStore?.ChannelId ?? string.Empty,
                 entities = migrationRequest.Entities,
                 message = "Migration request received and prepared for processing"
             });
@@ -142,13 +138,11 @@ public class MigrationManagementFunctions : BaseFunction
                 message = "Migration request accepted and sent to processing queue",
                 sourceStore = new
                 {
-                    storeId = migrationRequest.SourceStore?.StoreId ?? string.Empty,
-                    channelId = migrationRequest.SourceStore?.ChannelId ?? string.Empty
+                    storeId = migrationRequest.SourceStore?.StoreId ?? string.Empty
                 },
                 destinationStore = new
                 {
-                    storeId = migrationRequest.DestinationStore?.StoreId ?? string.Empty,
-                    channelId = migrationRequest.DestinationStore?.ChannelId ?? string.Empty
+                    storeId = migrationRequest.DestinationStore?.StoreId ?? string.Empty
                 },
                 entities = migrationRequest.Entities,
                 createdAt = migrationEntry.CreatedAt,

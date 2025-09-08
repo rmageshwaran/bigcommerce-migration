@@ -17,11 +17,6 @@ public class StoreConfiguration
     public string? AccessToken { get; set; }
 
     /// <summary>
-    /// Channel (storefront) identifier for multi-storefront support
-    /// </summary>
-    public string? ChannelId { get; set; }
-
-    /// <summary>
     /// Optional base URL override (defaults to https://api.bigcommerce.com)
     /// </summary>
     public string? BaseUrl { get; set; }
@@ -33,8 +28,7 @@ public class StoreConfiguration
     public bool IsValid()
     {
         return !string.IsNullOrWhiteSpace(StoreId) &&
-               !string.IsNullOrWhiteSpace(AccessToken) &&
-               !string.IsNullOrWhiteSpace(ChannelId);
+               !string.IsNullOrWhiteSpace(AccessToken);
     }
 
     /// <summary>
@@ -102,6 +96,6 @@ public class StoreConfiguration
     /// <returns>String representation with masked token</returns>
     public override string ToString()
     {
-        return $"Store: {StoreId}, Channel: {ChannelId}, Token: {GetMaskedAccessToken()}";
+        return $"Store: {StoreId}, Token: {GetMaskedAccessToken()}";
     }
 } 

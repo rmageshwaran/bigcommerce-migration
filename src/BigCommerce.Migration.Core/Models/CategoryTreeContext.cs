@@ -7,24 +7,8 @@ namespace BigCommerce.Migration.Core.Models;
 public class CategoryTreeContext
 {
     /// <summary>
-    /// Source channel (storefront) identifier
+    /// A dictionary that maps a source category tree ID to a destination category tree ID.
+    /// This is built from the channel mappings provided in the migration request.
     /// </summary>
-    public string? SourceChannelId { get; set; }
-
-    /// <summary>
-    /// Destination channel (storefront) identifier
-    /// </summary>
-    public string? DestinationChannelId { get; set; }
-
-    /// <summary>
-    /// Resolved category tree ID for the source channel
-    /// Retrieved from BigCommerce API: GET /stores/{store_id}/v3/catalog/trees?channel_id={sourceChannelId}
-    /// </summary>
-    public string? SourceCategoryTreeId { get; set; }
-
-    /// <summary>
-    /// Resolved category tree ID for the destination channel
-    /// Retrieved from BigCommerce API: GET /stores/{store_id}/v3/catalog/trees?channel_id={destinationChannelId}
-    /// </summary>
-    public string? DestinationCategoryTreeId { get; set; }
+    public Dictionary<string, string> CategoryTreeIdMapping { get; set; } = new();
 } 

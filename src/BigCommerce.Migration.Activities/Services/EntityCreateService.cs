@@ -72,7 +72,6 @@ public class EntityCreateService : IEntityCreateService
                 {
                     entity["_source_store_id"] = request.SourceStore?.StoreId ?? "";
                     entity["_source_store_token"] = request.SourceStore?.AccessToken ?? "";
-                    entity["_source_store_channel_id"] = request.SourceStore?.ChannelId ?? "1"; // Default to "1" if not specified
                     
                     _logger.LogDebug("🔧 [ENTITY-CREATE-DEBUG] Entity keys after adding source store: [{Keys}] (migration: {MigrationId})", 
                         string.Join(", ", entity.Keys), request.MigrationId);

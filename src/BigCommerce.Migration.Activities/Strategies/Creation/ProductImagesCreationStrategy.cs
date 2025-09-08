@@ -338,8 +338,7 @@ public class ProductImagesCreationStrategy : IEntityCreationStrategy
             var sourceStoreConfig = new StoreConfiguration 
             { 
                 StoreId = sourceStoreId,
-                AccessToken = sourceStoreToken,
-                ChannelId = sourceStoreChannelId ?? "1" // Default to "1" if not specified
+                AccessToken = sourceStoreToken
             };
 
             _logger.LogInformation("🔍 [BATCH-{BatchId}] DEBUG: About to call FetchProductImagesStreamingAsync for product {SourceProductId} (migration: {MigrationId})",
@@ -437,8 +436,7 @@ public class ProductImagesCreationStrategy : IEntityCreationStrategy
 
                     var sourceStore = new StoreConfiguration { 
                         StoreId = productEntity.GetValueOrDefault("_source_store_id")?.ToString() ?? "",
-                        AccessToken = productEntity.GetValueOrDefault("_source_store_token")?.ToString() ?? "",
-                        ChannelId = productEntity.GetValueOrDefault("_source_store_channel_id")?.ToString() ?? "1"
+                        AccessToken = productEntity.GetValueOrDefault("_source_store_token")?.ToString() ?? ""
                     };
                     var transformStrategy = _transformStrategyFactory.GetStrategy("product-images");
                     _logger.LogInformation("🔍 [BATCH-{BatchId}] DEBUG: About to call transform strategy - Type: {StrategyType} (migration: {MigrationId})",

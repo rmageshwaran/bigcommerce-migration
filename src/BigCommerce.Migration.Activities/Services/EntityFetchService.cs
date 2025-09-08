@@ -160,6 +160,7 @@ public class EntityFetchService : IEntityFetchService
                 request.EntityIds,
                 request.MigrationId,
                 request.SourceStore,
+                request.CachedEntityData,
                 request.CategoryTreeContext,
                 cancellationToken);
 
@@ -428,10 +429,6 @@ public class EntityFetchService : IEntityFetchService
             };
 
             // Add entity-specific parameters
-            if (request.EntityType.ToLowerInvariant() == "categories" && request.CategoryTreeContext != null)
-            {
-                paginationRequest.CategoryTreeId = request.CategoryTreeContext.SourceCategoryTreeId;
-            }
             
             // ✅ COMPONENT HANDLING: Individual component types fetch products with includes
             string actualEntityType = request.EntityType;

@@ -50,7 +50,7 @@ public class MigrationRequest
     public string GetSummary()
     {
         var entityList = string.Join(", ", Entities);
-        return $"Migration: {SourceStore?.StoreId}[{SourceStore?.ChannelId}] -> {DestinationStore?.StoreId}[{DestinationStore?.ChannelId}], Entities: {entityList}";
+        return $"Migration: {SourceStore?.StoreId} -> {DestinationStore?.StoreId}, Entities: {entityList}";
     }
 }
 

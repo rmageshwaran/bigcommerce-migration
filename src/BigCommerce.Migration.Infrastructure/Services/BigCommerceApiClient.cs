@@ -37,8 +37,25 @@ public class BigCommerceApiClient : IBigCommerceApiClient
     {
         ValidateStoreConfiguration(storeConfig);
 
-        // Use correct BigCommerce API syntax: channel_id:in for filtering category trees by channel
-        var url = $"{storeConfig.GetApiBaseUrl()}/catalog/trees?channel_id:in={storeConfig.ChannelId}";
+        // This method is now a pass-through to the multi-channel version.
+        // It's kept for backward compatibility with any components that haven't been updated yet.
+        // Note: The ChannelId is no longer on StoreConfiguration, so this method's logic needs to be considered.
+        // For now, we will assume it fetches all trees if no channel is specified.
+        return await GetCategoryTreesAsync(storeConfig, new List<string>(), cancellationToken);
+    }
+
+    /// <summary>
+    /// Gets category trees for a specific store and a list of channels using correct BigCommerce API syntax
+    /// </summary>
+    public async Task<List<Dictionary<string, object>>> GetCategoryTreesAsync(StoreConfiguration storeConfig, List<string> channelIds, CancellationToken cancellationToken = default)
+    {
+        ValidateStoreConfiguration(storeConfig);
+
+        var url = $"{storeConfig.GetApiBaseUrl()}/catalog/trees";
+        if (channelIds.Any())
+        {
+            url += $"?channel_id:in={string.Join(",", channelIds)}";
+        }
 
         try
         {
@@ -49,8 +66,8 @@ public class BigCommerceApiClient : IBigCommerceApiClient
             {
                 var trees = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(dataElement.GetRawText()) ?? new List<Dictionary<string, object>>();
                 
-                _logger.LogDebug("Retrieved {TreeCount} category trees for store {StoreId}, channel {ChannelId}", 
-                    trees.Count, storeConfig.StoreId, storeConfig.ChannelId);
+                _logger.LogDebug("Retrieved {TreeCount} category trees for store {StoreId}, channels [{Channels}]", 
+                    trees.Count, storeConfig.StoreId, string.Join(",", channelIds));
                 
                 return trees;
             }
@@ -59,8 +76,8 @@ public class BigCommerceApiClient : IBigCommerceApiClient
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get category trees for store {StoreId}, channel {ChannelId}", 
-                storeConfig.StoreId, storeConfig.ChannelId);
+            _logger.LogError(ex, "Failed to get category trees for store {StoreId}, channels [{Channels}]", 
+                storeConfig.StoreId, string.Join(",", channelIds));
             throw;
         }
     }
@@ -222,8 +239,8 @@ public class BigCommerceApiClient : IBigCommerceApiClient
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get products for store {StoreId}, channel {ChannelId}", 
-                storeConfig.StoreId, storeConfig.ChannelId);
+            _logger.LogError(ex, "Failed to get products for store {StoreId}", 
+                storeConfig.StoreId);
             throw;
         }
     }

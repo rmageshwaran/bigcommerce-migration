@@ -409,8 +409,6 @@ public static class ServiceCollectionExtensions
     private static IServiceCollection AddCoreServices(this IServiceCollection services, IConfiguration configuration)
     {
         // Register services as singleton for better performance and test consistency
-        services.AddSingleton<ICategoryTreeResolver, CategoryTreeResolver>();
-
         // Register OpenSearch service - use no-op implementation when disabled
         services.AddSingleton<IOpenSearchService>(serviceProvider =>
         {

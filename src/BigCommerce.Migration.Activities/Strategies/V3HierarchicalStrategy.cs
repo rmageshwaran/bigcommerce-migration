@@ -52,89 +52,104 @@ public class V3HierarchicalStrategy : IEntityDiscoveryStrategy
             _logger.LogInformation("Using V3 hierarchical strategy for {EntityType} - fetching all entities for hierarchical sorting", 
                 request.EntityType);
 
-            // Fetch ALL entities to perform global hierarchical sorting
-            var paginationRequest = new BigCommercePaginationRequest
-            {
-                Page = 1,
-                Limit = 250, // Use large limit to minimize pagination - REVERTED: 250 is correct for performance
-                IncludeDeleted = request.EntityConfig.IncludeDeleted,
-                IncludeDrafts = request.EntityConfig.IncludeDrafts,
-                CategoryTreeId = request.CategoryTreeContext?.SourceCategoryTreeId,
-                SortBy = "id",
-                SortDirection = "asc"
-            };
-
-            // ✅ DEBUG: Log the category tree ID being used for discovery
-            _logger.LogInformation("🔍 DEBUG: Using category tree ID '{CategoryTreeId}' for discovery of {EntityType} in migration {MigrationId}", 
-                paginationRequest.CategoryTreeId ?? "DEFAULT", request.EntityType, request.MigrationId);
-
             var allEntities = new List<Dictionary<string, object>>();
-            var currentPage = 1;
             BigCommerceV3Pagination? v3Metadata = null;
 
-            do
+            if (request.CategoryTreeContext?.CategoryTreeIdMapping == null || !request.CategoryTreeContext.CategoryTreeIdMapping.Any())
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                
-                paginationRequest.Page = currentPage;
-                var response = await _apiClient.GetPaginatedEntitiesAsync(
-                    request.SourceStore,
-                    request.EntityType,
-                    paginationRequest,
-                    cancellationToken);
+                _logger.LogWarning("No category tree mappings found. Skipping category discovery.");
+                return new EntityDiscoveryResult { EntityType = request.EntityType };
+            }
 
-                if (response.Data != null && response.Data.Any())
+            foreach (var sourceTreeId in request.CategoryTreeContext.CategoryTreeIdMapping.Keys)
+            {
+                // Fetch ALL entities to perform global hierarchical sorting
+                var paginationRequest = new BigCommercePaginationRequest
                 {
-                    allEntities.AddRange(response.Data);
-                    _logger.LogDebug("Cached {PageEntities} {EntityType} from page {Page} (total so far: {Total})", 
-                        response.Data.Count, request.EntityType, currentPage, allEntities.Count);
-                }
+                    Page = 1,
+                    Limit = 250, // Use large limit to minimize pagination - REVERTED: 250 is correct for performance
+                    IncludeDeleted = request.EntityConfig.IncludeDeleted,
+                    IncludeDrafts = request.EntityConfig.IncludeDrafts,
+                    CategoryTreeId = sourceTreeId,
+                    SortBy = "id",
+                    SortDirection = "asc"
+                };
 
-                // Store V3 metadata from first page
-                if (currentPage == 1 && response.Meta != null)
+                // ✅ DEBUG: Log the category tree ID being used for discovery
+                _logger.LogInformation("🔍 DEBUG: Using category tree ID '{CategoryTreeId}' for discovery of {EntityType} in migration {MigrationId}", 
+                    paginationRequest.CategoryTreeId ?? "DEFAULT", request.EntityType, request.MigrationId);
+
+                var currentPage = 1;
+
+                do
                 {
-                    v3Metadata = response.Meta.Pagination;
-                }
+                    cancellationToken.ThrowIfCancellationRequested();
+                    
+                    paginationRequest.Page = currentPage;
+                    var response = await _apiClient.GetPaginatedEntitiesAsync(
+                        request.SourceStore,
+                        request.EntityType,
+                        paginationRequest,
+                        cancellationToken);
 
-                // ✅ ROBUST PAGINATION: Use multiple exit conditions for reliability
-                // 1. No more data returned (most reliable indicator)
-                if (response.Data == null || !response.Data.Any())
-                {
-                    _logger.LogDebug("No more {EntityType} data returned from page {Page}, ending pagination", 
-                        request.EntityType, currentPage);
-                    break;
-                }
-                
-                // 2. Returned fewer items than limit (indicates last page)
-                if (response.Data.Count < paginationRequest.Limit)
-                {
-                    _logger.LogDebug("Page {Page} returned {Count} {EntityType} items (less than limit {Limit}), ending pagination",
-                        currentPage, response.Data.Count, request.EntityType, paginationRequest.Limit);
-                    break;
-                }
-                
-                // 3. API metadata indicates last page (if available and reliable)
-                if (response.TotalPages.HasValue && currentPage >= response.TotalPages.Value)
-                {
-                    _logger.LogDebug("Reached API-indicated last page {TotalPages} for {EntityType}", 
-                        response.TotalPages.Value, request.EntityType);
-                    break;
-                }
+                    if (response.Data != null && response.Data.Any())
+                    {
+                        // Tag each entity with its source tree ID
+                        foreach (var entity in response.Data)
+                        {
+                            entity["_sourceTreeId"] = sourceTreeId;
+                        }
+                        allEntities.AddRange(response.Data);
+                        _logger.LogDebug("Cached {PageEntities} {EntityType} from page {Page} (total so far: {Total})", 
+                            response.Data.Count, request.EntityType, currentPage, allEntities.Count);
+                    }
 
-                currentPage++;
+                    // Store V3 metadata from first page
+                    if (currentPage == 1 && response.Meta != null)
+                    {
+                        v3Metadata = response.Meta.Pagination;
+                    }
 
-                // 4. Safety check - prevent infinite loops
-                if (currentPage > 100)
-                {
-                    _logger.LogWarning("Breaking pagination loop after 100 pages for {EntityType} to prevent infinite loop. Total entities cached: {TotalCached}", 
-                        request.EntityType, allEntities.Count);
-                    break;
-                }
+                    // ✅ ROBUST PAGINATION: Use multiple exit conditions for reliability
+                    // 1. No more data returned (most reliable indicator)
+                    if (response.Data == null || !response.Data.Any())
+                    {
+                        _logger.LogDebug("No more {EntityType} data returned from page {Page}, ending pagination", 
+                            request.EntityType, currentPage);
+                        break;
+                    }
+                    
+                    // 2. Returned fewer items than limit (indicates last page)
+                    if (response.Data.Count < paginationRequest.Limit)
+                    {
+                        _logger.LogDebug("Page {Page} returned {Count} {EntityType} items (less than limit {Limit}), ending pagination",
+                            currentPage, response.Data.Count, request.EntityType, paginationRequest.Limit);
+                        break;
+                    }
+                    
+                    // 3. API metadata indicates last page (if available and reliable)
+                    if (response.TotalPages.HasValue && currentPage >= response.TotalPages.Value)
+                    {
+                        _logger.LogDebug("Reached API-indicated last page {TotalPages} for {EntityType}", 
+                            response.TotalPages.Value, request.EntityType);
+                        break;
+                    }
 
-            } while (true);
+                    currentPage++;
 
-            _logger.LogInformation("✅ Pagination completed for {EntityType}: Cached {ActualCount} entities across {PagesProcessed} pages", 
-                request.EntityType, allEntities.Count, currentPage);
+                    // 4. Safety check - prevent infinite loops
+                    if (currentPage > 100)
+                    {
+                        _logger.LogWarning("Breaking pagination loop after 100 pages for {EntityType} to prevent infinite loop. Total entities cached: {TotalCached}", 
+                            request.EntityType, allEntities.Count);
+                        break;
+                    }
+
+                } while (true);
+            }
+
+            _logger.LogInformation("✅ Pagination completed for {EntityType}: Cached {ActualCount} entities", 
+                request.EntityType, allEntities.Count);
 
             // ✅ VALIDATION: Check if we might have missed entities
             if (v3Metadata?.Total > 0 && allEntities.Count != v3Metadata.Total)
@@ -187,8 +202,7 @@ public class V3HierarchicalStrategy : IEntityDiscoveryStrategy
                 {
                     { "ApiVersion", "V3" },
                     { "Strategy", "HierarchicalCaching" },
-                    { "TotalPages", currentPage },
-                    { "PageSize", paginationRequest.Limit },
+                    { "PageSize", 250 },
                     { "HierarchicallySorted", true },
                     { "DataCached", true },
                     { "OptimizedForHierarchy", true },

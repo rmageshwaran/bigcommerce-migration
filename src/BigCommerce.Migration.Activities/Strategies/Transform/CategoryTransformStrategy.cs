@@ -39,52 +39,24 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
         _logger.LogDebug("🔧 [TRANSFORM] ⭐ STARTING: Transforming category {EntityId} ('{EntityName}') for migration {MigrationId}",
             entityId, entityName, migrationId);
 
-        // 🚨 CRITICAL DEBUG: Log CategoryTreeContext details
         if (categoryTreeContext == null)
         {
             _logger.LogError("🚨 [TRANSFORM] ❌ CRITICAL: CategoryTreeContext is NULL for category {EntityId} in migration {MigrationId}",
                 entityId, migrationId);
+            throw new InvalidOperationException("CategoryTreeContext is required for category transformation.");
         }
-        else
-        {
-            _logger.LogInformation("🔧 [TRANSFORM] 📋 CategoryTreeContext: SourceTreeId='{SourceTreeId}', DestinationTreeId='{DestinationTreeId}', SourceChannelId='{SourceChannelId}', DestinationChannelId='{DestinationChannelId}' for migration {MigrationId}",
-                categoryTreeContext.SourceCategoryTreeId ?? "NULL",
-                categoryTreeContext.DestinationCategoryTreeId ?? "NULL",
-                categoryTreeContext.SourceChannelId ?? "NULL",
-                categoryTreeContext.DestinationChannelId ?? "NULL",
-                migrationId);
-        }
-
-        _logger.LogDebug("Transforming category for migration {MigrationId}", migrationId);
-
-        // Start with a clean dictionary and copy only valid BigCommerce fields
+        
         var transformed = new Dictionary<string, object>();
 
-        // Copy valid BigCommerce category fields from source
         CopyValidBigCommerceFields(entity, transformed, migrationId);
-
-        // Handle category tree mapping if context is available
-        HandleCategoryTreeMapping(transformed, categoryTreeContext, migrationId);
-
-        // Fix meta_keywords field - BigCommerce expects an array, not a malformed string
+        HandleCategoryTreeMapping(transformed, categoryTreeContext, migrationId, entity);
         HandleMetaKeywords(transformed, migrationId);
-
-        // Handle other common fields to match BigCommerce V3 format
         HandleCommonFields(transformed, migrationId);
-
-        // Ensure required BigCommerce category fields are present
         EnsureRequiredFields(transformed, migrationId);
-
-        // Ensure custom_url structure exists and is valid
-        EnsureCustomUrlStructure(transformed, categoryTreeContext, migrationId);
-
-        // Apply parent_id mapping for hierarchical categories
+        EnsureCustomUrlStructure(transformed, categoryTreeContext, migrationId, entity);
         await HandleParentIdConversionAsync(transformed, migrationId, cancellationToken);
-
-        // Remove fields that shouldn't be sent to BigCommerce API
         RemoveInvalidFields(transformed, migrationId);
 
-        // Log transformed category details at debug level
         _logger.LogDebug("Transformed category '{CategoryName}' for migration {MigrationId}",
             transformed.GetValueOrDefault("name"), migrationId);
 
@@ -137,7 +109,7 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
             "depth", "path", "children",
             
             // Internal tracking fields
-            "_original_entity_id", "original_id", "source_id",
+            "_original_entity_id", "original_id", "source_id", "_sourceTreeId",
             
             // BigCommerce read-only fields that shouldn't be in create requests
             "id", "category_id", "category_uuid", "date_created", "date_modified"
@@ -159,23 +131,30 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
         }
     }
 
-    private void HandleCategoryTreeMapping(Dictionary<string, object> transformed, CategoryTreeContext? categoryTreeContext, string migrationId)
+    private void HandleCategoryTreeMapping(Dictionary<string, object> transformed, CategoryTreeContext categoryTreeContext, string migrationId, Dictionary<string, object> sourceEntity)
     {
-        if (categoryTreeContext != null)
+        if (sourceEntity.TryGetValue("_sourceTreeId", out var sourceTreeIdObj) && sourceTreeIdObj is string sourceTreeId)
         {
-            if (transformed.TryGetValue("category_tree_id", out var sourceTreeId))
+            if (categoryTreeContext.CategoryTreeIdMapping.TryGetValue(sourceTreeId, out var destinationTreeId))
             {
-                if (!string.IsNullOrWhiteSpace(categoryTreeContext.DestinationCategoryTreeId))
+                if (int.TryParse(destinationTreeId, out var treeIdInt))
                 {
-                    transformed["category_tree_id"] = categoryTreeContext.DestinationCategoryTreeId;
-                    _logger.LogDebug("Mapped category tree ID from {SourceTreeId} to {DestinationTreeId} for migration {MigrationId}",
-                        sourceTreeId, categoryTreeContext.DestinationCategoryTreeId, migrationId);
+                    transformed["tree_id"] = treeIdInt;
+                    _logger.LogDebug("Mapped source tree {SourceTreeId} to destination tree {DestinationTreeId}", sourceTreeId, destinationTreeId);
                 }
                 else
                 {
-                    _logger.LogWarning("No destination category tree ID found for migration {MigrationId}", migrationId);
+                    _logger.LogWarning("Could not parse destination tree ID '{DestinationTreeId}' for source tree {SourceTreeId}", destinationTreeId, sourceTreeId);
                 }
             }
+            else
+            {
+                _logger.LogWarning("No destination tree mapping found for source tree {SourceTreeId}", sourceTreeId);
+            }
+        }
+        else
+        {
+            _logger.LogWarning("Category is missing the '_sourceTreeId' tag. Cannot determine destination tree.");
         }
     }
 
@@ -299,7 +278,7 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
         }
     }
 
-    private void EnsureCustomUrlStructure(Dictionary<string, object> transformed, CategoryTreeContext? categoryTreeContext, string migrationId)
+    private void EnsureCustomUrlStructure(Dictionary<string, object> transformed, CategoryTreeContext categoryTreeContext, string migrationId, Dictionary<string, object> sourceEntity)
     {
         // BigCommerce V3 API expects 'url' structure with 'path' field as an object
         string? existingUrlPath = null;
@@ -357,7 +336,7 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
             urlStructure["path"], migrationId);
 
         // Also ensure tree_id is set as a direct field (required by BigCommerce V3)
-        EnsureTreeIdField(transformed, categoryTreeContext, migrationId);
+        HandleCategoryTreeMapping(transformed, categoryTreeContext, migrationId, sourceEntity);
     }
 
     private async Task HandleParentIdConversionAsync(Dictionary<string, object> transformed, string migrationId, CancellationToken cancellationToken)
@@ -437,51 +416,6 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
     }
 
 
-
-    private void EnsureTreeIdField(Dictionary<string, object> transformed, CategoryTreeContext? categoryTreeContext, string migrationId)
-    {
-        var entityId = transformed.GetValueOrDefault("id")?.ToString() ?? transformed.GetValueOrDefault("_original_entity_id")?.ToString() ?? "unknown";
-
-        _logger.LogDebug("🔧 [TREE-ID] ⭐ STARTING: Ensuring tree_id for entity {EntityId} in migration {MigrationId}", entityId, migrationId);
-
-        // 🚨 CRITICAL DEBUG: Log CategoryTreeContext validation
-        if (categoryTreeContext == null)
-        {
-            _logger.LogError("🚨 [TREE-ID] ❌ CRITICAL: CategoryTreeContext is NULL for entity {EntityId} in migration {MigrationId}", entityId, migrationId);
-        }
-        else if (string.IsNullOrWhiteSpace(categoryTreeContext.DestinationCategoryTreeId))
-        {
-            _logger.LogError("🚨 [TREE-ID] ❌ CRITICAL: DestinationCategoryTreeId is NULL/EMPTY for entity {EntityId} in migration {MigrationId}. CategoryTreeContext exists but DestinationTreeId='{DestinationTreeId}'",
-                entityId, migrationId, categoryTreeContext.DestinationCategoryTreeId ?? "NULL");
-        }
-        else
-        {
-            _logger.LogInformation("🔧 [TREE-ID] ✅ VALID: CategoryTreeContext has DestinationTreeId='{DestinationTreeId}' for entity {EntityId} in migration {MigrationId}",
-                categoryTreeContext.DestinationCategoryTreeId, entityId, migrationId);
-        }
-
-        // BigCommerce V3 API requires tree_id field
-        // Use the resolved destination tree ID from the category tree context
-        if (categoryTreeContext != null && !string.IsNullOrWhiteSpace(categoryTreeContext.DestinationCategoryTreeId))
-        {
-            if (int.TryParse(categoryTreeContext.DestinationCategoryTreeId, out var resolvedTreeId))
-            {
-                transformed["tree_id"] = resolvedTreeId;
-                _logger.LogInformation("🔧 [TREE-ID] ✅ SUCCESS: Set tree_id {TreeId} from resolved destination category tree context for entity {EntityId} in migration {MigrationId}",
-                    resolvedTreeId, entityId, migrationId);
-                return;
-            }
-            else
-            {
-                _logger.LogError("🚨 [TREE-ID] ❌ PARSE-ERROR: Failed to parse DestinationCategoryTreeId '{DestinationTreeId}' as integer for entity {EntityId} in migration {MigrationId}",
-                    categoryTreeContext.DestinationCategoryTreeId, entityId, migrationId);
-            }
-        }
-
-        // Default fallback if no resolved tree ID available
-        transformed["tree_id"] = 1;
-        _logger.LogWarning("🚨 [TREE-ID] ⚠️ FALLBACK: No destination tree ID found, using default tree_id 1 for entity {EntityId} in migration {MigrationId}", entityId, migrationId);
-    }
 
     private static void RemoveNullValues(Dictionary<string, object> transformed)
     {

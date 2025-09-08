@@ -21,7 +21,6 @@ public class MigrationHttpFunctions
 {
     private readonly ILogger<MigrationHttpFunctions> _logger;
     private readonly IBigCommerceApiClient _bigCommerceApiClient;
-    private readonly ICategoryTreeResolver _categoryTreeResolver;
     private readonly IOpenSearchService _openSearchService;
     private readonly IMigrationStorageService _migrationStorageService;
     private readonly IQueueService _queueService;
@@ -36,7 +35,6 @@ public class MigrationHttpFunctions
     /// </summary>
     /// <param name="logger">Logger instance</param>
     /// <param name="bigCommerceApiClient">BigCommerce API client</param>
-    /// <param name="categoryTreeResolver">Category tree resolver</param>
     /// <param name="openSearchService">OpenSearch service</param>
     /// <param name="migrationStorageService">Migration storage service</param>
     /// <param name="queueService">Queue service</param>
@@ -45,10 +43,10 @@ public class MigrationHttpFunctions
     /// <param name="cancellationStore">Cancellation store for native cancellation flags</param>
     /// <param name="signalREventFactory">SignalR event factory for notifications</param>
     /// <param name="progressEventPublisher">Progress event publisher for SignalR broadcasting</param>
+    /// <param name="signalRService">SignalR service</param>
     public MigrationHttpFunctions(
         ILogger<MigrationHttpFunctions> logger,
         IBigCommerceApiClient bigCommerceApiClient,
-        ICategoryTreeResolver categoryTreeResolver,
         IOpenSearchService openSearchService,
         IMigrationStorageService migrationStorageService,
         IQueueService queueService,
@@ -60,7 +58,6 @@ public class MigrationHttpFunctions
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _bigCommerceApiClient = bigCommerceApiClient ?? throw new ArgumentNullException(nameof(bigCommerceApiClient));
-        _categoryTreeResolver = categoryTreeResolver ?? throw new ArgumentNullException(nameof(categoryTreeResolver));
         _openSearchService = openSearchService ?? throw new ArgumentNullException(nameof(openSearchService));
         _migrationStorageService = migrationStorageService ?? throw new ArgumentNullException(nameof(migrationStorageService));
         _queueService = queueService ?? throw new ArgumentNullException(nameof(queueService));
@@ -147,8 +144,6 @@ public class MigrationHttpFunctions
                 Id = migrationId,
                 SourceStoreId = migrationRequest.SourceStore?.StoreId ?? string.Empty,
                 DestinationStoreId = migrationRequest.DestinationStore?.StoreId ?? string.Empty,
-                SourceChannelId = migrationRequest.SourceStore?.ChannelId ?? string.Empty,
-                DestinationChannelId = migrationRequest.DestinationStore?.ChannelId ?? string.Empty,
                 Entities = migrationRequest.Entities,
                 Status = Core.Models.MigrationStatus.Queued,
                 CreatedAt = DateTime.UtcNow,
@@ -168,8 +163,6 @@ public class MigrationHttpFunctions
             {
                 sourceStore = migrationRequest.SourceStore?.StoreId ?? string.Empty,
                 destinationStore = migrationRequest.DestinationStore?.StoreId ?? string.Empty,
-                sourceChannel = migrationRequest.SourceStore?.ChannelId ?? string.Empty,
-                destinationChannel = migrationRequest.DestinationStore?.ChannelId ?? string.Empty,
                 entities = migrationRequest.Entities,
                 message = "Migration request received and prepared for processing"
             });
@@ -185,13 +178,11 @@ public class MigrationHttpFunctions
                 message = "Migration request accepted and sent to processing queue",
                 sourceStore = new
                 {
-                    storeId = migrationRequest.SourceStore?.StoreId ?? string.Empty,
-                    channelId = migrationRequest.SourceStore?.ChannelId ?? string.Empty
+                    storeId = migrationRequest.SourceStore?.StoreId ?? string.Empty
                 },
                 destinationStore = new
                 {
-                    storeId = migrationRequest.DestinationStore?.StoreId ?? string.Empty,
-                    channelId = migrationRequest.DestinationStore?.ChannelId ?? string.Empty
+                    storeId = migrationRequest.DestinationStore?.StoreId ?? string.Empty
                 },
                 entities = migrationRequest.Entities,
                 createdAt = migrationEntry.CreatedAt,
@@ -2018,8 +2009,6 @@ public class MigrationEntry
     public string Id { get; set; } = string.Empty;
     public string SourceStoreId { get; set; } = string.Empty;
     public string DestinationStoreId { get; set; } = string.Empty;
-    public string SourceChannelId { get; set; } = string.Empty;
-    public string DestinationChannelId { get; set; } = string.Empty;
     public IEnumerable<string> Entities { get; set; } = Array.Empty<string>();
     public MigrationStatus Status { get; set; }
     public DateTime CreatedAt { get; set; }

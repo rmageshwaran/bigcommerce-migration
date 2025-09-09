@@ -46,13 +46,11 @@ public interface ICategoryApiClient
     /// Creates categories in a specific category tree
     /// </summary>
     /// <param name="storeConfig">Store configuration with credentials</param>
-    /// <param name="categoryTreeId">Category tree identifier</param>
     /// <param name="categories">Categories to create</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>List of created categories</returns>
     Task<List<Dictionary<string, object>>> CreateCategoriesAsync(
         StoreConfiguration storeConfig, 
-        string categoryTreeId, 
         List<Dictionary<string, object>> categories, 
         CancellationToken cancellationToken = default);
 } 

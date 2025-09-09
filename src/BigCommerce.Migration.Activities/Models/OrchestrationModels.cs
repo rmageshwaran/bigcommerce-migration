@@ -930,4 +930,10 @@ public class ProcessEntityChunkRequest
     /// Passed from EntityMigrationRequest for channel ID mapping
     /// </summary>
     public List<ChannelMapping>? ChannelMapping { get; set; }
+
+    /// <summary>
+    /// Cached entity data from V3 discovery phase to avoid duplicate API calls
+    /// For V2 APIs, this will be null and processing will use direct pagination
+    /// </summary>
+    public List<Dictionary<string, object>>? CachedEntityData { get; set; }
 } 

@@ -1,8 +1,8 @@
-using System.Text.Json;
+using BigCommerce.Migration.Activities.Services;
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
-using BigCommerce.Migration.Activities.Services;
 using Microsoft.Extensions.Logging;
+using System.Text.Json;
 
 namespace BigCommerce.Migration.Activities.Strategies.Transform;
 
@@ -33,7 +33,7 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
         CategoryTreeContext? categoryTreeContext = null,
         CancellationToken cancellationToken = default)
     {
-        var entityId = entity.GetValueOrDefault("id")?.ToString() ?? "unknown";
+        var entityId = entity.GetValueOrDefault("category_id")?.ToString() ?? "unknown";
         var entityName = entity.GetValueOrDefault("name")?.ToString() ?? "unknown";
 
         _logger.LogDebug("🔧 [TRANSFORM] ⭐ STARTING: Transforming category {EntityId} ('{EntityName}') for migration {MigrationId}",
@@ -45,11 +45,11 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
                 entityId, migrationId);
             throw new InvalidOperationException("CategoryTreeContext is required for category transformation.");
         }
-        
+
         var transformed = new Dictionary<string, object>();
 
         CopyValidBigCommerceFields(entity, transformed, migrationId);
-        HandleCategoryTreeMapping(transformed, categoryTreeContext, migrationId, entity);
+        HandleCategoryTreeMapping(transformed, categoryTreeContext, entity);
         HandleMetaKeywords(transformed, migrationId);
         HandleCommonFields(transformed, migrationId);
         EnsureRequiredFields(transformed, migrationId);
@@ -131,10 +131,12 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
         }
     }
 
-    private void HandleCategoryTreeMapping(Dictionary<string, object> transformed, CategoryTreeContext categoryTreeContext, string migrationId, Dictionary<string, object> sourceEntity)
+    private void HandleCategoryTreeMapping(Dictionary<string, object> transformed, CategoryTreeContext categoryTreeContext, Dictionary<string, object> sourceEntity)
     {
-        if (sourceEntity.TryGetValue("_sourceTreeId", out var sourceTreeIdObj) && sourceTreeIdObj is string sourceTreeId)
+        if (sourceEntity.TryGetValue("_sourceTreeId", out var sourceTreeIdObj))
         {
+            string sourceTreeId = sourceTreeIdObj?.ToString() ?? string.Empty;
+
             if (categoryTreeContext.CategoryTreeIdMapping.TryGetValue(sourceTreeId, out var destinationTreeId))
             {
                 if (int.TryParse(destinationTreeId, out var treeIdInt))
@@ -162,37 +164,42 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
     {
         if (transformed.TryGetValue("meta_keywords", out var metaKeywords))
         {
-            if (metaKeywords is string metaKeywordsString)
+            if (metaKeywords is JsonElement jsonElement)
             {
-                try
+                if (jsonElement.ValueKind == JsonValueKind.String)
                 {
-                    // Handle common malformed cases
-                    if (string.IsNullOrWhiteSpace(metaKeywordsString) ||
-                        metaKeywordsString == "[]" ||
-                        metaKeywordsString == "[\"\"]" ||
-                        metaKeywordsString == "[\"[]\"]")
-                    {
-                        transformed["meta_keywords"] = new List<string>();
-                        _logger.LogDebug("Converted empty/malformed meta_keywords to empty array for migration {MigrationId}", migrationId);
-                    }
-                    else
-                    {
-                        // Try to parse as JSON array
-                        var parsedKeywords = JsonSerializer.Deserialize<List<string>>(metaKeywordsString);
-                        transformed["meta_keywords"] = parsedKeywords ?? new List<string>();
-                        _logger.LogDebug("Successfully parsed meta_keywords JSON for migration {MigrationId}", migrationId);
-                    }
-                }
-                catch (JsonException ex)
-                {
-                    // If parsing fails, try to split as comma-separated values
-                    var keywords = metaKeywordsString.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                        .Select(k => k.Trim())
-                        .Where(k => !string.IsNullOrWhiteSpace(k))
-                        .ToList();
+                    string metaKeywordsString = metaKeywords?.ToString() ?? string.Empty;
 
-                    transformed["meta_keywords"] = keywords;
-                    _logger.LogWarning(ex, "Failed to parse meta_keywords as JSON, split as CSV instead for migration {MigrationId}", migrationId);
+                    try
+                    {
+                        // Handle common malformed cases
+                        if (string.IsNullOrWhiteSpace(metaKeywordsString) ||
+                            metaKeywordsString == "[]" ||
+                            metaKeywordsString == "[\"\"]" ||
+                            metaKeywordsString == "[\"[]\"]")
+                        {
+                            transformed["meta_keywords"] = new List<string>();
+                            _logger.LogDebug("Converted empty/malformed meta_keywords to empty array for migration {MigrationId}", migrationId);
+                        }
+                        else
+                        {
+                            // Try to parse as JSON array
+                            var parsedKeywords = JsonSerializer.Deserialize<List<string>>(metaKeywordsString);
+                            transformed["meta_keywords"] = parsedKeywords ?? new List<string>();
+                            _logger.LogDebug("Successfully parsed meta_keywords JSON for migration {MigrationId}", migrationId);
+                        }
+                    }
+                    catch (JsonException ex)
+                    {
+                        // If parsing fails, try to split as comma-separated values
+                        var keywords = metaKeywordsString.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                            .Select(k => k.Trim())
+                            .Where(k => !string.IsNullOrWhiteSpace(k))
+                            .ToList();
+
+                        transformed["meta_keywords"] = keywords;
+                        _logger.LogWarning(ex, "Failed to parse meta_keywords as JSON, split as CSV instead for migration {MigrationId}", migrationId);
+                    }
                 }
             }
             else if (metaKeywords is not List<string> && metaKeywords is not string[])
@@ -287,11 +294,30 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
         if (transformed.ContainsKey("url"))
         {
             var existingUrl = transformed["url"];
-            if (existingUrl is string urlString && !string.IsNullOrWhiteSpace(urlString))
+            if (existingUrl is JsonElement jsonElement)
             {
-                existingUrlPath = urlString;
-                _logger.LogDebug("Found existing string URL '{ExistingUrl}' - converting to object structure for migration {MigrationId}",
-                    urlString, migrationId);
+                if (jsonElement.ValueKind == JsonValueKind.String)
+                {
+                    var urlString = jsonElement.GetString();
+                    if (!string.IsNullOrWhiteSpace(urlString))
+                    {
+                        if (urlString.TrimStart().StartsWith("{")) // JSON inside a string
+                        {
+                            using var doc = JsonDocument.Parse(urlString);
+                            if (doc.RootElement.TryGetProperty("path", out var pathElement))
+                            {
+                                existingUrlPath = pathElement.GetString();
+                                _logger.LogDebug("Found existing string URL '{ExistingUrl}' - converting to object structure for migration {MigrationId}",
+                                urlString, migrationId);
+                            }
+                        }
+                        else
+                        {
+                            // plain string URL
+                            existingUrlPath = urlString;
+                        }
+                    }
+                }
             }
             else if (existingUrl is Dictionary<string, object> existingUrlDict &&
                      existingUrlDict.TryGetValue("path", out var pathValue) &&
@@ -334,52 +360,54 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
 
         _logger.LogDebug("Created URL object structure with path '{UrlPath}' for migration {MigrationId}",
             urlStructure["path"], migrationId);
-
-        // Also ensure tree_id is set as a direct field (required by BigCommerce V3)
-        HandleCategoryTreeMapping(transformed, categoryTreeContext, migrationId, sourceEntity);
     }
 
     private async Task HandleParentIdConversionAsync(Dictionary<string, object> transformed, string migrationId, CancellationToken cancellationToken)
     {
-        if (transformed.TryGetValue("parent_id", out var parentId))
+        if (transformed.TryGetValue("parent_id", out var parentIdObj))
         {
             _logger.LogDebug("🔍 DEBUG: HandleParentIdConversionAsync - processing parent_id: {ParentId} (type: {ParentIdType}) for migration {MigrationId}",
-                parentId, parentId?.GetType().Name, migrationId);
+                parentIdObj, parentIdObj?.GetType().Name, migrationId);
 
-            if (parentId is string parentIdString)
+            if (parentIdObj is JsonElement jsonElement)
             {
-                _logger.LogDebug("🔍 DEBUG: Looking up mapping for parent_id string '{ParentIdString}' in migration {MigrationId}",
-                    parentIdString, migrationId);
-
-                var mappedParentId = await _entityMappingService.GetDestinationIdAsync(
-                    migrationId,
-                    "categories",
-                    parentIdString,
-                    cancellationToken);
-
-                _logger.LogDebug("🔍 DEBUG: Mapping lookup result for parent_id '{ParentIdString}': '{MappedParentId}' in migration {MigrationId}",
-                    parentIdString, mappedParentId ?? "NULL", migrationId);
-
-                if (!string.IsNullOrEmpty(mappedParentId) && int.TryParse(mappedParentId, out var parsedMappedId))
+                if (jsonElement.ValueKind == JsonValueKind.Number)
                 {
-                    transformed["parent_id"] = parsedMappedId;
-                    _logger.LogDebug("🔍 DEBUG: ✅ Successfully mapped parent_id {ParentIdString} to {MappedParentId} for migration {MigrationId}",
-                        parentIdString, parsedMappedId, migrationId);
-                }
-                else if (int.TryParse(parentIdString, out var parsedOriginal))
-                {
-                    transformed["parent_id"] = parsedOriginal;
-                    _logger.LogDebug("No mapping found for parent_id {ParentIdString}, using original value {ParsedOriginal} for migration {MigrationId}",
-                        parentIdString, parsedOriginal, migrationId);
-                }
-                else
-                {
-                    transformed["parent_id"] = 0;
-                    _logger.LogDebug("Parent_id {ParentIdString} not found in mapping and cannot be parsed, treating as root category for migration {MigrationId}",
-                        parentIdString, migrationId);
+                    string parentIdString = parentIdObj?.ToString() ?? null!;
+
+                    _logger.LogDebug("🔍 DEBUG: Looking up mapping for parent_id string '{ParentIdString}' in migration {MigrationId}",
+                    parentIdObj, migrationId);
+
+                    var mappedParentId = await _entityMappingService.GetDestinationIdAsync(
+                        migrationId,
+                        "categories",
+                        parentIdString,
+                        cancellationToken);
+
+                    _logger.LogDebug("🔍 DEBUG: Mapping lookup result for parent_id '{ParentIdString}': '{MappedParentId}' in migration {MigrationId}",
+                        parentIdObj, mappedParentId ?? "NULL", migrationId);
+
+                    if (!string.IsNullOrEmpty(mappedParentId) && long.TryParse(mappedParentId, out long parsedMappedId))
+                    {
+                        transformed["parent_id"] = parsedMappedId;
+                        _logger.LogDebug("🔍 DEBUG: ✅ Successfully mapped parent_id {ParentIdString} to {MappedParentId} for migration {MigrationId}",
+                            parentIdObj, parsedMappedId, migrationId);
+                    }
+                    else if (long.TryParse(parentIdString, out var parsedOriginal))
+                    {
+                        transformed["parent_id"] = parsedOriginal;
+                        _logger.LogDebug("No mapping found for parent_id {ParentIdString}, using original value {ParsedOriginal} for migration {MigrationId}",
+                            parentIdObj, parsedOriginal, migrationId);
+                    }
+                    else
+                    {
+                        transformed["parent_id"] = 0;
+                        _logger.LogDebug("Parent_id {ParentIdString} not found in mapping and cannot be parsed, treating as root category for migration {MigrationId}",
+                            parentIdObj, migrationId);
+                    }
                 }
             }
-            else if (parentId is int parentIdInt)
+            else if (parentIdObj is int parentIdInt)
             {
                 _logger.LogDebug("🔍 DEBUG: Looking up mapping for parent_id int '{ParentIdInt}' in migration {MigrationId}",
                     parentIdInt, migrationId);
@@ -412,17 +440,6 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
         {
             transformed["parent_id"] = 0;
             _logger.LogDebug("🔍 DEBUG: No parent_id found in entity, setting to 0 (root category) for migration {MigrationId}", migrationId);
-        }
-    }
-
-
-
-    private static void RemoveNullValues(Dictionary<string, object> transformed)
-    {
-        var keysToRemove = transformed.Where(kvp => kvp.Value == null).Select(kvp => kvp.Key).ToList();
-        foreach (var key in keysToRemove)
-        {
-            transformed.Remove(key);
         }
     }
 

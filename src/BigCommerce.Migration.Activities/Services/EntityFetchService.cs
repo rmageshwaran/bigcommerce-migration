@@ -579,7 +579,7 @@ public class EntityFetchService : IEntityFetchService
             var batchEntities = request.CachedEntityData
                 .Where(entity =>
                 {
-                    var entityId = entity.TryGetValue("id", out var id) ? id.ToString() : null;
+                    var entityId = entity.TryGetValue("category_id", out var id) ? id.ToString() : null;
                     return entityId != null && request.EntityIds.Contains(entityId);
                 })
                 .ToList(); // Preserves the hierarchical order from cached data
@@ -590,7 +590,7 @@ public class EntityFetchService : IEntityFetchService
             // ✅ DEBUG: Log the hierarchical processing order
             foreach (var entity in batchEntities)
             {
-                var categoryId = entity.TryGetValue("id", out var id) ? id.ToString() : "UNKNOWN";
+                var categoryId = entity.TryGetValue("category_id", out var id) ? id.ToString() : "UNKNOWN";
                 var categoryName = entity.TryGetValue("name", out var name) ? name.ToString() : "UNKNOWN";
                 var parentId = entity.TryGetValue("parent_id", out var parent) ? parent.ToString() : "UNKNOWN";
                 _logger.LogInformation("🔍 DEBUG: - Hierarchical order: Category {CategoryId} ({CategoryName}), Parent: {ParentId}", 
@@ -613,114 +613,6 @@ public class EntityFetchService : IEntityFetchService
             standardBatchEntities.Count, request.EntityType, request.BatchNumber, request.MigrationId);
 
         return standardBatchEntities;
-    }
-
-    private StoreConfiguration ValidateStoreConfiguration(StoreConfiguration? storeConfig)
-    {
-        if (storeConfig == null || !storeConfig.IsValid())
-            throw new ArgumentException("Invalid source store configuration");
-        return storeConfig;
-    }
-
-    private List<int> ParseProductIds(List<string> entityIds, string migrationId)
-    {
-        var productIds = new List<int>();
-        foreach (var productIdStr in entityIds)
-        {
-            if (!int.TryParse(productIdStr, out var productId))
-            {
-                _logger.LogWarning("Invalid product ID: {ProductId} in migration {MigrationId}", productIdStr, migrationId);
-                continue;
-            }
-            productIds.Add(productId);
-        }
-        return productIds;
-    }
-
-    private async Task<List<Dictionary<string, object>>> FetchAllCategoriesWithPaginationAsync(
-        StoreConfiguration storeConfig, string categoryTreeId, CancellationToken cancellationToken)
-    {
-        var allCategories = new List<Dictionary<string, object>>();
-        var paginationRequest = new BigCommercePaginationRequest
-        {
-            Page = 1,
-            Limit = 250, // Fetch a large number of categories
-            CategoryTreeId = categoryTreeId,
-            IncludeDeleted = false,
-            IncludeDrafts = false,
-            SortBy = "id",
-            SortDirection = "asc"
-        };
-
-        while (!cancellationToken.IsCancellationRequested)
-        {
-            var response = await _apiClient.GetPaginatedEntitiesAsync(
-                storeConfig, 
-                "categories", // Always fetch categories
-                paginationRequest, 
-                cancellationToken);
-
-            if (response.Data == null || response.Data.Count == 0)
-                break;
-
-            allCategories.AddRange(response.Data);
-            _logger.LogDebug("Fetched {Count} categories from page {Page}", response.Data.Count, paginationRequest.Page);
-
-            if (!response.HasNextPage)
-                break;
-
-            paginationRequest.Page++;
-        }
-        return allCategories;
-    }
-
-    private List<Dictionary<string, object>> SortCategoriesHierarchically(List<Dictionary<string, object>> categories)
-    {
-        if (!categories.Any())
-        {
-            return categories;
-        }
-
-        try
-        {
-            _logger.LogDebug("Starting hierarchical sort of {CategoryCount} categories", categories.Count);
-
-            // Create a lookup dictionary for faster parent lookups
-            var categoryLookup = categories.ToDictionary(
-                c => c.TryGetValue("id", out var id) ? id.ToString()! : string.Empty,
-                c => c
-            );
-
-            // Calculate depth for each category
-            var categoryDepths = new Dictionary<string, int>();
-            
-            foreach (var category in categories)
-            {
-                var categoryId = category.TryGetValue("id", out var id) ? id.ToString()! : string.Empty;
-                if (!string.IsNullOrEmpty(categoryId))
-                {
-                    categoryDepths[categoryId] = CalculateCategoryDepth(category, categoryLookup, new HashSet<string>());
-                }
-            }
-
-            // Sort by depth (parents first), then by name for consistency
-            var sortedCategories = categories
-                .OrderBy(c => 
-                {
-                    var categoryId = c.TryGetValue("id", out var id) ? id.ToString()! : string.Empty;
-                    return categoryDepths.TryGetValue(categoryId, out var depth) ? depth : int.MaxValue;
-                })
-                .ThenBy(c => c.TryGetValue("name", out var name) ? name.ToString() : string.Empty)
-                .ToList();
-
-            _logger.LogDebug("Hierarchical sorting completed for {CategoryCount} categories", sortedCategories.Count);
-            return sortedCategories;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to sort categories hierarchically, falling back to original order");
-            return categories;
-        }
     }
 
     /// <summary>
@@ -760,94 +652,6 @@ public class EntityFetchService : IEntityFetchService
 
         // Recursive depth calculation
         return 1 + CalculateCategoryDepth(parentCategory, categoryLookup, visited);
-    }
-
-
-    private async Task FetchVariantsForProductAsync(int productId, StoreConfiguration storeConfig, 
-        ConcurrentBag<Dictionary<string, object>> allVariants, string migrationId, CancellationToken cancellationToken)
-    {
-        try
-        {
-            var variants = await _apiClient.GetProductVariantsAsync(storeConfig, productId, cancellationToken);
-
-            if (variants != null)
-            {
-                var variantDicts = variants.Select(variant => new Dictionary<string, object>
-                {
-                    ["id"] = variant.Id,
-                    ["product_id"] = variant.ProductId
-                }).ToList();
-
-                foreach (var variant in variantDicts)
-                {
-                    allVariants.Add(variant);
-                }
-                _logger.LogDebug("Fetched {Count} variants for product {ProductId}", variants.Count, productId);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to fetch variants for product {ProductId} in migration {MigrationId}", 
-                productId, migrationId);
-        }
-    }
-
-    private async Task FetchImagesForProductAsync(int productId, StoreConfiguration storeConfig, 
-        ConcurrentBag<Dictionary<string, object>> allImages, string migrationId, CancellationToken cancellationToken)
-    {
-        try
-        {
-            var images = await _apiClient.GetProductImagesAsync(storeConfig, productId, cancellationToken);
-
-            if (images != null)
-            {
-                var imageDicts = images.Select(image => new Dictionary<string, object>
-                {
-                    ["id"] = image.Id,
-                    ["product_id"] = image.ProductId
-                }).ToList();
-
-                foreach (var image in imageDicts)
-                {
-                    allImages.Add(image);
-                }
-                _logger.LogDebug("Fetched {Count} images for product {ProductId}", images.Count, productId);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to fetch images for product {ProductId} in migration {MigrationId}", 
-                productId, migrationId);
-        }
-    }
-
-    private async Task FetchModifiersForProductAsync(int productId, StoreConfiguration storeConfig, 
-        ConcurrentBag<Dictionary<string, object>> allModifiers, string migrationId, CancellationToken cancellationToken)
-    {
-        try
-        {
-            var modifiers = await _apiClient.GetProductModifiersAsync(storeConfig, productId, cancellationToken);
-
-            if (modifiers != null)
-            {
-                var modifierDicts = modifiers.Select(modifier => new Dictionary<string, object>
-                {
-                    ["id"] = modifier.Id,
-                    ["product_id"] = modifier.ProductId
-                }).ToList();
-
-                foreach (var modifier in modifierDicts)
-                {
-                    allModifiers.Add(modifier);
-                }
-                _logger.LogDebug("Fetched {Count} modifiers for product {ProductId}", modifiers.Count, productId);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to fetch modifiers for product {ProductId} in migration {MigrationId}", 
-                productId, migrationId);
-        }
     }
 
     /// <summary>

@@ -124,6 +124,7 @@ public class ProcessEntityChunkActivity
                 BatchNumber = request.ChunkNumber,
                 TotalBatches = request.TotalChunks,
                 EntityIds = request.EntityIds ?? new List<string>(),
+                CachedEntityData = request.CachedEntityData,
                 SourceStore = request.SourceStore,
                 DestinationStore = request.DestinationStore,
                 CategoryTreeContext = request.CategoryTreeContext,

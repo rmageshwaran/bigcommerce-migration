@@ -115,7 +115,9 @@ public class BigCommerceApiClient : IBigCommerceApiClient
     /// <summary>
     /// Creates categories using the correct BigCommerce API endpoint
     /// </summary>
-    public async Task<List<Dictionary<string, object>>> CreateCategoriesAsync(StoreConfiguration storeConfig, string categoryTreeId, List<Dictionary<string, object>> categories, CancellationToken cancellationToken = default)
+    public async Task<List<Dictionary<string, object>>> CreateCategoriesAsync(StoreConfiguration storeConfig
+        , List<Dictionary<string, object>> categories
+        , CancellationToken cancellationToken = default)
     {
         ValidateStoreConfiguration(storeConfig);
 
@@ -124,8 +126,8 @@ public class BigCommerceApiClient : IBigCommerceApiClient
         // Reference: https://developer.bigcommerce.com/docs/rest-catalog/category-trees/categories#create-categories
         var url = $"{storeConfig.GetApiBaseUrl()}/catalog/trees/categories";
         
-        _logger.LogDebug("Creating {Count} categories for tree {TreeId} in store {StoreId}", 
-            categories.Count, categoryTreeId, storeConfig.StoreId);
+        _logger.LogDebug("Creating {Count} categories for store {StoreId}", 
+            categories.Count, storeConfig.StoreId);
 
         // Serialize categories to JSON for the API call
         var jsonContent = JsonSerializer.Serialize(categories);
@@ -176,8 +178,8 @@ public class BigCommerceApiClient : IBigCommerceApiClient
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to create categories for store {StoreId}, tree {TreeId}", 
-                storeConfig.StoreId, categoryTreeId);
+            _logger.LogError(ex, "Failed to create categories for store {StoreId}", 
+                storeConfig.StoreId);
             throw;
         }
     }

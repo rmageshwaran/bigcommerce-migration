@@ -27,7 +27,7 @@ public static class EntityMigrationDurableOrchestrator
     {
         var logger = context.CreateReplaySafeLogger("EntityMigrationDurableOrchestrator");
         var input = context.GetInput<EntityMigrationRequest>();
-        
+
         if (input == null)
         {
             throw new ArgumentNullException(nameof(input), "Entity migration request is required");
@@ -35,16 +35,16 @@ public static class EntityMigrationDurableOrchestrator
 
         var migrationId = input.MigrationId;
         var entityType = input.EntityType;
-        
+
         // 🎯 PRODUCT-COMPONENTS EFFICIENT HANDLING: Fetch once, track components individually
         // Single API fetch with include="options,modifiers,reviews" but separate progress tracking per component type
         if (entityType.Equals("product-components", StringComparison.OrdinalIgnoreCase))
         {
             logger.LogInformation("🔧 Product-components phase starting - single fetch, individual component progress tracking");
-            
+
             // Initialize individual component progress tracking
             var componentTypes = new[] { "options", "modifiers", "reviews" };
-            
+
             foreach (var componentType in componentTypes)
             {
                 // 1. Send EntityStarted events for UI real-time updates
@@ -55,7 +55,7 @@ public static class EntityMigrationDurableOrchestrator
                     TotalCount = 0, // Progressive discovery - total unknown until processing
                     Message = $"{componentType} migration started - discovered during product-components fetch"
                 });
-                
+
                 // 2. 🎯 CRITICAL: Create EntityProgress database entries for individual components
                 await context.CallActivityAsync("StartEntityProcessingActivity", new
                 {
@@ -67,11 +67,11 @@ public static class EntityMigrationDurableOrchestrator
                     CancellationReason = string.Empty,
                     CancelledAt = DateTime.MinValue
                 });
-                
+
                 logger.LogInformation("🎯 Initialized progress tracking for {ComponentType} with database entry creation", componentType);
             }
         }
-        
+
         var result = new EntityMigrationResult
         {
             EntityType = entityType,
@@ -87,7 +87,7 @@ public static class EntityMigrationDurableOrchestrator
 
         try
         {
-            logger.LogInformation("🚀 THROUGHPUT OPTIMIZED: Starting {EntityType} migration with 17.0x parallel processing for MigrationId: {MigrationId}", 
+            logger.LogInformation("🚀 THROUGHPUT OPTIMIZED: Starting {EntityType} migration with 17.0x parallel processing for MigrationId: {MigrationId}",
                 entityType, migrationId);
 
             // Step 0.5: Setup external event listening for cancellation
@@ -95,27 +95,28 @@ public static class EntityMigrationDurableOrchestrator
             logger.LogInformation("Step 0.5: External cancellation event listener activated for {EntityType} migration {MigrationId}", entityType, migrationId);
 
             // Step 0.6: Initialize deterministic cancellation state
-            var cancellationState = new { 
-                IsCancelled = input.IsCancelled, 
-                CancellationReason = input.CancellationReason ?? string.Empty, 
+            var cancellationState = new
+            {
+                IsCancelled = input.IsCancelled,
+                CancellationReason = input.CancellationReason ?? string.Empty,
                 CancellationSource = input.IsCancelled ? "Inherited" : string.Empty,
-                CancelledAt = input.CancelledAt 
+                CancelledAt = input.CancelledAt
             };
-            logger.LogInformation("Step 0.6: Deterministic cancellation state initialized for {EntityType} migration {MigrationId}. Inherited: {Inherited}", 
+            logger.LogInformation("Step 0.6: Deterministic cancellation state initialized for {EntityType} migration {MigrationId}. Inherited: {Inherited}",
                 entityType, migrationId, input.IsCancelled);
 
             // Step 1: Enhanced cancellation check using deterministic state
             if (cancellationState.IsCancelled)
             {
-                logger.LogInformation("Migration {MigrationId} was cancelled before {EntityType} processing began. Source: {Source}, Reason: {Reason}", 
+                logger.LogInformation("Migration {MigrationId} was cancelled before {EntityType} processing began. Source: {Source}, Reason: {Reason}",
                     migrationId, entityType, cancellationState.CancellationSource, cancellationState.CancellationReason);
-                
+
                 result.IsSuccess = false;
                 result.ErrorMessage = $"{entityType} migration was cancelled ({cancellationState.CancellationSource}): {cancellationState.CancellationReason}";
                 result.EndTime = cancellationState.CancelledAt ?? context.CurrentUtcDateTime;
                 result.Duration = result.EndTime.Value - result.StartTime;
                 result.Errors.Add($"{entityType} migration was cancelled ({cancellationState.CancellationSource}): {cancellationState.CancellationReason}");
-                
+
                 // 🚫 CANCELLATION FIX: Don't mark unprocessed entities as failed
                 // For cancelled phases, all entities should be marked as cancelled, not failed
                 result.ProcessedEntities = 0;
@@ -123,7 +124,7 @@ public static class EntityMigrationDurableOrchestrator
                 result.FailedEntities = 0;
                 result.SkippedEntities = 0;
                 // Note: TotalEntities will be set later during discovery if needed
-                
+
                 return result;
             }
 
@@ -139,7 +140,7 @@ public static class EntityMigrationDurableOrchestrator
             // Step 3: Get Configuration - Load entity-specific settings from appsettings.json
             logger.LogError("🔧🔧🔧 [ORCHESTRATOR-CONFIG-DEBUG] ===== CALLING GetEntityConfigurationActivity for '{EntityType}' =====", entityType);
             var entityConfig = await context.CallActivityAsync<EntityConfiguration>("GetEntityConfigurationActivity", entityType);
-            
+
             logger.LogError("🔧 [ORCHESTRATOR-CONFIG-DEBUG] RECEIVED EntityConfiguration from activity: " +
                           "EntityType={EntityType}, ChunkSize={ChunkSize}, FetchBatchSize={FetchBatchSize}, PageSize={PageSize}, " +
                           "SubBatchSize={SubBatchSize}, MaxConcurrency={MaxConcurrency}, ProcessSubBatchesSequentially={ProcessSubBatchesSequentially}",
@@ -152,15 +153,15 @@ public static class EntityMigrationDurableOrchestrator
                 logger.LogError("🚨 [ORCHESTRATOR-CONFIG-DEBUG] NULL EntityConfiguration received from activity!");
                 throw new InvalidOperationException($"Failed to get configuration for entity type: {entityType}");
             }
-            
+
             if (entityConfig.ChunkSize <= 0 || entityConfig.FetchBatchSize <= 0)
             {
-                logger.LogError("🚨 [ORCHESTRATOR-CONFIG-DEBUG] INVALID configuration values: ChunkSize={ChunkSize}, FetchBatchSize={FetchBatchSize}", 
+                logger.LogError("🚨 [ORCHESTRATOR-CONFIG-DEBUG] INVALID configuration values: ChunkSize={ChunkSize}, FetchBatchSize={FetchBatchSize}",
                     entityConfig.ChunkSize, entityConfig.FetchBatchSize);
             }
 
             // Step 4: Discover entities to migrate
-            logger.LogInformation("Discovering {EntityType} entities for MigrationId: {MigrationId}", 
+            logger.LogInformation("Discovering {EntityType} entities for MigrationId: {MigrationId}",
                 entityType, migrationId);
 
             var discoverRequest = new EntityDiscoveryRequest
@@ -183,20 +184,20 @@ public static class EntityMigrationDurableOrchestrator
             if (discoverResult.Errors.Any())
             {
                 // 🚫 CANCELLATION FIX: Check if discovery failed due to cancellation
-                bool isDiscoveryCancellation = discoverResult.Errors.Any(error => 
+                bool isDiscoveryCancellation = discoverResult.Errors.Any(error =>
                     error.Contains("cancelled", StringComparison.OrdinalIgnoreCase) ||
                     error.Contains("OperationCanceledException", StringComparison.OrdinalIgnoreCase));
-                
+
                 if (isDiscoveryCancellation)
                 {
-                    logger.LogInformation("🚫 Discovery for {EntityType} was cancelled for MigrationId: {MigrationId}. Errors: {Errors}", 
+                    logger.LogInformation("🚫 Discovery for {EntityType} was cancelled for MigrationId: {MigrationId}. Errors: {Errors}",
                         entityType, migrationId, string.Join(", ", discoverResult.Errors));
-                    
+
                     result.IsSuccess = false;
                     result.ErrorMessage = $"{entityType} discovery was cancelled";
                     result.EndTime = context.CurrentUtcDateTime;
                     result.Errors.Add($"{entityType} discovery was cancelled");
-                    
+
                     // 🚫 CANCELLATION FIX: Don't mark undiscovered entities as failed
                     // For cancelled discovery, no entities should be marked as failed
                     result.TotalEntities = 0;
@@ -204,14 +205,14 @@ public static class EntityMigrationDurableOrchestrator
                     result.SuccessfulEntities = 0;
                     result.FailedEntities = 0;
                     result.SkippedEntities = 0;
-                    
+
                     return result;
                 }
                 else
                 {
-                    logger.LogError("Failed to discover {EntityType} entities for MigrationId: {MigrationId}. Errors: {Errors}", 
+                    logger.LogError("Failed to discover {EntityType} entities for MigrationId: {MigrationId}. Errors: {Errors}",
                         entityType, migrationId, string.Join(", ", discoverResult.Errors));
-                    
+
                     result.IsSuccess = false;
                     result.ErrorMessage = $"Failed to discover {entityType} entities: {string.Join(", ", discoverResult.Errors)}";
                     result.EndTime = context.CurrentUtcDateTime;
@@ -225,13 +226,13 @@ public static class EntityMigrationDurableOrchestrator
                 // Progressive discovery returns 0 but processing should still happen to discover incrementally
                 if (isProgressiveDiscovery)
                 {
-                    logger.LogInformation("🔄 Progressive discovery: {EntityType} TotalCount=0 but will discover during processing for MigrationId: {MigrationId}", 
+                    logger.LogInformation("🔄 Progressive discovery: {EntityType} TotalCount=0 but will discover during processing for MigrationId: {MigrationId}",
                         entityType, migrationId);
                     // Continue processing - don't return early
                 }
                 else
                 {
-                    logger.LogInformation("No {EntityType} entities found to migrate for MigrationId: {MigrationId}", 
+                    logger.LogInformation("No {EntityType} entities found to migrate for MigrationId: {MigrationId}",
                         entityType, migrationId);
                     result.IsSuccess = true;
                     result.EndTime = context.CurrentUtcDateTime;
@@ -239,7 +240,7 @@ public static class EntityMigrationDurableOrchestrator
                 }
             }
 
-            logger.LogInformation("Discovered {EntityCount} {EntityType} entities for MigrationId: {MigrationId}", 
+            logger.LogInformation("Discovered {EntityCount} {EntityType} entities for MigrationId: {MigrationId}",
                 discoverResult.TotalCount, entityType, migrationId);
 
             // 🚨 FIX: Set TotalEntities from discovery result (or keep as 0 for progressive discovery)
@@ -312,11 +313,11 @@ public static class EntityMigrationDurableOrchestrator
 
             // 🚀 **STEP 7: SMART PROCESSING** - Hybrid approach for optimal performance
             var entityIds = discoverResult?.EntityIds ?? new List<string>();
-            
+
             // Handle efficient pagination strategy (empty EntityIds but has TotalCount)
             var useDirectPagination = !entityIds.Any() && ((discoverResult?.TotalCount ?? 0) > 0 || isProgressiveDiscovery);
             var totalEntities = useDirectPagination ? (discoverResult?.TotalCount ?? 0) : entityIds.Count;
-            
+
             // 🔧 PROGRESSIVE DISCOVERY: For progressive discovery, use metadata to determine processing scope
             if (isProgressiveDiscovery && totalEntities == 0)
             {
@@ -327,32 +328,32 @@ public static class EntityMigrationDurableOrchestrator
                     totalProducts = JsonElementHelper.GetIntegerValue(discoverResult.PaginationMetadata["TotalProducts"]);
                 }
                 totalEntities = totalProducts; // Process all products to extract components
-                logger.LogInformation("🔄 Progressive discovery: Will process {TotalProducts} products to extract {EntityType} components", 
+                logger.LogInformation("🔄 Progressive discovery: Will process {TotalProducts} products to extract {EntityType} components",
                     totalProducts, entityType);
             }
-            
+
             // 🎯 PERFORMANCE OPTIMIZATION: Use configuration-driven chunking  
             var chunkingThreshold = 0; // 🔧 FORCE ALL ENTITIES THROUGH NORMAL PIPELINE: No fast workflow bypass
             var chunkSize = entityConfig.ChunkSize; // ✅ NOW CONFIGURABLE!
-            
+
             logger.LogError("🎯 [ORCHESTRATOR-CHUNKING-DEBUG] ===== CHUNKING CONFIGURATION =====");
             logger.LogError("🎯 [ORCHESTRATOR-CHUNKING-DEBUG] EntityType='{EntityType}', TotalEntities={TotalEntities}", entityType, totalEntities);
             logger.LogError("🎯 [ORCHESTRATOR-CHUNKING-DEBUG] ChunkingThreshold={ChunkingThreshold}, ConfiguredChunkSize={ConfiguredChunkSize}", chunkingThreshold, chunkSize);
             logger.LogError("🎯 [ORCHESTRATOR-CHUNKING-DEBUG] UseDirectPagination={UseDirectPagination}", useDirectPagination);
-            
+
             var shouldUseChunking = totalEntities > chunkingThreshold;
             var batchSize = shouldUseChunking ? chunkSize : totalEntities;
             var totalBatches = shouldUseChunking ? CalculateBatchCount(totalEntities, chunkSize) : 1;
-            
-            logger.LogError("🎯 [ORCHESTRATOR-CHUNKING-DEBUG] Calculated: ShouldUseChunking={ShouldUseChunking}, BatchSize={BatchSize}, TotalBatches={TotalBatches}", 
+
+            logger.LogError("🎯 [ORCHESTRATOR-CHUNKING-DEBUG] Calculated: ShouldUseChunking={ShouldUseChunking}, BatchSize={BatchSize}, TotalBatches={TotalBatches}",
                 shouldUseChunking, batchSize, totalBatches);
-            
+
             // Declare result variable at method scope to avoid compilation errors
             BigCommerce.Migration.Core.Interfaces.BatchProcessingResult parallelResult;
-            
+
             // 🔧 CRITICAL FIX: Track partial results for cancellation scenarios
             var partialResults = new List<BatchProcessingResult>();
-            
+
             // 🚨 CRITICAL DEBUG: Log CategoryTreeContext before processing
             if (input.CategoryTreeContext == null)
             {
@@ -360,24 +361,25 @@ public static class EntityMigrationDurableOrchestrator
             }
             else
             {
-                logger.LogInformation("🔄 [ORCHESTRATOR] 📋 CategoryTreeContext: Mappings='{Mappings}' for {EntityType} in migration {MigrationId}", 
+                logger.LogInformation("🔄 [ORCHESTRATOR] 📋 CategoryTreeContext: Mappings='{Mappings}' for {EntityType} in migration {MigrationId}",
                     string.Join(", ", input.CategoryTreeContext.CategoryTreeIdMapping.Select(kv => $"{kv.Key}->{kv.Value}")),
                     entityType, migrationId);
             }
-            
+
             // Step 7.1: Check for cancellation before starting batch processing
             if (!cancellationState.IsCancelled)
             {
                 var preBatchCancellationResult = await context.CallActivityAsync<(bool IsCancelled, string Reason)>("CheckCancellationFlag", migrationId);
                 bool preBatchExternalCancellation = cancellationEvent.IsCompleted && cancellationEvent.IsCompletedSuccessfully;
-                
+
                 if (preBatchCancellationResult.IsCancelled || preBatchExternalCancellation)
                 {
                     // Update deterministic cancellation state
-                    cancellationState = new {
+                    cancellationState = new
+                    {
                         IsCancelled = true,
-                        CancellationReason = preBatchExternalCancellation ? 
-                            (cancellationEvent.Result ?? "External cancellation requested") : 
+                        CancellationReason = preBatchExternalCancellation ?
+                            (cancellationEvent.Result ?? "External cancellation requested") :
                             (preBatchCancellationResult.Reason ?? "No reason provided"),
                         CancellationSource = preBatchExternalCancellation ? "ExternalEvent" : "CancellationFlag",
                         CancelledAt = (DateTime?)context.CurrentUtcDateTime
@@ -387,15 +389,15 @@ public static class EntityMigrationDurableOrchestrator
 
             if (cancellationState.IsCancelled)
             {
-                logger.LogInformation("Migration {MigrationId} was cancelled before {EntityType} batch processing. Source: {Source}, Reason: {Reason}", 
+                logger.LogInformation("Migration {MigrationId} was cancelled before {EntityType} batch processing. Source: {Source}, Reason: {Reason}",
                     migrationId, entityType, cancellationState.CancellationSource, cancellationState.CancellationReason);
-                
+
                 result.IsSuccess = false;
                 result.ErrorMessage = $"{entityType} migration was cancelled before batch processing ({cancellationState.CancellationSource}): {cancellationState.CancellationReason}";
                 result.EndTime = cancellationState.CancelledAt ?? context.CurrentUtcDateTime;
                 result.Duration = result.EndTime.Value - result.StartTime;
                 result.Errors.Add($"{entityType} migration was cancelled before batch processing ({cancellationState.CancellationSource}): {cancellationState.CancellationReason}");
-                
+
                 return result;
             }
 
@@ -403,122 +405,123 @@ public static class EntityMigrationDurableOrchestrator
             {
                 // 🚀 LARGE DATASET: Use chunked orchestration for timeout prevention
                 logger.LogInformation("🚀 CHUNKED WORKFLOW: Processing {TotalEntities} {EntityType} entities in {TotalChunks} chunks " +
-                                    "of max {ChunkSize} entities each to prevent timeouts", 
+                                    "of max {ChunkSize} entities each to prevent timeouts",
                     totalEntities, entityType, totalBatches, batchSize);
 
                 // Process all chunks in parallel using sub-orchestrators
                 var chunkTasks = new List<Task<BigCommerce.Migration.Core.Interfaces.BatchProcessingResult>>();
-            
+
                 for (int chunkNumber = 0; chunkNumber < totalBatches; chunkNumber++)
                 {
                     var startIndex = chunkNumber * batchSize;
                     var endIndex = Math.Min(startIndex + batchSize, totalEntities);
                     var actualChunkSize = endIndex - startIndex;
-                
+
                     logger.LogError("🔥 [ORCHESTRATOR-CHUNK-DEBUG] ===== CREATING CHUNK {ChunkNumber}/{TotalBatches} =====", chunkNumber, totalBatches);
-                    logger.LogError("🔥 [ORCHESTRATOR-CHUNK-DEBUG] ChunkNumber={ChunkNumber}, StartIndex={StartIndex}, EndIndex={EndIndex}, ActualChunkSize={ActualChunkSize}", 
+                    logger.LogError("🔥 [ORCHESTRATOR-CHUNK-DEBUG] ChunkNumber={ChunkNumber}, StartIndex={StartIndex}, EndIndex={EndIndex}, ActualChunkSize={ActualChunkSize}",
                         chunkNumber, startIndex, endIndex, actualChunkSize);
                     logger.LogError("🔥 [ORCHESTRATOR-CHUNK-DEBUG] BatchSize={BatchSize}, UseDirectPagination={UseDirectPagination}", batchSize, useDirectPagination);
-                
+
                     // Get entity IDs for this chunk
-                    var chunkEntityIds = useDirectPagination 
+                    var chunkEntityIds = useDirectPagination
                         ? new List<string>() // Direct pagination doesn't use pre-fetched IDs
                         : entityIds.Skip(startIndex).Take(actualChunkSize).ToList();
-                    
-                    logger.LogError("🔥 [ORCHESTRATOR-CHUNK-DEBUG] ChunkEntityIds.Count={ChunkEntityIdsCount}", chunkEntityIds.Count);
-                
-                // 🚨 CRITICAL FIX: For direct pagination, adjust pagination metadata for chunk boundaries
-                var chunkPaginationMetadata = new Dictionary<string, object>();
-                if (useDirectPagination && discoverResult?.PaginationMetadata != null)
-                {
-                    logger.LogError("🔥 [ORCHESTRATOR-CHUNK-DEBUG] Setting up chunk pagination metadata for direct pagination...");
-                    logger.LogError("🔥 [ORCHESTRATOR-CHUNK-DEBUG] Original PaginationMetadata keys: [{OriginalKeys}]", 
-                        string.Join(", ", discoverResult.PaginationMetadata.Keys));
-                    
-                    // Copy original metadata
-                    foreach (var kvp in discoverResult.PaginationMetadata)
-                    {
-                        chunkPaginationMetadata[kvp.Key] = kvp.Value;
-                        logger.LogError("🔥 [ORCHESTRATOR-CHUNK-DEBUG] Copied: {Key}={Value}", kvp.Key, kvp.Value);
-                    }
-                    // Override with chunk-specific values
-                    chunkPaginationMetadata["TotalCount"] = actualChunkSize; // Limit each chunk to its size
-                    chunkPaginationMetadata["StartIndex"] = startIndex;
-                    chunkPaginationMetadata["ChunkSize"] = actualChunkSize;
-                    
-                    logger.LogError("🔥 [ORCHESTRATOR-CHUNK-DEBUG] OVERRIDDEN values: TotalCount={TotalCount}, StartIndex={StartIndex}, ChunkSize={ChunkSize}", 
-                        actualChunkSize, startIndex, actualChunkSize);
-                }
-                else
-                {
-                    logger.LogError("🔥 [ORCHESTRATOR-CHUNK-DEBUG] NOT using direct pagination OR no original pagination metadata");
-                }
 
-                var chunkRequest = new ProcessEntityChunkRequest
-                {
-                    MigrationId = migrationId,
-                    EntityType = entityType,
-                    ChunkNumber = chunkNumber,
-                    TotalChunks = totalBatches,
-                    StartIndex = startIndex,
-                    ChunkSize = actualChunkSize,
-                    EntityIds = chunkEntityIds,
-                    SourceStore = input.SourceStore ?? new StoreConfiguration(),
-                    DestinationStore = input.DestinationStore ?? new StoreConfiguration(),
-                    CategoryTreeContext = input.CategoryTreeContext ?? new CategoryTreeContext(),
-                    UseDirectPagination = useDirectPagination,
-                    PaginationMetadata = useDirectPagination ? chunkPaginationMetadata : discoverResult?.PaginationMetadata,
-                    IsCancelled = cancellationState.IsCancelled,
-                    CancellationReason = cancellationState.CancellationReason,
-                    CancelledAt = cancellationState.CancelledAt,
-                    ChannelMapping = input.ChannelMapping // ✅ Pass ChannelMapping from EntityMigrationRequest
-                };
-                
-                // ✅ DEBUG: Log ChannelMapping propagation for each chunk
-                if (entityType.Equals("product-channel-assign", StringComparison.OrdinalIgnoreCase))
-                {
-                    if (chunkRequest.ChannelMapping?.Any() == true)
+                    logger.LogError("🔥 [ORCHESTRATOR-CHUNK-DEBUG] ChunkEntityIds.Count={ChunkEntityIdsCount}", chunkEntityIds.Count);
+
+                    // 🚨 CRITICAL FIX: For direct pagination, adjust pagination metadata for chunk boundaries
+                    var chunkPaginationMetadata = new Dictionary<string, object>();
+                    if (useDirectPagination && discoverResult?.PaginationMetadata != null)
                     {
-                        logger.LogInformation("🔗 [ENTITY-ORCHESTRATOR-DEBUG] Chunk {ChunkNumber}: Passing ChannelMapping [{Mappings}] to ProcessEntityChunkActivity", 
-                            chunkNumber, string.Join(", ", chunkRequest.ChannelMapping.Select(m => $"{m.SourceChannel}→{m.DestinationChannel}")));
+                        logger.LogError("🔥 [ORCHESTRATOR-CHUNK-DEBUG] Setting up chunk pagination metadata for direct pagination...");
+                        logger.LogError("🔥 [ORCHESTRATOR-CHUNK-DEBUG] Original PaginationMetadata keys: [{OriginalKeys}]",
+                            string.Join(", ", discoverResult.PaginationMetadata.Keys));
+
+                        // Copy original metadata
+                        foreach (var kvp in discoverResult.PaginationMetadata)
+                        {
+                            chunkPaginationMetadata[kvp.Key] = kvp.Value;
+                            logger.LogError("🔥 [ORCHESTRATOR-CHUNK-DEBUG] Copied: {Key}={Value}", kvp.Key, kvp.Value);
+                        }
+                        // Override with chunk-specific values
+                        chunkPaginationMetadata["TotalCount"] = actualChunkSize; // Limit each chunk to its size
+                        chunkPaginationMetadata["StartIndex"] = startIndex;
+                        chunkPaginationMetadata["ChunkSize"] = actualChunkSize;
+
+                        logger.LogError("🔥 [ORCHESTRATOR-CHUNK-DEBUG] OVERRIDDEN values: TotalCount={TotalCount}, StartIndex={StartIndex}, ChunkSize={ChunkSize}",
+                            actualChunkSize, startIndex, actualChunkSize);
                     }
                     else
                     {
-                        logger.LogError("❌ [ENTITY-ORCHESTRATOR-DEBUG] Chunk {ChunkNumber}: No ChannelMapping available for {EntityType}!", 
-                            chunkNumber, entityType);
+                        logger.LogError("🔥 [ORCHESTRATOR-CHUNK-DEBUG] NOT using direct pagination OR no original pagination metadata");
                     }
-                }
-                
-                logger.LogError("🚀 [ORCHESTRATOR-CHUNK-DEBUG] FINAL chunkRequest for chunk {ChunkNumber}: " +
-                              "MigrationId={MigrationId}, EntityType={EntityType}, ChunkNumber={ChunkNumber}, TotalChunks={TotalChunks}, " +
-                              "StartIndex={StartIndex}, ChunkSize={ChunkSize}, UseDirectPagination={UseDirectPagination}, EntityIds.Count={EntityIdsCount}, " +
-                              "PaginationMetadata.Count={PaginationMetadataCount}",
-                              chunkNumber, migrationId, entityType, chunkNumber, totalBatches, 
-                              startIndex, actualChunkSize, useDirectPagination, chunkEntityIds.Count, 
-                              (chunkRequest.PaginationMetadata?.Count ?? 0));
-                
-                if (chunkRequest.PaginationMetadata != null && chunkRequest.PaginationMetadata.Any())
-                {
-                    foreach (var kvp in chunkRequest.PaginationMetadata)
+
+                    var chunkRequest = new ProcessEntityChunkRequest
                     {
-                        logger.LogError("🚀 [ORCHESTRATOR-CHUNK-DEBUG] PaginationMetadata[{Key}]={Value}", kvp.Key, kvp.Value);
+                        MigrationId = migrationId,
+                        EntityType = entityType,
+                        ChunkNumber = chunkNumber,
+                        TotalChunks = totalBatches,
+                        StartIndex = startIndex,
+                        ChunkSize = actualChunkSize,
+                        EntityIds = chunkEntityIds,
+                        CachedEntityData = discoverResult.EntityData,
+                        SourceStore = input.SourceStore ?? new StoreConfiguration(),
+                        DestinationStore = input.DestinationStore ?? new StoreConfiguration(),
+                        CategoryTreeContext = input.CategoryTreeContext ?? new CategoryTreeContext(),
+                        UseDirectPagination = useDirectPagination,
+                        PaginationMetadata = useDirectPagination ? chunkPaginationMetadata : discoverResult?.PaginationMetadata,
+                        IsCancelled = cancellationState.IsCancelled,
+                        CancellationReason = cancellationState.CancellationReason,
+                        CancelledAt = cancellationState.CancelledAt,
+                        ChannelMapping = input.ChannelMapping // ✅ Pass ChannelMapping from EntityMigrationRequest
+                    };
+
+                    // ✅ DEBUG: Log ChannelMapping propagation for each chunk
+                    if (entityType.Equals("product-channel-assign", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (chunkRequest.ChannelMapping?.Any() == true)
+                        {
+                            logger.LogInformation("🔗 [ENTITY-ORCHESTRATOR-DEBUG] Chunk {ChunkNumber}: Passing ChannelMapping [{Mappings}] to ProcessEntityChunkActivity",
+                                chunkNumber, string.Join(", ", chunkRequest.ChannelMapping.Select(m => $"{m.SourceChannel}→{m.DestinationChannel}")));
+                        }
+                        else
+                        {
+                            logger.LogError("❌ [ENTITY-ORCHESTRATOR-DEBUG] Chunk {ChunkNumber}: No ChannelMapping available for {EntityType}!",
+                                chunkNumber, entityType);
+                        }
                     }
-                }
 
-                logger.LogInformation("🎯 [CHUNK-{ChunkNumber}] Queuing chunk processing: entities {StartIndex}-{EndIndex} " +
-                                    "({ActualChunkSize} entities) for {EntityType}", 
-                    chunkNumber, startIndex, endIndex - 1, actualChunkSize, entityType);
+                    logger.LogError("🚀 [ORCHESTRATOR-CHUNK-DEBUG] FINAL chunkRequest for chunk {ChunkNumber}: " +
+                                  "MigrationId={MigrationId}, EntityType={EntityType}, ChunkNumber={ChunkNumber}, TotalChunks={TotalChunks}, " +
+                                  "StartIndex={StartIndex}, ChunkSize={ChunkSize}, UseDirectPagination={UseDirectPagination}, EntityIds.Count={EntityIdsCount}, " +
+                                  "PaginationMetadata.Count={PaginationMetadataCount}",
+                                  chunkNumber, migrationId, entityType, chunkNumber, totalBatches,
+                                  startIndex, actualChunkSize, useDirectPagination, chunkEntityIds.Count,
+                                  (chunkRequest.PaginationMetadata?.Count ?? 0));
 
-                // Call ProcessEntityChunkOrchestrator for each chunk
-                var chunkTask = context.CallSubOrchestratorAsync<BigCommerce.Migration.Core.Interfaces.BatchProcessingResult>(
+                    if (chunkRequest.PaginationMetadata != null && chunkRequest.PaginationMetadata.Any())
+                    {
+                        foreach (var kvp in chunkRequest.PaginationMetadata)
+                        {
+                            logger.LogError("🚀 [ORCHESTRATOR-CHUNK-DEBUG] PaginationMetadata[{Key}]={Value}", kvp.Key, kvp.Value);
+                        }
+                    }
+
+                    logger.LogInformation("🎯 [CHUNK-{ChunkNumber}] Queuing chunk processing: entities {StartIndex}-{EndIndex} " +
+                                        "({ActualChunkSize} entities) for {EntityType}",
+                        chunkNumber, startIndex, endIndex - 1, actualChunkSize, entityType);
+
+                    // Call ProcessEntityChunkOrchestrator for each chunk
+                    var chunkTask = context.CallSubOrchestratorAsync<BigCommerce.Migration.Core.Interfaces.BatchProcessingResult>(
                     "ProcessEntityChunkOrchestrator",
                     chunkRequest);
-                
-                chunkTasks.Add(chunkTask);
-            }
+
+                    chunkTasks.Add(chunkTask);
+                }
 
                 // Wait for all chunks to complete
-                logger.LogInformation("🔄 [ENHANCED-ORCHESTRATOR] Waiting for {TotalChunks} chunks to complete for {EntityType}", 
+                logger.LogInformation("🔄 [ENHANCED-ORCHESTRATOR] Waiting for {TotalChunks} chunks to complete for {EntityType}",
                     totalBatches, entityType);
 
                 var chunkResults = await Task.WhenAll(chunkTasks);
@@ -534,15 +537,15 @@ public static class EntityMigrationDurableOrchestrator
                 };
 
                 logger.LogInformation("🎉 [CHUNKED-ORCHESTRATOR] All {TotalChunks} chunks completed for {EntityType}: " +
-                                    "{SuccessfulEntities} successful, {FailedEntities} failed, {TotalErrors} errors", 
-                    totalBatches, entityType, parallelResult.SuccessfulEntities, parallelResult.FailedEntities, 
+                                    "{SuccessfulEntities} successful, {FailedEntities} failed, {TotalErrors} errors",
+                    totalBatches, entityType, parallelResult.SuccessfulEntities, parallelResult.FailedEntities,
                     parallelResult.Errors?.Count ?? 0);
             }
             else
             {
                 // ⚡ SMALL DATASET: Use direct activity processing for maximum speed (like original 28-second approach)
                 logger.LogInformation("⚡ FAST WORKFLOW: Processing {TotalEntities} {EntityType} entities using direct activity " +
-                                    "(≤{Threshold} entities - no chunking needed)", 
+                                    "(≤{Threshold} entities - no chunking needed)",
                     totalEntities, entityType, chunkingThreshold);
 
                 // Create a single chunk request for all entities (fast processing)
@@ -555,6 +558,7 @@ public static class EntityMigrationDurableOrchestrator
                     StartIndex = 0,
                     ChunkSize = totalEntities,
                     EntityIds = entityIds,
+                    CachedEntityData = discoverResult.EntityData,
                     SourceStore = input.SourceStore ?? new StoreConfiguration(),
                     DestinationStore = input.DestinationStore ?? new StoreConfiguration(),
                     CategoryTreeContext = input.CategoryTreeContext ?? new CategoryTreeContext(),
@@ -565,11 +569,11 @@ public static class EntityMigrationDurableOrchestrator
                     CancelledAt = cancellationState.CancelledAt,
                     ChannelMapping = input.ChannelMapping // ✅ Pass ChannelMapping from EntityMigrationRequest
                 };
-                
+
                 // ✅ DEBUG: Log ChannelMapping for fast workflow
                 if (entityType.Equals("product-channel-assign", StringComparison.OrdinalIgnoreCase))
                 {
-                    logger.LogInformation("⚡ [ENTITY-ORCHESTRATOR-DEBUG] Fast workflow: ChannelMapping status for {EntityType}: {HasMapping}", 
+                    logger.LogInformation("⚡ [ENTITY-ORCHESTRATOR-DEBUG] Fast workflow: ChannelMapping status for {EntityType}: {HasMapping}",
                         entityType, fastRequest.ChannelMapping?.Any() == true ? "Available" : "Missing");
                 }
 
@@ -578,19 +582,19 @@ public static class EntityMigrationDurableOrchestrator
                     "ProcessEntityChunk", fastRequest);
 
                 logger.LogInformation("⚡ [FAST-ORCHESTRATOR] Direct activity completed for {EntityType}: " +
-                                    "{SuccessfulEntities} successful, {FailedEntities} failed, {TotalErrors} errors", 
-                    entityType, parallelResult.SuccessfulEntities, parallelResult.FailedEntities, 
+                                    "{SuccessfulEntities} successful, {FailedEntities} failed, {TotalErrors} errors",
+                    entityType, parallelResult.SuccessfulEntities, parallelResult.FailedEntities,
                     parallelResult.Errors?.Count ?? 0);
             }
 
-            logger.LogInformation("🎉 P2.5: PARALLEL processing completed for {EntityType} in {Duration}ms - {Processed}/{Total} entities", 
-                entityType, parallelResult.ProcessingTime.TotalMilliseconds, 
+            logger.LogInformation("🎉 P2.5: PARALLEL processing completed for {EntityType} in {Duration}ms - {Processed}/{Total} entities",
+                entityType, parallelResult.ProcessingTime.TotalMilliseconds,
                 parallelResult.TotalProcessed, discoverResult?.TotalCount ?? 0);
 
             // 🆕 TASK 3.3: Simplified progress aggregation using database as source of truth
             // Get latest aggregated progress from database (includes real-time incremental updates)
             var latestProgress = await context.CallActivityAsync<MigrationProgress>(
-                "GetLatestAggregatedProgressActivity", 
+                "GetLatestAggregatedProgressActivity",
                 new GetProgressRequest { MigrationId = migrationId, EntityType = entityType });
 
             // Simple assignment - database is the single source of truth
@@ -599,8 +603,8 @@ public static class EntityMigrationDurableOrchestrator
             result.SkippedEntities = latestProgress.SkippedEntities;
             result.CancelledEntities = latestProgress.CancelledEntities;
             result.ProcessedEntities = latestProgress.ProcessedEntities;
-            
-            logger.LogInformation("✅ [TASK-3.3] Simplified progress from database: Successful={Successful}, Failed={Failed}, Skipped={Skipped}, Cancelled={Cancelled}, ProcessedEntities={ProcessedEntities} out of TotalEntities={TotalEntities}", 
+
+            logger.LogInformation("✅ [TASK-3.3] Simplified progress from database: Successful={Successful}, Failed={Failed}, Skipped={Skipped}, Cancelled={Cancelled}, ProcessedEntities={ProcessedEntities} out of TotalEntities={TotalEntities}",
                 result.SuccessfulEntities, result.FailedEntities, result.SkippedEntities, result.CancelledEntities, result.ProcessedEntities, discoverResult?.TotalCount ?? 0);
 
             // Step 6: Complete entity processing
@@ -640,28 +644,28 @@ public static class EntityMigrationDurableOrchestrator
                 logger.LogInformation("🚫 [CANCELLATION-RESULT] {EntityType} was cancelled for MigrationId: {MigrationId}. " +
                                     "TotalEntities: {TotalEntities}, ProcessedEntities: {ProcessedEntities}, " +
                                     "SuccessfulEntities: {SuccessfulEntities}, FailedEntities: {FailedEntities}, SkippedEntities: {SkippedEntities}",
-                    entityType, migrationId, discoverResult?.TotalCount ?? 0, result.ProcessedEntities, 
+                    entityType, migrationId, discoverResult?.TotalCount ?? 0, result.ProcessedEntities,
                     result.SuccessfulEntities, result.FailedEntities, result.SkippedEntities);
-                
+
                 result.IsSuccess = false;
                 if (wasCancelledByState)
                 {
                     result.ErrorMessage = $"{entityType} migration was cancelled ({cancellationState.CancellationSource}): {cancellationState.CancellationReason}";
-                    logger.LogInformation("{EntityType} migration was cancelled for MigrationId: {MigrationId} via {Source}. Reason: {Reason}", 
+                    logger.LogInformation("{EntityType} migration was cancelled for MigrationId: {MigrationId} via {Source}. Reason: {Reason}",
                         entityType, migrationId, cancellationState.CancellationSource, cancellationState.CancellationReason);
                 }
                 else
                 {
                     result.ErrorMessage = $"{entityType} migration was cancelled during processing";
-                    logger.LogInformation("{EntityType} migration was cancelled during processing for MigrationId: {MigrationId}", 
+                    logger.LogInformation("{EntityType} migration was cancelled during processing for MigrationId: {MigrationId}",
                         entityType, migrationId);
                 }
-                
+
                 // 🚨 CRITICAL FIX: Update entity progress to "Cancelled" status before returning
                 // This ensures the entityprogress table shows the correct status when entity is cancelled
-                logger.LogInformation("🔄 [CANCELLATION-FIX] Updating entity progress to 'Cancelled' status for {EntityType} in migration {MigrationId}", 
+                logger.LogInformation("🔄 [CANCELLATION-FIX] Updating entity progress to 'Cancelled' status for {EntityType} in migration {MigrationId}",
                     entityType, migrationId);
-                
+
                 await context.CallActivityAsync(
                     "UpdateEntityProgressActivity",
                     new UpdateEntityProgressRequest
@@ -683,10 +687,10 @@ public static class EntityMigrationDurableOrchestrator
                         CancellationReason = wasCancelledByState ? cancellationState.CancellationReason : "Entity processing was cancelled",
                         CancelledAt = wasCancelledByState ? cancellationState.CancelledAt : context.CurrentUtcDateTime
                     });
-                
-                logger.LogInformation("✅ [CANCELLATION-FIX] Entity progress updated to 'Cancelled' status for {EntityType} in migration {MigrationId}", 
+
+                logger.LogInformation("✅ [CANCELLATION-FIX] Entity progress updated to 'Cancelled' status for {EntityType} in migration {MigrationId}",
                     entityType, migrationId);
-                
+
                 return result;
             }
 
@@ -699,7 +703,7 @@ public static class EntityMigrationDurableOrchestrator
             {
                 result.IsSuccess = true;
                 logger.LogInformation("🎉 PARALLEL MIGRATION SUCCESS: Completed {EntityType} migration for MigrationId: {MigrationId}. " +
-                                    "Processed: {ProcessedCount} entities with 17.0x optimizations", 
+                                    "Processed: {ProcessedCount} entities with 17.0x optimizations",
                     entityType, migrationId, result.ProcessedEntities);
             }
             else if (result.SuccessfulEntities > 0)
@@ -707,14 +711,14 @@ public static class EntityMigrationDurableOrchestrator
                 result.IsSuccess = true; // Partial success
                 result.ErrorMessage = $"Completed with {result.FailedEntities} failed entities out of {result.ProcessedEntities} total";
                 logger.LogWarning("Completed {EntityType} migration with errors for MigrationId: {MigrationId}. " +
-                                "Processed: {ProcessedCount}, Successful: {SuccessfulCount}, Failed: {FailedCount}", 
+                                "Processed: {ProcessedCount}, Successful: {SuccessfulCount}, Failed: {FailedCount}",
                     entityType, migrationId, result.ProcessedEntities, result.SuccessfulEntities, result.FailedEntities);
             }
             else
             {
                 result.IsSuccess = false;
                 result.ErrorMessage = $"All {result.FailedEntities} {entityType} entities failed to migrate";
-                logger.LogError("All {EntityType} entities failed for MigrationId: {MigrationId}. Failed: {FailedCount}", 
+                logger.LogError("All {EntityType} entities failed for MigrationId: {MigrationId}. Failed: {FailedCount}",
                     entityType, migrationId, result.FailedEntities);
             }
 
@@ -724,14 +728,14 @@ public static class EntityMigrationDurableOrchestrator
         {
             // 🆕 TASK 3.3: Simplified exception handling using database as source of truth
             // No need for complex preservation logic - incremental progress is already in database
-            logger.LogInformation("🚫 [TASK-3.3] {EntityType} migration was cancelled or failed for MigrationId: {MigrationId}: {ErrorMessage}", 
+            logger.LogInformation("🚫 [TASK-3.3] {EntityType} migration was cancelled or failed for MigrationId: {MigrationId}: {ErrorMessage}",
                 entityType, migrationId, ex.Message);
 
             try
             {
                 // Get latest progress from database (incremental updates already saved by Task 3.1)
                 var finalProgress = await context.CallActivityAsync<MigrationProgress>(
-                    "GetLatestAggregatedProgressActivity", 
+                    "GetLatestAggregatedProgressActivity",
                     new GetProgressRequest { MigrationId = migrationId, EntityType = entityType });
 
                 // Simple assignment - database has the real-time data
@@ -741,7 +745,7 @@ public static class EntityMigrationDurableOrchestrator
                 result.CancelledEntities = finalProgress.CancelledEntities;
                 result.ProcessedEntities = finalProgress.ProcessedEntities;
 
-                logger.LogInformation("✅ [TASK-3.3] Retrieved final progress from database: Successful={Successful}, Failed={Failed}, Skipped={Skipped}, Cancelled={Cancelled}", 
+                logger.LogInformation("✅ [TASK-3.3] Retrieved final progress from database: Successful={Successful}, Failed={Failed}, Skipped={Skipped}, Cancelled={Cancelled}",
                     result.SuccessfulEntities, result.FailedEntities, result.SkippedEntities, result.CancelledEntities);
             }
             catch (Exception progressEx)
@@ -754,7 +758,7 @@ public static class EntityMigrationDurableOrchestrator
             result.ErrorMessage = ex.Message;
             result.EndTime = context.CurrentUtcDateTime;
             result.Duration = result.EndTime.Value - result.StartTime;
-            
+
             return result;
         }
     }
@@ -778,4 +782,3 @@ public static class EntityMigrationDurableOrchestrator
 
 }
 
- 

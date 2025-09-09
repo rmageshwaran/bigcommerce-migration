@@ -433,7 +433,7 @@ public static class EntityMigrationDurableOrchestrator
                     for (int i = 0; i < levelTotalBatches; i++)
                     {
                         var chunkCategories = categoriesForCurrentLevel.Skip(i * chunkSize).Take(chunkSize).ToList();
-                        var chunkEntityIds = chunkCategories.Select(c => c["id"].ToString()).ToList();
+                        var chunkEntityIds = chunkCategories.Select(c => c["category_id"].ToString()).ToList();
 
                         var chunkRequest = new ProcessEntityChunkRequest
                         {
@@ -459,8 +459,8 @@ public static class EntityMigrationDurableOrchestrator
                     var levelChunkResults = await Task.WhenAll(levelChunkTasks);
                     chunkResults.AddRange(levelChunkResults);
 
-                    processedCategoryIds.UnionWith(categoriesForCurrentLevel.Select(c => c["id"].ToString()));
-                    parentIdsForCurrentLevel = categoriesForCurrentLevel.Select(c => c["id"].ToString()).ToList();
+                    processedCategoryIds.UnionWith(categoriesForCurrentLevel.Select(c => c["category_id"].ToString()));
+                    parentIdsForCurrentLevel = categoriesForCurrentLevel.Select(c => c["category_id"].ToString()).ToList();
                 }
 
                 parallelResult = new BigCommerce.Migration.Core.Interfaces.BatchProcessingResult
@@ -831,10 +831,6 @@ public static class EntityMigrationDurableOrchestrator
         }
     }
 
-    // 🗑️ TASK 3.3: PreserveCancelledWorkAsync method removed
-    // No longer needed - incremental progress is automatically preserved in database by Task 3.1
-    // The database now serves as the single source of truth for all progress data
-
     /// <summary>
     /// Calculates the number of batches needed for a given entity count and batch size
     /// </summary>
@@ -846,7 +842,5 @@ public static class EntityMigrationDurableOrchestrator
         if (totalCount == 0) return 0;
         return (int)Math.Ceiling((double)totalCount / batchSize);
     }
-
-
 }
 

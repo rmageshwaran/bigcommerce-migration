@@ -642,7 +642,7 @@ public class BigCommerceApiClient : IBigCommerceApiClient
         var endpoint = entityType.ToLowerInvariant() switch
         {
             "products" => "catalog/products",
-            "categories" => "catalog/categories", 
+            "categories" => "catalog/trees/categories", 
             "brands" => "catalog/brands",
             "variants" => "catalog/variants",              // Phase 3: Map to variants endpoint
             

@@ -151,13 +151,6 @@ public class V3HierarchicalStrategy : IEntityDiscoveryStrategy
             _logger.LogInformation("✅ Pagination completed for {EntityType}: Cached {ActualCount} entities", 
                 request.EntityType, allEntities.Count);
 
-            // ✅ VALIDATION: Check if we might have missed entities
-            if (v3Metadata?.Total > 0 && allEntities.Count != v3Metadata.Total)
-            {
-                _logger.LogWarning("⚠️ Entity count mismatch for {EntityType}! Cached: {CachedCount}, API reported total: {ApiTotal}",
-                    request.EntityType, allEntities.Count, v3Metadata.Total);
-            }
-
             // Sort entities hierarchically
             var sortedEntities = SortEntitiesHierarchically(allEntities);
             
@@ -240,7 +233,7 @@ public class V3HierarchicalStrategy : IEntityDiscoveryStrategy
         // Helper method to add entity and its children recursively
         void AddEntityAndChildren(Dictionary<string, object> entity, int parentId = 0)
         {
-            if (entity.TryGetValue("id", out var idObj) && int.TryParse(idObj.ToString(), out var entityId))
+            if (entity.TryGetValue("category_id", out var idObj) && int.TryParse(idObj.ToString(), out var entityId))
             {
                 if (!processed.Contains(entityId))
                 {
@@ -278,7 +271,7 @@ public class V3HierarchicalStrategy : IEntityDiscoveryStrategy
 
         // Add any remaining entities that weren't processed (orphaned entities)
         var orphanedEntities = entities.Where(e => 
-            e.TryGetValue("id", out var idObj) && 
+            e.TryGetValue("category_id", out var idObj) && 
             int.TryParse(idObj.ToString(), out var entityId) && 
             !processed.Contains(entityId)).ToList();
 
@@ -298,7 +291,7 @@ public class V3HierarchicalStrategy : IEntityDiscoveryStrategy
         
         foreach (var entity in entities)
         {
-            if (entity.TryGetValue("id", out var idValue))
+            if (entity.TryGetValue("category_id", out var idValue))
             {
                 entityIds.Add(idValue.ToString() ?? string.Empty);
             }

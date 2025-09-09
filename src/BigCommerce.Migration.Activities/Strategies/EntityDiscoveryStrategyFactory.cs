@@ -154,15 +154,6 @@ public class EntityDiscoveryStrategyFactory : IEntityDiscoveryStrategyFactory
             return new ProductMetafieldsDiscoveryStrategy(_apiRequestHandler, _productMetafieldsLogger);
         }
         
-        // 🔧 SPECIAL CASE: product-components and individual component types are not real BigCommerce API endpoints
-        // They are logical entities that represent components within products (options, modifiers, reviews)
-        //var componentTypes = new[] { "product-components", "options", "modifiers", "reviews" };
-        //if (componentTypes.Contains(entityType, StringComparer.OrdinalIgnoreCase))
-        //{
-        //    _logger.LogInformation("🏭 [STRATEGY-FACTORY-DEBUG] ✅ Creating V3 product-components strategy for {EntityType} - will extract components from products", entityType);
-        //    return new V3ProductComponentsDiscoveryStrategy(_apiClient, _v3ProductComponentsLogger, _cancellationStore);
-        //}
-        
         // 🎯 EXPLICIT STRATEGY SELECTION: Ensure correct processing approach
         if (IsHierarchicalEntity(entityType))
         {

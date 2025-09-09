@@ -143,7 +143,9 @@ public class ProcessEntityChunkActivity
             }
 
             // Step 1: Fetch entities
-            var entities = await FetchEntitiesForChunk(batchRequest);
+            var entities = (request.EntityType.Equals("categories", StringComparison.OrdinalIgnoreCase) && request.CachedEntityData != null)
+                ? request.CachedEntityData
+                : await FetchEntitiesForChunk(batchRequest);
             
             // Phase 3.1.1: Check for cancellation after fetch step
             await CheckCancellationAsync(request.MigrationId);

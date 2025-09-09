@@ -350,6 +350,7 @@ public static class EntityMigrationDurableOrchestrator
 
             // Declare result variable at method scope to avoid compilation errors
             BigCommerce.Migration.Core.Interfaces.BatchProcessingResult parallelResult;
+            var chunkResults = new List<BigCommerce.Migration.Core.Interfaces.BatchProcessingResult>();
 
             // 🔧 CRITICAL FIX: Track partial results for cancellation scenarios
             var partialResults = new List<BatchProcessingResult>();
@@ -401,7 +402,77 @@ public static class EntityMigrationDurableOrchestrator
                 return result;
             }
 
-            if (shouldUseChunking)
+            if (entityType.Equals("categories", StringComparison.OrdinalIgnoreCase))
+            {
+                var allCategories = discoverResult.EntityData;
+                var categoriesByParentId = allCategories
+                    .GroupBy(c => c.GetValueOrDefault("parent_id")?.ToString() ?? "0")
+                    .ToDictionary(g => g.Key, g => g.ToList());
+
+                var processedCategoryIds = new HashSet<string>();
+                var level = 0;
+                var parentIdsForCurrentLevel = new List<string> { "0" };
+
+                while (parentIdsForCurrentLevel.Any())
+                {
+                    level++;
+                    logger.LogInformation("Processing level {Level} of categories with {ParentCount} parents.", level, parentIdsForCurrentLevel.Count);
+
+                    var categoriesForCurrentLevel = parentIdsForCurrentLevel
+                        .SelectMany(parentId => categoriesByParentId.GetValueOrDefault(parentId, new List<Dictionary<string, object>>()))
+                        .ToList();
+
+                    if (!categoriesForCurrentLevel.Any())
+                    {
+                        break;
+                    }
+
+                    var levelChunkTasks = new List<Task<BigCommerce.Migration.Core.Interfaces.BatchProcessingResult>>();
+                    var levelTotalBatches = CalculateBatchCount(categoriesForCurrentLevel.Count, chunkSize);
+
+                    for (int i = 0; i < levelTotalBatches; i++)
+                    {
+                        var chunkCategories = categoriesForCurrentLevel.Skip(i * chunkSize).Take(chunkSize).ToList();
+                        var chunkEntityIds = chunkCategories.Select(c => c["id"].ToString()).ToList();
+
+                        var chunkRequest = new ProcessEntityChunkRequest
+                        {
+                            MigrationId = migrationId,
+                            EntityType = entityType,
+                            ChunkNumber = i,
+                            TotalChunks = levelTotalBatches,
+                            EntityIds = chunkEntityIds,
+                            CachedEntityData = chunkCategories,
+                            SourceStore = input.SourceStore,
+                            DestinationStore = input.DestinationStore,
+                            CategoryTreeContext = input.CategoryTreeContext,
+                            UseDirectPagination = false,
+                            PaginationMetadata = null,
+                            IsCancelled = cancellationState.IsCancelled,
+                            CancellationReason = cancellationState.CancellationReason,
+                            CancelledAt = cancellationState.CancelledAt,
+                            ChannelMapping = input.ChannelMapping
+                        };
+
+                        levelChunkTasks.Add(context.CallSubOrchestratorAsync<BigCommerce.Migration.Core.Interfaces.BatchProcessingResult>("ProcessEntityChunkOrchestrator", chunkRequest));
+                    }
+                    var levelChunkResults = await Task.WhenAll(levelChunkTasks);
+                    chunkResults.AddRange(levelChunkResults);
+
+                    processedCategoryIds.UnionWith(categoriesForCurrentLevel.Select(c => c["id"].ToString()));
+                    parentIdsForCurrentLevel = categoriesForCurrentLevel.Select(c => c["id"].ToString()).ToList();
+                }
+
+                parallelResult = new BigCommerce.Migration.Core.Interfaces.BatchProcessingResult
+                {
+                    TotalProcessed = chunkResults.Sum(r => r.TotalProcessed),
+                    SuccessfulEntities = chunkResults.Sum(r => r.SuccessfulEntities),
+                    FailedEntities = chunkResults.Sum(r => r.FailedEntities),
+                    ProcessingTime = chunkResults.Max(r => r.ProcessingTime),
+                    Errors = chunkResults.SelectMany(r => r.Errors ?? new List<string>()).ToList()
+                };
+            }
+            else if (shouldUseChunking)
             {
                 // 🚀 LARGE DATASET: Use chunked orchestration for timeout prevention
                 logger.LogInformation("🚀 CHUNKED WORKFLOW: Processing {TotalEntities} {EntityType} entities in {TotalChunks} chunks " +
@@ -519,12 +590,9 @@ public static class EntityMigrationDurableOrchestrator
 
                     chunkTasks.Add(chunkTask);
                 }
+                var chunkResultsArray = await Task.WhenAll(chunkTasks);
+                chunkResults.AddRange(chunkResultsArray);
 
-                // Wait for all chunks to complete
-                logger.LogInformation("🔄 [ENHANCED-ORCHESTRATOR] Waiting for {TotalChunks} chunks to complete for {EntityType}",
-                    totalBatches, entityType);
-
-                var chunkResults = await Task.WhenAll(chunkTasks);
 
                 // Aggregate results from all chunks
                 parallelResult = new BigCommerce.Migration.Core.Interfaces.BatchProcessingResult

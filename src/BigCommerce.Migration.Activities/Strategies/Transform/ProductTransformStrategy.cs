@@ -1,7 +1,8 @@
+using BigCommerce.Migration.Activities.Services;
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
-using BigCommerce.Migration.Activities.Services;
 using Microsoft.Extensions.Logging;
+using System.Text.Json;
 
 namespace BigCommerce.Migration.Activities.Strategies.Transform;
 
@@ -79,12 +80,11 @@ public class ProductTransformStrategy : IEntityTransformStrategy
             transformed["description"] = description;
         }
 
-        // 🚀 TEMPORARILY COMMENTED: Category and brand mapping to avoid missing ID errors
-        // TODO: Uncomment after categories and brands are migrated first
-        // TransformCategoryMappingHardCoded(entity, transformed, migrationId);
+        // Handle Categories
+        await TransformCategoryMappingAsync(entity, transformed, migrationId);
 
-        // Handle brand mapping - TEMPORARILY COMMENTED
-        // await TransformBrandMappingAsync(entity, transformed, migrationId, cancellationToken);
+        // Handle Brands
+        await TransformBrandMappingAsync(entity, transformed, migrationId, cancellationToken);
 
         // Handle inventory and stock tracking
         TransformInventoryFields(entity, transformed);
@@ -284,68 +284,59 @@ public class ProductTransformStrategy : IEntityTransformStrategy
     /// <summary>
     /// Transforms category mapping using hard-coded category ID (no category migration dependency)
     /// </summary>
-    private void TransformCategoryMappingHardCoded(Dictionary<string, object> entity, Dictionary<string, object> transformed, string migrationId)
+    private async Task TransformCategoryMappingAsync(Dictionary<string, object> entity, Dictionary<string, object> transformed, string migrationId)
     {
-        // 🚀 HARD-CODED CATEGORY: Using fixed category ID 14988 for all products
-        // This removes the dependency on category migration while focusing on brand/product migration
-        const int HARD_CODED_CATEGORY_ID = 14988;
-
         // Check if the source product has any categories (for logging purposes)
         if (entity.TryGetValue("categories", out var categoriesValue))
         {
-            var sourceCategoryIds = ExtractCategoryIds(categoriesValue);
-            if (sourceCategoryIds.Any())
+            var destinationCategoryIds = await ExtractCategoryIds(categoriesValue, migrationId);
+
+            if (destinationCategoryIds.Count > 0)
             {
-                _logger.LogDebug("Product had {SourceCategoryCount} source categories, assigning hard-coded category ID {CategoryId} in migration {MigrationId}",
-                    sourceCategoryIds.Count, HARD_CODED_CATEGORY_ID, migrationId);
+                transformed["categories"] = destinationCategoryIds;
             }
             else
             {
-                _logger.LogDebug("Product had no source categories, assigning hard-coded category ID {CategoryId} in migration {MigrationId}",
-                    HARD_CODED_CATEGORY_ID, migrationId);
+                _logger.LogInformation("Product had no source categories in migration {MigrationId}", migrationId);
             }
         }
         else
         {
-            _logger.LogDebug("Product had no categories field, assigning hard-coded category ID {CategoryId} in migration {MigrationId}",
-                HARD_CODED_CATEGORY_ID, migrationId);
+            _logger.LogInformation("Product had no categories field in migration {MigrationId}", migrationId);
         }
-
-        // Always assign the hard-coded category ID
-        transformed["categories"] = new List<int> { HARD_CODED_CATEGORY_ID };
-
-        _logger.LogDebug("✅ Assigned hard-coded category ID {CategoryId} to product in migration {MigrationId}",
-            HARD_CODED_CATEGORY_ID, migrationId);
     }
 
     /// <summary>
     /// Extracts category IDs from various category field formats
     /// </summary>
-    private static List<int> ExtractCategoryIds(object categoriesValue)
+    private async Task<List<int>> ExtractCategoryIds(object sourceStoreCategories, string migrationId)
     {
-        var categoryIds = new List<int>();
+        var destinationStoreCategoryIds = new List<int>();
 
-        if (categoriesValue is IEnumerable<object> categoryArray)
+        if (sourceStoreCategories != null)
         {
-            foreach (var category in categoryArray)
+            List<int> categories = JsonSerializer.Deserialize<List<int>>(sourceStoreCategories?.ToString() ?? "[]") ?? [];
+
+            foreach (var categoryId in categories)
             {
-                if (category is Dictionary<string, object> categoryDict)
+                var destinationCategoryId = await _entityMappingService.GetDestinationIdAsync(migrationId, "categories", categoryId.ToString(), CancellationToken.None);
+
+                if (!string.IsNullOrEmpty(destinationCategoryId) && int.TryParse(destinationCategoryId, out var mappedCategoryId))
                 {
-                    // Category object with ID field
-                    if (categoryDict.TryGetValue("id", out var idValue) && int.TryParse(idValue?.ToString(), out var id))
-                    {
-                        categoryIds.Add(id);
-                    }
+                    destinationStoreCategoryIds.Add(mappedCategoryId);
+                    _logger.LogDebug("Mapped source category ID {SourceId} to destination ID {DestinationId} in migration {MigrationId}",
+                        categoryId, mappedCategoryId, migrationId);
                 }
-                else if (int.TryParse(category?.ToString(), out var directId))
+                else
                 {
-                    // Direct category ID
-                    categoryIds.Add(directId);
+                    _logger.LogWarning("No mapping found for source category ID {SourceId} in migration {MigrationId}.",
+                        categoryId, migrationId);
+                    // Don't include categoryid if no mapping exists
                 }
             }
         }
 
-        return categoryIds;
+        return destinationStoreCategoryIds;
     }
 
     /// <summary>

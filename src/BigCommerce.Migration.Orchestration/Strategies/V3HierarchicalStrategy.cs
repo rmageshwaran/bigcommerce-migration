@@ -167,19 +167,19 @@ public class V3HierarchicalStrategy : IEntityDiscoveryStrategy
                 }
             }
             
-            // ✅ FIX: Extract ALL entity IDs (not just hierarchically sorted ones)
-            // The hierarchical sorting is for the cached data only, not for filtering which entities to process
-            var allEntityIds = ExtractEntityIds(allEntities); // Use original unsorted list for complete entity IDs
+            // ✅ FIX: Extract entity IDs from HIERARCHICALLY SORTED entities to preserve parent-child order
+            // This ensures parent categories are migrated before children, allowing proper mapping resolution
+            var hierarchicalEntityIds = ExtractEntityIds(sortedEntities); // Use hierarchically sorted list for proper order!
             
-            _logger.LogInformation("✅ Hierarchical strategy completed for {EntityType}: {TotalEntities} entities discovered, {SortedEntities} entities sorted and cached", 
-                request.EntityType, allEntityIds.Count, sortedEntities.Count);
+            _logger.LogInformation("✅ Hierarchical strategy completed for {EntityType}: {TotalEntities} entities discovered, {SortedEntities} entities sorted and cached, hierarchical order preserved", 
+                request.EntityType, allEntities.Count, sortedEntities.Count);
 
             return new EntityDiscoveryResult
             {
                 EntityType = request.EntityType,
-                EntityIds = allEntityIds, // ✅ Return ALL entity IDs, not just hierarchically sorted ones
+                EntityIds = hierarchicalEntityIds, // ✅ Use hierarchically sorted entity IDs for proper parent-child order!
                 EntityData = sortedEntities, // Store hierarchically sorted entity data
-                TotalCount = allEntityIds.Count, // ✅ Use total count of all entities
+                TotalCount = allEntities.Count, // ✅ Use total count of all entities (some may be dropped in sorting)
                 ApiVersion = BigCommerceApiVersion.V3,
                 SkipDiscovery = false,
                 V3PaginationMetadata = v3Metadata,

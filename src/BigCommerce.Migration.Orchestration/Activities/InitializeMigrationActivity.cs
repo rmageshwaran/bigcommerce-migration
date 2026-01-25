@@ -48,7 +48,13 @@ public class InitializeMigrationActivity
         catch (OperationCanceledException)
         {
             _logger.LogInformation("Migration initialization was cancelled");
-            throw;
+            
+            // Activity should return proper result, not throw
+            return new InitializeMigrationResult
+            {
+                IsSuccess = false,
+                ErrorMessage = "Migration initialization was cancelled"
+            };
         }
         catch (Exception ex)
         {

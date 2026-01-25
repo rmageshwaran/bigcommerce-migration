@@ -35,12 +35,12 @@ public class V3EfficientPaginationStrategy : IEntityDiscoveryStrategy
 
     /// <summary>
     /// Discovers entities using V3 efficient pagination strategy
-    /// Fetches only metadata from first page to determine total count and pagination info
-    /// Does not cache entity data for memory optimization with large datasets
+    /// Gets metadata from first page only to enable direct pagination during batch processing
+    /// This strategy is memory-optimized and designed for non-hierarchical entities
     /// </summary>
     /// <param name="request">Entity discovery request</param>
     /// <param name="cancellationToken">Cancellation token</param>
-    /// <returns>Discovery result with pagination metadata only</returns>
+    /// <returns>Discovery result with pagination metadata only (no entity data cached)</returns>
     public async Task<EntityDiscoveryResult> DiscoverEntitiesAsync(
         EntityDiscoveryRequest request, 
         CancellationToken cancellationToken = default)
@@ -49,7 +49,10 @@ public class V3EfficientPaginationStrategy : IEntityDiscoveryStrategy
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            // OPTIMIZATION: Only fetch first page to get total count and pagination metadata
+            _logger.LogInformation("🔍 V3 Efficient Discovery: Starting metadata-only discovery for {EntityType} in migration {MigrationId}", 
+                request.EntityType, request.MigrationId);
+
+            // ✅ CORRECT DESIGN: Fetch ONLY first page to get total count and pagination metadata
             var paginationRequest = new BigCommercePaginationRequest
             {
                 Page = 1,
@@ -70,6 +73,9 @@ public class V3EfficientPaginationStrategy : IEntityDiscoveryStrategy
             var totalCount = response.TotalItems ?? 0;
             var totalPages = response.TotalPages ?? 1;
             var pageSize = response.PerPage;
+
+            _logger.LogInformation("✅ V3 Discovery: Completed metadata discovery for {EntityType} - Found {TotalCount} entities across {TotalPages} pages", 
+                request.EntityType, totalCount, totalPages);
 
             // ✅ MEMORY EFFICIENT: Return pagination metadata instead of all entity IDs
             // Batch processing will use page-based fetching during processing
@@ -92,13 +98,13 @@ public class V3EfficientPaginationStrategy : IEntityDiscoveryStrategy
                     { "HierarchicallySorted", false },
                     { "CachingDisabled", true },
                     { "MemoryOptimized", true },
-                    { "UsePaginationBatching", true }
+                    { "UseDirectPagination", true }
                 }
             };
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "V3 efficient pagination strategy failed for {EntityType} in migration {MigrationId}", 
+            _logger.LogError(ex, "🚨 V3 efficient pagination strategy failed for {EntityType} in migration {MigrationId}", 
                 request.EntityType, request.MigrationId);
 
             return new EntityDiscoveryResult

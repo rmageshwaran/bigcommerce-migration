@@ -106,34 +106,75 @@ public class MigrationStorageService : IMigrationStorageService
     }
 
     /// <summary>
-    /// Updates an existing migration entry in Azure Table Storage
+    /// Updates a migration entry in Azure Table Storage with optimistic concurrency control
+    /// Prevents race conditions when multiple processes update the same migration simultaneously
     /// </summary>
     /// <param name="migrationEntry">Migration entry to update</param>
     /// <returns>Updated migration entry</returns>
     public async Task<MigrationEntry> UpdateMigrationAsync(MigrationEntry migrationEntry)
     {
-        try
+        const int maxRetries = 3;
+        const int baseDelayMs = 100;
+        
+        for (int attempt = 0; attempt < maxRetries; attempt++)
         {
-            _logger.LogInformation("Updating migration entry: {MigrationId}", migrationEntry.Id);
+            try
+            {
+                _logger.LogInformation("Updating migration entry: {MigrationId} (attempt {Attempt}/{MaxRetries})", 
+                    migrationEntry.Id, attempt + 1, maxRetries);
 
-            var tableClient = await GetTableClientAsync(MigrationsTableName);
-            var tableEntity = ConvertToTableEntity(migrationEntry);
-
-            await tableClient.UpdateEntityAsync(tableEntity, ETag.All);
-            
-            _logger.LogInformation("Successfully updated migration entry: {MigrationId}", migrationEntry.Id);
-            return migrationEntry;
+                var tableClient = await GetTableClientAsync(MigrationsTableName);
+                
+                // 🔒 OPTIMISTIC CONCURRENCY: Get current entity with ETag
+                var currentEntity = await tableClient.GetEntityAsync<TableEntity>("migration", migrationEntry.Id);
+                var currentETag = currentEntity.Value.ETag;
+                
+                // 🔄 MERGE UPDATES: Apply incremental updates to current state
+                var updatedEntity = ConvertToTableEntity(migrationEntry);
+                updatedEntity.ETag = currentETag; // Use current ETag for optimistic concurrency
+                
+                // 🎯 ATOMIC UPDATE: Update only if ETag matches (no concurrent modifications)
+                await tableClient.UpdateEntityAsync(updatedEntity, currentETag);
+                
+                _logger.LogInformation("✅ Successfully updated migration entry: {MigrationId} (attempt {Attempt})", 
+                    migrationEntry.Id, attempt + 1);
+                return migrationEntry;
+            }
+            catch (RequestFailedException ex) when (ex.Status == 412 && attempt < maxRetries - 1) // Precondition Failed (ETag mismatch)
+            {
+                _logger.LogWarning("⚠️ Concurrent update detected for migration {MigrationId}, retrying... (attempt {Attempt}/{MaxRetries})", 
+                    migrationEntry.Id, attempt + 1, maxRetries);
+                
+                // 🔄 EXPONENTIAL BACKOFF: Wait before retry to reduce contention
+                var delay = baseDelayMs * (int)Math.Pow(2, attempt);
+                await Task.Delay(delay);
+                continue;
+            }
+            catch (RequestFailedException ex) when (ex.Status == 404)
+            {
+                _logger.LogWarning("Migration entry not found for update: {MigrationId}", migrationEntry.Id);
+                throw new InvalidOperationException($"Migration {migrationEntry.Id} not found", ex);
+            }
+            catch (Exception ex) when (attempt == maxRetries - 1)
+            {
+                _logger.LogError(ex, "💥 Failed to update migration entry after {MaxRetries} attempts: {MigrationId}", 
+                    maxRetries, migrationEntry.Id);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "⚠️ Error updating migration entry: {MigrationId} (attempt {Attempt}/{MaxRetries})", 
+                    migrationEntry.Id, attempt + 1, maxRetries);
+                
+                if (attempt < maxRetries - 1)
+                {
+                    var delay = baseDelayMs * (int)Math.Pow(2, attempt);
+                    await Task.Delay(delay);
+                }
+            }
         }
-        catch (RequestFailedException ex) when (ex.Status == 404)
-        {
-            _logger.LogWarning("Migration entry not found for update: {MigrationId}", migrationEntry.Id);
-            throw new InvalidOperationException($"Migration {migrationEntry.Id} not found", ex);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error updating migration entry: {MigrationId}", migrationEntry.Id);
-            throw;
-        }
+        
+        throw new InvalidOperationException($"Failed to update migration {migrationEntry.Id} after {maxRetries} attempts");
     }
 
     /// <summary>
@@ -801,46 +842,117 @@ public class MigrationStorageService : IMigrationStorageService
     #region Entity Progress Operations
 
     /// <summary>
-    /// Creates or updates an entity progress entry in Azure Table Storage
+    /// Creates or updates an entity progress entry in Azure Table Storage with optimistic concurrency control
+    /// Prevents race conditions when multiple sub-batches update the same entity progress simultaneously
     /// </summary>
     /// <param name="progressEntry">Entity progress entry to create or update</param>
     /// <returns>Created or updated progress entry</returns>
     public async Task<EntityProgressEntry> CreateOrUpdateEntityProgressAsync(EntityProgressEntry progressEntry)
     {
-        try
+        const int maxRetries = 3;
+        const int baseDelayMs = 50;
+        
+        for (int attempt = 0; attempt < maxRetries; attempt++)
         {
-            _logger.LogInformation("Creating/updating entity progress: {MigrationId}, {EntityType}", 
-                progressEntry.MigrationId, progressEntry.EntityType);
-
-            var tableClient = await GetTableClientAsync(EntityProgressTableName);
-            var tableEntity = new TableEntity(progressEntry.MigrationId, progressEntry.EntityType)
+            try
             {
-                ["EntityType"] = progressEntry.EntityType,
-                ["TotalCount"] = progressEntry.TotalCount,
-                ["ProcessedCount"] = progressEntry.ProcessedCount,
-                ["SuccessCount"] = progressEntry.SuccessCount,
-                ["FailureCount"] = progressEntry.FailureCount,
-                ["ProgressPercentage"] = progressEntry.ProgressPercentage,
-                ["Status"] = progressEntry.Status,
-                ["StartTime"] = progressEntry.StartTime,
-                ["EndTime"] = progressEntry.EndTime,
-                ["ProcessingTime"] = progressEntry.ProcessingTime.TotalMilliseconds,
-                ["CreatedAt"] = progressEntry.CreatedAt,
-                ["UpdatedAt"] = progressEntry.UpdatedAt
-            };
+                _logger.LogInformation("Creating/updating entity progress: {MigrationId}, {EntityType} (attempt {Attempt}/{MaxRetries})", 
+                    progressEntry.MigrationId, progressEntry.EntityType, attempt + 1, maxRetries);
 
-            await tableClient.UpsertEntityAsync(tableEntity);
-            
-            _logger.LogInformation("Successfully created/updated entity progress: {MigrationId}, {EntityType}", 
-                progressEntry.MigrationId, progressEntry.EntityType);
-            return progressEntry;
+                var tableClient = await GetTableClientAsync(EntityProgressTableName);
+                
+                try
+                {
+                    // 🔒 OPTIMISTIC CONCURRENCY: Try to get existing entity with ETag
+                    var existingEntity = await tableClient.GetEntityAsync<TableEntity>(progressEntry.MigrationId, progressEntry.EntityType);
+                    
+                    // 🔄 MERGE UPDATES: Update existing entity with incremental values
+                    var currentETag = existingEntity.Value.ETag;
+                    var updatedEntity = new TableEntity(progressEntry.MigrationId, progressEntry.EntityType)
+                    {
+                        ["EntityType"] = progressEntry.EntityType,
+                        ["TotalCount"] = progressEntry.TotalCount,
+                        ["ProcessedCount"] = progressEntry.ProcessedCount,
+                        ["SuccessCount"] = progressEntry.SuccessCount,
+                        ["FailureCount"] = progressEntry.FailureCount,
+                        ["ProgressPercentage"] = progressEntry.ProgressPercentage,
+                        ["Status"] = progressEntry.Status,
+                        ["StartTime"] = progressEntry.StartTime,
+                        ["EndTime"] = progressEntry.EndTime,
+                        ["ProcessingTime"] = progressEntry.ProcessingTime.TotalMilliseconds,
+                        ["CreatedAt"] = existingEntity.Value.GetDateTimeOffset("CreatedAt") ?? progressEntry.CreatedAt,
+                        ["UpdatedAt"] = progressEntry.UpdatedAt,
+                        ETag = currentETag
+                    };
+
+                    // 🎯 ATOMIC UPDATE: Update only if ETag matches (no concurrent modifications)
+                    await tableClient.UpdateEntityAsync(updatedEntity, currentETag);
+                }
+                catch (RequestFailedException ex) when (ex.Status == 404)
+                {
+                    // 🆕 CREATE NEW: Entity doesn't exist, create it
+                    var newEntity = new TableEntity(progressEntry.MigrationId, progressEntry.EntityType)
+                    {
+                        ["EntityType"] = progressEntry.EntityType,
+                        ["TotalCount"] = progressEntry.TotalCount,
+                        ["ProcessedCount"] = progressEntry.ProcessedCount,
+                        ["SuccessCount"] = progressEntry.SuccessCount,
+                        ["FailureCount"] = progressEntry.FailureCount,
+                        ["ProgressPercentage"] = progressEntry.ProgressPercentage,
+                        ["Status"] = progressEntry.Status,
+                        ["StartTime"] = progressEntry.StartTime,
+                        ["EndTime"] = progressEntry.EndTime,
+                        ["ProcessingTime"] = progressEntry.ProcessingTime.TotalMilliseconds,
+                        ["CreatedAt"] = progressEntry.CreatedAt,
+                        ["UpdatedAt"] = progressEntry.UpdatedAt
+                    };
+
+                    await tableClient.AddEntityAsync(newEntity);
+                }
+                
+                _logger.LogInformation("✅ Successfully created/updated entity progress: {MigrationId}, {EntityType} (attempt {Attempt})", 
+                    progressEntry.MigrationId, progressEntry.EntityType, attempt + 1);
+                return progressEntry;
+            }
+            catch (RequestFailedException ex) when (ex.Status == 412 && attempt < maxRetries - 1) // Precondition Failed (ETag mismatch)
+            {
+                _logger.LogWarning("⚠️ Concurrent update detected for entity progress {MigrationId}/{EntityType}, retrying... (attempt {Attempt}/{MaxRetries})", 
+                    progressEntry.MigrationId, progressEntry.EntityType, attempt + 1, maxRetries);
+                
+                // 🔄 EXPONENTIAL BACKOFF: Wait before retry to reduce contention
+                var delay = baseDelayMs * (int)Math.Pow(2, attempt);
+                await Task.Delay(delay);
+                continue;
+            }
+            catch (RequestFailedException ex) when (ex.Status == 409 && attempt < maxRetries - 1) // Conflict (entity already exists during create)
+            {
+                _logger.LogWarning("⚠️ Entity already exists during create for {MigrationId}/{EntityType}, retrying with update... (attempt {Attempt}/{MaxRetries})", 
+                    progressEntry.MigrationId, progressEntry.EntityType, attempt + 1, maxRetries);
+                
+                var delay = baseDelayMs * (int)Math.Pow(2, attempt);
+                await Task.Delay(delay);
+                continue;
+            }
+            catch (Exception ex) when (attempt == maxRetries - 1)
+            {
+                _logger.LogError(ex, "💥 Failed to create/update entity progress after {MaxRetries} attempts: {MigrationId}/{EntityType}", 
+                    maxRetries, progressEntry.MigrationId, progressEntry.EntityType);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "⚠️ Error creating/updating entity progress: {MigrationId}/{EntityType} (attempt {Attempt}/{MaxRetries})", 
+                    progressEntry.MigrationId, progressEntry.EntityType, attempt + 1, maxRetries);
+                
+                if (attempt < maxRetries - 1)
+                {
+                    var delay = baseDelayMs * (int)Math.Pow(2, attempt);
+                    await Task.Delay(delay);
+                }
+            }
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error creating/updating entity progress: {MigrationId}, {EntityType}", 
-                progressEntry.MigrationId, progressEntry.EntityType);
-            throw;
-        }
+        
+        throw new InvalidOperationException($"Failed to create/update entity progress {progressEntry.MigrationId}/{progressEntry.EntityType} after {maxRetries} attempts");
     }
 
     /// <summary>

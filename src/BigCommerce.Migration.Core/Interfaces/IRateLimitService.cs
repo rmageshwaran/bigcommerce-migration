@@ -54,6 +54,26 @@ public interface IRateLimitService
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>Task that completes when request can proceed</returns>
     Task CheckAndWaitAsync(string storeId, CancellationToken cancellationToken = default);
+    
+    /// <summary>
+    /// **Phase 2.7**: Registers parallel processing context for adaptive rate limiting
+    /// </summary>
+    /// <param name="storeId">Store identifier</param>
+    /// <param name="concurrentBatches">Number of concurrent batches being processed</param>
+    /// <param name="totalBatches">Total number of batches in the migration</param>
+    void RegisterParallelContext(string storeId, int concurrentBatches, int totalBatches);
+    
+    /// <summary>
+    /// **Phase 2.7**: Unregisters parallel processing context
+    /// </summary>
+    /// <param name="storeId">Store identifier</param>
+    void UnregisterParallelContext(string storeId);
+    
+    /// <summary>
+    /// **Phase 2.7**: Resets consecutive rate limit hits when requests succeed
+    /// </summary>
+    /// <param name="storeId">Store identifier</param>
+    void ResetConsecutiveRateLimitHits(string storeId);
 }
 
 /// <summary>

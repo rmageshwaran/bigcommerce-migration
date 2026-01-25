@@ -38,6 +38,7 @@ public class ServiceCollectionExtensionsTests
         // Add missing core services that orchestration depends on
         _services.AddSingleton<IOpenSearchService>(new Mock<IOpenSearchService>().Object);
         _services.AddSingleton<IApiRequestHandler>(new Mock<IApiRequestHandler>().Object);
+        _services.AddSingleton<IProgressQueueService>(new Mock<IProgressQueueService>().Object);
     }
 
     [Fact]

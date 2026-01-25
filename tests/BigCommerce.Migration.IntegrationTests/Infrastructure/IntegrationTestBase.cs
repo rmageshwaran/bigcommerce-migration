@@ -3,11 +3,13 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
 using BigCommerce.Migration.Infrastructure.Services;
 using BigCommerce.Migration.Orchestration.Services;
+using BigCommerce.Migration.Orchestration.Services.EntityCreation;
 using BigCommerce.Migration.Functions.Extensions;
 using Xunit.Abstractions;
 
@@ -88,6 +90,17 @@ public abstract class IntegrationTestBase : IDisposable
     /// </summary>
     private void RegisterCoreServices(IServiceCollection services)
     {
+        // Add test-specific configuration for Azure Storage
+        var testConfig = new ConfigurationBuilder()
+            .AddConfiguration(Configuration) // Keep existing configuration
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["AzureWebJobsStorage"] = "UseDevelopmentStorage=true",
+                ["ConnectionStrings:AzureWebJobsStorage"] = "UseDevelopmentStorage=true"
+            })
+            .Build();
+        services.AddSingleton<IConfiguration>(testConfig);
+
         // Register Infrastructure services
         services.AddTransient<IBigCommerceApiClient, BigCommerceApiClient>();
         services.AddTransient<ICategoryTreeResolver, CategoryTreeResolver>();
@@ -95,6 +108,24 @@ public abstract class IntegrationTestBase : IDisposable
         services.AddTransient<IMigrationStorageService, MigrationStorageService>();
         services.AddTransient<IOpenSearchService, OpenSearchService>();
         services.AddTransient<IQueueService, QueueService>();
+
+        // Register dynamic rate limiting services (Phase 1 implementation)
+        services.AddSingleton<IDynamicRateLimiter, DynamicRateLimitService>();
+        services.AddSingleton<IApiHealthMonitor, ApiHealthMonitor>();
+        services.AddSingleton<IRateCalculator, BigCommerceAwareRateCalculator>();
+        services.AddSingleton<IDateTimeProvider, DateTimeProvider>();
+        
+        // Register enhanced API request handler with dynamic rate limiting
+        services.AddSingleton<IApiRequestHandler>(serviceProvider =>
+        {
+            var httpClient = serviceProvider.GetRequiredService<HttpClient>();
+            var rateLimitService = serviceProvider.GetRequiredService<IRateLimitService>();
+            var openSearchService = serviceProvider.GetRequiredService<IOpenSearchService>();
+            var logger = serviceProvider.GetRequiredService<ILogger<ApiRequestHandler>>();
+            var dynamicRateLimiter = serviceProvider.GetRequiredService<IDynamicRateLimiter>();
+            
+            return new ApiRequestHandler(httpClient, rateLimitService, openSearchService, logger, dynamicRateLimiter);
+        });
 
         // Register Orchestration services
         services.AddTransient<IRateLimitService, RateLimitService>();
@@ -107,6 +138,12 @@ public abstract class IntegrationTestBase : IDisposable
         services.AddTransient<IEntityCreateService, EntityCreateService>();
         services.AddTransient<IEntityMappingService, EntityMappingService>();
         services.AddTransient<IEntityErrorHandlingService, EntityErrorHandlingService>();
+
+        // **Phase 3: Enhanced Parallel Processing Services for Integration Testing**
+        services.AddSingleton<IEnhancedParallelProcessor, EnhancedParallelProcessor>();
+        services.AddSingleton<IParallelProgressAggregator, ParallelProgressAggregator>();
+        services.AddSingleton<IParallelBatchProcessingPipeline, ParallelBatchProcessingPipeline>();
+        services.AddSingleton<IProgressEventPublisher, ProgressEventPublisher>();
 
         // Configure HTTP client
         services.AddHttpClient();

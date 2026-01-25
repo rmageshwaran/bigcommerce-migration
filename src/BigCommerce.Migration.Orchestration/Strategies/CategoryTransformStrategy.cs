@@ -26,13 +26,35 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
     }
 
     public async Task<Dictionary<string, object>> TransformEntityAsync(
-        Dictionary<string, object> entity,
-        string migrationId,
-        StoreConfiguration sourceStore,
-        StoreConfiguration destinationStore,
+        Dictionary<string, object> entity, 
+        string migrationId, 
+        StoreConfiguration sourceStore, 
+        StoreConfiguration destinationStore, 
         CategoryTreeContext? categoryTreeContext = null,
         CancellationToken cancellationToken = default)
     {
+        var entityId = entity.GetValueOrDefault("id")?.ToString() ?? "unknown";
+        var entityName = entity.GetValueOrDefault("name")?.ToString() ?? "unknown";
+        
+        _logger.LogDebug("🔧 [TRANSFORM] ⭐ STARTING: Transforming category {EntityId} ('{EntityName}') for migration {MigrationId}", 
+            entityId, entityName, migrationId);
+            
+        // 🚨 CRITICAL DEBUG: Log CategoryTreeContext details
+        if (categoryTreeContext == null)
+        {
+            _logger.LogError("🚨 [TRANSFORM] ❌ CRITICAL: CategoryTreeContext is NULL for category {EntityId} in migration {MigrationId}", 
+                entityId, migrationId);
+        }
+        else
+        {
+            _logger.LogInformation("🔧 [TRANSFORM] 📋 CategoryTreeContext: SourceTreeId='{SourceTreeId}', DestinationTreeId='{DestinationTreeId}', SourceChannelId='{SourceChannelId}', DestinationChannelId='{DestinationChannelId}' for migration {MigrationId}", 
+                categoryTreeContext.SourceCategoryTreeId ?? "NULL", 
+                categoryTreeContext.DestinationCategoryTreeId ?? "NULL",
+                categoryTreeContext.SourceChannelId ?? "NULL",
+                categoryTreeContext.DestinationChannelId ?? "NULL",
+                migrationId);
+        }
+
         _logger.LogDebug("Transforming category for migration {MigrationId}", migrationId);
         
         // Start with a clean dictionary and copy only valid BigCommerce fields
@@ -418,6 +440,26 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
 
     private void EnsureTreeIdField(Dictionary<string, object> transformed, CategoryTreeContext? categoryTreeContext, string migrationId)
     {
+        var entityId = transformed.GetValueOrDefault("id")?.ToString() ?? transformed.GetValueOrDefault("_original_entity_id")?.ToString() ?? "unknown";
+        
+        _logger.LogDebug("🔧 [TREE-ID] ⭐ STARTING: Ensuring tree_id for entity {EntityId} in migration {MigrationId}", entityId, migrationId);
+        
+        // 🚨 CRITICAL DEBUG: Log CategoryTreeContext validation
+        if (categoryTreeContext == null)
+        {
+            _logger.LogError("🚨 [TREE-ID] ❌ CRITICAL: CategoryTreeContext is NULL for entity {EntityId} in migration {MigrationId}", entityId, migrationId);
+        }
+        else if (string.IsNullOrWhiteSpace(categoryTreeContext.DestinationCategoryTreeId))
+        {
+            _logger.LogError("🚨 [TREE-ID] ❌ CRITICAL: DestinationCategoryTreeId is NULL/EMPTY for entity {EntityId} in migration {MigrationId}. CategoryTreeContext exists but DestinationTreeId='{DestinationTreeId}'", 
+                entityId, migrationId, categoryTreeContext.DestinationCategoryTreeId ?? "NULL");
+        }
+        else
+        {
+            _logger.LogInformation("🔧 [TREE-ID] ✅ VALID: CategoryTreeContext has DestinationTreeId='{DestinationTreeId}' for entity {EntityId} in migration {MigrationId}", 
+                categoryTreeContext.DestinationCategoryTreeId, entityId, migrationId);
+        }
+        
         // BigCommerce V3 API requires tree_id field
         // Use the resolved destination tree ID from the category tree context
         if (categoryTreeContext != null && !string.IsNullOrWhiteSpace(categoryTreeContext.DestinationCategoryTreeId))
@@ -425,15 +467,20 @@ public class CategoryTransformStrategy : IEntityTransformStrategy
             if (int.TryParse(categoryTreeContext.DestinationCategoryTreeId, out var resolvedTreeId))
             {
                 transformed["tree_id"] = resolvedTreeId;
-                _logger.LogDebug("Set tree_id {TreeId} from resolved destination category tree context for migration {MigrationId}", 
-                    resolvedTreeId, migrationId);
+                _logger.LogInformation("🔧 [TREE-ID] ✅ SUCCESS: Set tree_id {TreeId} from resolved destination category tree context for entity {EntityId} in migration {MigrationId}", 
+                    resolvedTreeId, entityId, migrationId);
                 return;
+            }
+            else
+            {
+                _logger.LogError("🚨 [TREE-ID] ❌ PARSE-ERROR: Failed to parse DestinationCategoryTreeId '{DestinationTreeId}' as integer for entity {EntityId} in migration {MigrationId}", 
+                    categoryTreeContext.DestinationCategoryTreeId, entityId, migrationId);
             }
         }
 
         // Default fallback if no resolved tree ID available
         transformed["tree_id"] = 1;
-        _logger.LogWarning("No destination tree ID found, using default tree_id 1 for migration {MigrationId}", migrationId);
+        _logger.LogWarning("🚨 [TREE-ID] ⚠️ FALLBACK: No destination tree ID found, using default tree_id 1 for entity {EntityId} in migration {MigrationId}", entityId, migrationId);
     }
 
     private static void RemoveNullValues(Dictionary<string, object> transformed)

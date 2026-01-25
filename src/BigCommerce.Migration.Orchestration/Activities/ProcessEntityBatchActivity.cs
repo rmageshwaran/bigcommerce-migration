@@ -111,8 +111,34 @@ public class ProcessEntityBatchActivity
                 _logger.LogInformation("Migration {MigrationId} was cancelled before batch {BatchNumber} processing. Reason: {Reason}",
                     request.MigrationId, request.BatchNumber, request.CancellationReason);
                 
-                result.Errors.Add($"Migration was cancelled before processing: {request.CancellationReason}");
+                var cancellationMessage = string.IsNullOrEmpty(request.CancellationReason) 
+                    ? "Migration was cancelled before processing"
+                    : $"Migration was cancelled before processing: {request.CancellationReason}";
+                result.Errors.Add(cancellationMessage);
                 return CompleteBatch(result, stopwatch);
+            }
+
+            // Step 3.5: External cancellation check via storage service
+            try
+            {
+                var cancellationEntry = await _migrationStorageService.GetCancellationTokenAsync(request.MigrationId);
+                if (cancellationEntry != null && !cancellationEntry.IsProcessed)
+                {
+                    _logger.LogInformation("Migration {MigrationId} was cancelled externally before batch {BatchNumber} processing. Reason: {Reason}",
+                        request.MigrationId, request.BatchNumber, cancellationEntry.Reason);
+                    
+                    var cancellationMessage = string.IsNullOrEmpty(cancellationEntry.Reason) 
+                        ? "Migration was cancelled before processing"
+                        : $"Migration was cancelled before processing: {cancellationEntry.Reason}";
+                    result.Errors.Add(cancellationMessage);
+                    return CompleteBatch(result, stopwatch);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to check cancellation status for migration {MigrationId} before batch {BatchNumber}. Processing will continue.",
+                    request.MigrationId, request.BatchNumber);
+                // Continue processing if cancellation check fails
             }
 
             // Create cancellation token source for this batch execution
@@ -248,8 +274,34 @@ public class ProcessEntityBatchActivity
                 _logger.LogInformation("Migration {MigrationId} was cancelled during batch processing at entity {EntityIndex}/{TotalEntities} via fast token check", 
                     request.MigrationId, i + 1, sourceEntities.Count);
                 
-                result.Errors.Add($"Migration was cancelled during entity processing at entity {i + 1}/{sourceEntities.Count}: {request.CancellationReason}");
+                var cancellationMessage = string.IsNullOrEmpty(request.CancellationReason)
+                    ? $"Migration was cancelled during batch processing at entity {i + 1}/{sourceEntities.Count}"
+                    : $"Migration was cancelled during batch processing at entity {i + 1}/{sourceEntities.Count}: {request.CancellationReason}";
+                result.Errors.Add(cancellationMessage);
                 return;
+            }
+
+            // External cancellation check via storage service before each entity
+            try
+            {
+                var cancellationEntry = await _migrationStorageService.GetCancellationTokenAsync(request.MigrationId);
+                if (cancellationEntry != null && !cancellationEntry.IsProcessed)
+                {
+                    _logger.LogInformation("Migration {MigrationId} was cancelled externally during batch processing at entity {EntityIndex}/{TotalEntities}. Reason: {Reason}",
+                        request.MigrationId, i + 1, sourceEntities.Count, cancellationEntry.Reason);
+                    
+                    var cancellationMessage = string.IsNullOrEmpty(cancellationEntry.Reason)
+                        ? $"Migration was cancelled during batch processing at entity {i + 1}/{sourceEntities.Count}"
+                        : $"Migration was cancelled during batch processing at entity {i + 1}/{sourceEntities.Count}: {cancellationEntry.Reason}";
+                    result.Errors.Add(cancellationMessage);
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to check cancellation status for migration {MigrationId} at entity {EntityIndex}/{TotalEntities}. Processing will continue.",
+                    request.MigrationId, i + 1, sourceEntities.Count);
+                // Continue processing if cancellation check fails
             }
             
             var entity = sourceEntities[i];
@@ -276,7 +328,10 @@ public class ProcessEntityBatchActivity
                     _logger.LogInformation("Migration {MigrationId} was cancelled after transforming entity {EntityId} via fast token check",
                         request.MigrationId, originalEntityId);
                     
-                    result.Errors.Add($"Migration was cancelled during entity processing: {request.CancellationReason}");
+                    var cancellationMessage = string.IsNullOrEmpty(request.CancellationReason)
+                        ? "Migration was cancelled during batch processing"
+                        : $"Migration was cancelled during batch processing: {request.CancellationReason}";
+                    result.Errors.Add(cancellationMessage);
                     return;
                 }
 

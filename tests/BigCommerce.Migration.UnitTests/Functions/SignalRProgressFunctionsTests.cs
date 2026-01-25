@@ -6,6 +6,7 @@ using Moq;
 using Xunit;
 using BigCommerce.Migration.Functions.Functions;
 using BigCommerce.Migration.Core.Models;
+using BigCommerce.Migration.Core.Services;
 
 namespace BigCommerce.Migration.UnitTests.Functions
 {
@@ -17,12 +18,14 @@ namespace BigCommerce.Migration.UnitTests.Functions
     public class SignalRProgressFunctionsTests
     {
         private readonly Mock<ILogger<SignalRProgressFunctions>> _mockLogger;
+        private readonly Mock<ISignalRMessageConverter> _mockSignalRMessageConverter;
         private readonly SignalRProgressFunctions _signalRProgressFunctions;
 
         public SignalRProgressFunctionsTests()
         {
             _mockLogger = new Mock<ILogger<SignalRProgressFunctions>>();
-            _signalRProgressFunctions = new SignalRProgressFunctions(_mockLogger.Object);
+            _mockSignalRMessageConverter = new Mock<ISignalRMessageConverter>();
+            _signalRProgressFunctions = new SignalRProgressFunctions(_mockLogger.Object, _mockSignalRMessageConverter.Object);
         }
 
         #region Constructor Tests
@@ -31,14 +34,21 @@ namespace BigCommerce.Migration.UnitTests.Functions
         public void Constructor_WithNullLogger_ShouldThrowArgumentNullException()
         {
             // Act & Assert
-            Assert.Throws<ArgumentNullException>(() => new SignalRProgressFunctions(null!));
+            Assert.Throws<ArgumentNullException>(() => new SignalRProgressFunctions(null!, _mockSignalRMessageConverter.Object));
         }
 
         [Fact]
-        public void Constructor_WithValidLogger_ShouldCreateInstance()
+        public void Constructor_WithNullSignalRMessageConverter_ShouldThrowArgumentNullException()
+        {
+            // Act & Assert
+            Assert.Throws<ArgumentNullException>(() => new SignalRProgressFunctions(_mockLogger.Object, null!));
+        }
+
+        [Fact]
+        public void Constructor_WithValidParameters_ShouldCreateInstance()
         {
             // Act
-            var functions = new SignalRProgressFunctions(_mockLogger.Object);
+            var functions = new SignalRProgressFunctions(_mockLogger.Object, _mockSignalRMessageConverter.Object);
 
             // Assert
             Assert.NotNull(functions);

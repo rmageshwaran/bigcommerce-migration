@@ -5,8 +5,11 @@ using System.Net;
 using System.Text.Json;
 using BigCommerce.Migration.Core.Models;
 using BigCommerce.Migration.Core.Interfaces;
+using BigCommerce.Migration.Core.Services;
 using Microsoft.Azure.WebJobs.Extensions.OpenApi.Core.Attributes;
 using Microsoft.OpenApi.Models;
+using Microsoft.DurableTask.Client;
+using Microsoft.DurableTask;
 
 namespace BigCommerce.Migration.Functions.Functions;
 
@@ -24,6 +27,9 @@ public class MigrationHttpFunctions
     private readonly IQueueService _queueService;
     private readonly IBlobService _blobService;
     private readonly IProgressTracker _progressTracker;
+    private readonly ICancellationStore _cancellationStore;
+    private readonly ISignalREventFactory _signalREventFactory;
+    private readonly IProgressEventPublisher _progressEventPublisher;
 
     /// <summary>
     /// Initializes a new instance of the MigrationHttpFunctions class
@@ -35,6 +41,10 @@ public class MigrationHttpFunctions
     /// <param name="migrationStorageService">Migration storage service</param>
     /// <param name="queueService">Queue service</param>
     /// <param name="blobService">Blob service</param>
+    /// <param name="progressTracker">Progress tracker service</param>
+    /// <param name="cancellationStore">Cancellation store for native cancellation flags</param>
+    /// <param name="signalREventFactory">SignalR event factory for notifications</param>
+    /// <param name="progressEventPublisher">Progress event publisher for SignalR broadcasting</param>
     public MigrationHttpFunctions(
         ILogger<MigrationHttpFunctions> logger,
         IBigCommerceApiClient bigCommerceApiClient,
@@ -43,7 +53,10 @@ public class MigrationHttpFunctions
         IMigrationStorageService migrationStorageService,
         IQueueService queueService,
         IBlobService blobService,
-        IProgressTracker progressTracker)
+        IProgressTracker progressTracker,
+        ICancellationStore cancellationStore,
+        ISignalREventFactory signalREventFactory,
+        IProgressEventPublisher progressEventPublisher)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _bigCommerceApiClient = bigCommerceApiClient ?? throw new ArgumentNullException(nameof(bigCommerceApiClient));
@@ -53,6 +66,9 @@ public class MigrationHttpFunctions
         _queueService = queueService ?? throw new ArgumentNullException(nameof(queueService));
         _blobService = blobService ?? throw new ArgumentNullException(nameof(blobService));
         _progressTracker = progressTracker ?? throw new ArgumentNullException(nameof(progressTracker));
+        _cancellationStore = cancellationStore ?? throw new ArgumentNullException(nameof(cancellationStore));
+        _signalREventFactory = signalREventFactory ?? throw new ArgumentNullException(nameof(signalREventFactory));
+        _progressEventPublisher = progressEventPublisher ?? throw new ArgumentNullException(nameof(progressEventPublisher));
     }
 
     /// <summary>
@@ -122,6 +138,8 @@ public class MigrationHttpFunctions
             {
                 return await CreateErrorResponse(req, HttpStatusCode.BadRequest, validationResult.ErrorMessage, migrationId);
             }
+
+
 
             // Create migration entry for Azure Storage
             var migrationEntry = new Core.Models.MigrationEntry
@@ -250,7 +268,8 @@ public class MigrationHttpFunctions
             MigrationProgress? detailedProgress = null;
             try
             {
-                detailedProgress = await _progressTracker.GetProgressAsync(migrationId, CancellationToken.None);
+                // 🆕 TASK 4.1: Use enhanced progress with real-time aggregated data
+                detailedProgress = await _progressTracker.GetLatestAggregatedProgressAsync(migrationId, CancellationToken.None);
             }
             catch (Exception ex)
             {
@@ -283,6 +302,8 @@ public class MigrationHttpFunctions
                     ProcessedEntities = migrationEntry.Entities?.Count() ?? 0,
                     SuccessfulEntities = migrationEntry.Entities?.Count() ?? 0, // Assume all succeeded for completed migrations
                     FailedEntities = 0, // Could be refined if we store failure counts
+                    SkippedEntities = 0, // 🚨 FIX: Include SkippedEntities in reconstructed progress
+                    CancelledEntities = 0, // 🚨 CANCELLATION FIX: Include CancelledEntities in reconstructed progress
                     StartTime = migrationEntry.CreatedAt,
                     LastUpdated = migrationEntry.UpdatedAt,
                     ElapsedTime = migrationEntry.UpdatedAt - migrationEntry.CreatedAt,
@@ -300,6 +321,8 @@ public class MigrationHttpFunctions
                             ProcessedCount = 1,
                             SuccessCount = 1,
                             FailureCount = 0,
+                            SkippedCount = 0, // 🚨 FIX: Include SkippedCount in reconstructed entity progress
+                            CancelledCount = 0, // 🚨 CANCELLATION FIX: Include CancelledCount in reconstructed entity progress
                             ProgressPercentage = 100,
                             Status = "completed",
                             StartTime = migrationEntry.CreatedAt,
@@ -353,6 +376,8 @@ public class MigrationHttpFunctions
                     completedEntities = detailedProgress?.SuccessfulEntities ?? 0,
                     totalEntities = detailedProgress?.TotalEntities ?? 0,
                     failedEntities = detailedProgress?.FailedEntities ?? 0,
+                    skippedEntities = detailedProgress?.SkippedEntities ?? 0,  // 🚨 FIX: Include skippedEntities
+                    cancelledEntities = detailedProgress?.CancelledEntities ?? 0,  // 🚫 ADD: Include cancelledEntities
                     processedEntities = detailedProgress?.ProcessedEntities ?? 0,
                     estimatedTimeRemaining = detailedProgress?.EstimatedTimeRemaining.TotalMinutes > 0 
                         ? $"{Math.Ceiling(detailedProgress.EstimatedTimeRemaining.TotalMinutes)} minutes" 
@@ -367,6 +392,7 @@ public class MigrationHttpFunctions
                         processedCount = kvp.Value.ProcessedCount,
                         successCount = kvp.Value.SuccessCount,
                         failureCount = kvp.Value.FailureCount,
+                        skippedCount = kvp.Value.SkippedCount,  // 🚨 FIX: Include skippedCount
                         progressPercentage = kvp.Value.ProgressPercentage,
                         status = kvp.Value.Status,
                         startTime = kvp.Value.StartTime,
@@ -457,21 +483,23 @@ public class MigrationHttpFunctions
     }
 
     /// <summary>
-    /// Cancels a migration operation
+    /// Cancels a migration operation using native Durable Functions approach
     /// </summary>
     /// <param name="req">HTTP request</param>
     /// <param name="migrationId">Migration ID</param>
+    /// <param name="durableTaskClient">Durable task client for orchestrator termination</param>
     /// <param name="context">Function execution context</param>
     /// <returns>HTTP response with cancellation status</returns>
     [Function("CancelMigration")]
     public async Task<HttpResponseData> CancelMigration(
         [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "migrations/{migrationId}/cancel")] HttpRequestData req,
         string migrationId,
+        [DurableClient] DurableTaskClient durableTaskClient,
         FunctionContext context)
     {
         try
         {
-            _logger.LogInformation("Cancelling migration. MigrationId: {MigrationId}", migrationId);
+            _logger.LogInformation("🚫 [NATIVE-CANCEL] Starting migration cancellation. MigrationId: {MigrationId}", migrationId);
 
             // Validate migration ID
             if (string.IsNullOrWhiteSpace(migrationId))
@@ -502,17 +530,61 @@ public class MigrationHttpFunctions
                 return await CreateErrorResponse(req, HttpStatusCode.BadRequest, "Migration already cancelled", migrationId);
             }
 
-            // Update migration status to cancelled
+            var cancellationReason = "User requested cancellation";
+            
+            // PHASE 1: Native Durable Functions Cancellation Implementation
+            // Step 1: Set cancellation flag in blob storage (cooperative cancellation)
+            await _cancellationStore.SetCancellationFlagAsync(migrationId, cancellationReason);
+            _logger.LogInformation("🚫 [NATIVE-CANCEL] Cancellation flag set. MigrationId: {MigrationId}", migrationId);
+
+            // Step 2: Update migration status to cancelled in storage
             migrationEntry.Status = Core.Models.MigrationStatus.Cancelled;
             migrationEntry.UpdatedAt = DateTime.UtcNow;
             await _migrationStorageService.UpdateMigrationAsync(migrationEntry);
+            _logger.LogInformation("🚫 [NATIVE-CANCEL] Migration status updated. MigrationId: {MigrationId}", migrationId);
 
-            // Create cancellation token for tracking
-            await _migrationStorageService.CreateCancellationTokenAsync(migrationId, "User requested cancellation");
+            // Step 3: Send external event to main orchestrator (if running)
+            try
+            {
+                await durableTaskClient.RaiseEventAsync(migrationId, "CancellationRequested", cancellationReason);
+                _logger.LogInformation("🚫 [NATIVE-CANCEL] External event sent to orchestrator. MigrationId: {MigrationId}", migrationId);
+            }
+            catch (Exception eventEx)
+            {
+                // Log but don't fail - orchestrator might already be completed or not exist
+                _logger.LogWarning(eventEx, "🚫 [NATIVE-CANCEL] Could not send external event (orchestrator may not exist). MigrationId: {MigrationId}", migrationId);
+            }
 
-            // Send cancellation message to queue for processing
-            await _queueService.SendCancellationMessageAsync(migrationId, "User requested cancellation");
-            _logger.LogInformation("Migration cancellation message sent to queue. MigrationId: {MigrationId}", migrationId);
+            // Step 4: Terminate main orchestrator (if running)
+            try
+            {
+                await durableTaskClient.TerminateInstanceAsync(migrationId, cancellationReason);
+                _logger.LogInformation("🚫 [NATIVE-CANCEL] Orchestrator termination requested. MigrationId: {MigrationId}", migrationId);
+            }
+            catch (Exception terminateEx)
+            {
+                // Log but don't fail - orchestrator might already be completed or not exist
+                _logger.LogWarning(terminateEx, "🚫 [NATIVE-CANCEL] Could not terminate orchestrator (may not exist). MigrationId: {MigrationId}", migrationId);
+            }
+
+            // Step 5: Send SignalR notification about cancellation
+            var statusEvent = _signalREventFactory.CreateStatusProgress(migrationId, new StatusProgressOptions
+            {
+                Status = "Cancelled",
+                Message = "Migration cancelled by user request",
+                IsCancelled = true,
+                CancellationReason = cancellationReason,
+                CancelledAt = DateTime.UtcNow,
+                Data = new Dictionary<string, object>
+                {
+                    ["reason"] = cancellationReason,
+                    ["cancelledAt"] = DateTime.UtcNow.ToString("O"),
+                    ["approach"] = "native-durable-functions"
+                }
+            });
+
+            await _progressEventPublisher.PublishStatusAsync(statusEvent);
+            _logger.LogInformation("🚫 [NATIVE-CANCEL] SignalR cancellation notification sent. MigrationId: {MigrationId}", migrationId);
             
             var response = req.CreateResponse(HttpStatusCode.OK);
             response.Headers.Add("Content-Type", "application/json; charset=utf-8");
@@ -521,8 +593,17 @@ public class MigrationHttpFunctions
             {
                 migrationId = migrationId,
                 status = "cancelled",
-                message = "Migration cancelled successfully",
-                cancelledAt = DateTime.UtcNow
+                message = "Migration cancelled successfully using native Durable Functions approach",
+                cancelledAt = DateTime.UtcNow,
+                approach = "native-durable-functions",
+                actions = new[]
+                {
+                    "cancellation-flag-set",
+                    "migration-status-updated", 
+                    "external-event-sent",
+                    "orchestrator-termination-requested",
+                    "signalr-notification-sent"
+                }
             };
 
             await response.WriteStringAsync(JsonSerializer.Serialize(responseData, new JsonSerializerOptions
@@ -605,6 +686,8 @@ public class MigrationHttpFunctions
                 processedEntities = detailedProgress.ProcessedEntities,
                 successfulEntities = detailedProgress.SuccessfulEntities,
                 failedEntities = detailedProgress.FailedEntities,
+                skippedEntities = detailedProgress.SkippedEntities, // 🚨 FIX: Include SkippedEntities in latest migration response
+                cancelledEntities = detailedProgress.CancelledEntities, // 🚫 ADD: Include CancelledEntities in latest migration response
                 message = "Latest migration retrieved successfully"
             };
 
@@ -697,6 +780,8 @@ public class MigrationHttpFunctions
                     processedEntities = detailedProgress.ProcessedEntities,
                     successfulEntities = detailedProgress.SuccessfulEntities,
                     failedEntities = detailedProgress.FailedEntities,
+                    skippedEntities = detailedProgress.SkippedEntities, // 🚨 FIX: Include SkippedEntities in migration history
+                    cancelledEntities = detailedProgress.CancelledEntities, // 🚫 ADD: Include CancelledEntities in migration history
                     percentageCompleted = detailedProgress.OverallProgressPercentage,
                     entities = migration.Entities
                 });
@@ -766,12 +851,22 @@ public class MigrationHttpFunctions
             // Get detailed progress
             var detailedProgress = await GetDetailedProgressAsync(migrationId);
             
+            // 🔍 DEBUG: Log detailed progress data
+            _logger.LogInformation("🔍 [ENTITY-BREAKDOWN-DEBUG] Migration {MigrationId}: DetailedProgress null? {IsNull}", 
+                migrationId, detailedProgress == null);
+            
             // Build entity breakdown
             var entityBreakdown = new List<object>();
-            if (detailedProgress.EntityProgress != null)
+            if (detailedProgress?.EntityProgress != null)
             {
+                _logger.LogInformation("🔍 [ENTITY-BREAKDOWN-DEBUG] Migration {MigrationId}: Found {EntityCount} entities in progress", 
+                    migrationId, detailedProgress.EntityProgress.Count);
+                    
                 foreach (var entityProgress in detailedProgress.EntityProgress)
                 {
+                    _logger.LogInformation("🔍 [ENTITY-BREAKDOWN-DEBUG] Migration {MigrationId}: Entity {EntityType} - Success: {Success}, Failed: {Failed}, Skipped: {Skipped}", 
+                        migrationId, entityProgress.Key, entityProgress.Value.SuccessCount, entityProgress.Value.FailureCount, entityProgress.Value.SkippedCount);
+                        
                     entityBreakdown.Add(new
                     {
                         entity = entityProgress.Key,
@@ -781,11 +876,16 @@ public class MigrationHttpFunctions
                         totalEntities = entityProgress.Value.TotalCount,
                         successfulEntities = entityProgress.Value.SuccessCount,
                         failedEntities = entityProgress.Value.FailureCount,
-                        skippedEntities = 0, // EntityProgress doesn't have SkippedEntities
+                        skippedEntities = entityProgress.Value.SkippedCount, // 🚨 FIX: Use actual SkippedCount from EntityProgress
+                        cancelledEntities = entityProgress.Value.CancelledCount, // 🚫 ADD: Use actual CancelledCount from EntityProgress
                         percentageCompleted = entityProgress.Value.ProgressPercentage,
                         hasErrors = entityProgress.Value.FailureCount > 0
                     });
                 }
+            }
+            else
+            {
+                _logger.LogWarning("🔍 [ENTITY-BREAKDOWN-DEBUG] Migration {MigrationId}: EntityProgress is null or empty", migrationId);
             }
             
             var response = req.CreateResponse(HttpStatusCode.OK);
@@ -1064,11 +1164,13 @@ public class MigrationHttpFunctions
             
             // Convert OpenSearch results to proper format - handle JsonElement results
             var errorLogs = new List<Dictionary<string, object>>();
-            foreach (var result in searchResults)
+            if (searchResults != null)
+            {
+                foreach (var result in searchResults)
             {
                 if (result is JsonElement jsonElement)
                 {
-                    errorLogs.Add(ParseJsonElementToDictionary(jsonElement));
+                    errorLogs.Add(ParseJsonElementToDictionary(jsonElement)!);
                 }
                 else if (result is Dictionary<string, object> dict)
                 {
@@ -1078,6 +1180,7 @@ public class MigrationHttpFunctions
                 {
                     _logger.LogWarning("Unexpected result type from OpenSearch: {Type}", result?.GetType()?.Name ?? "null");
                 }
+            }
             }
             
             // If no results with structured query, try broader search without entity type filter
@@ -1744,11 +1847,11 @@ public class MigrationHttpFunctions
     {
         try
         {
-            // Try to get from progress tracker first
-            var progress = await _progressTracker.GetProgressAsync(migrationId, CancellationToken.None);
+            // 🆕 TASK 4.1: Try to get enhanced progress with real-time aggregated data first
+            var progress = await _progressTracker.GetLatestAggregatedProgressAsync(migrationId, CancellationToken.None);
             
-            // If progress tracker has meaningful data, use it
-            if (progress != null && progress.TotalEntities > 0)
+            // If progress tracker has meaningful data, use it (but skip for completed migrations to ensure fresh data from storage)
+            if (progress != null && progress.TotalEntities > 0 && progress.Status != "completed")
             {
                 return progress;
             }
@@ -1761,6 +1864,16 @@ public class MigrationHttpFunctions
                 var entityProgressEntries = await _migrationStorageService.GetEntityProgressAsync(migrationId);
                 var entityProgress = new Dictionary<string, EntityProgress>();
                 
+                // 🔍 DEBUG: Log entity progress entries from database
+                _logger.LogInformation("🔍 [GET-DETAILED-PROGRESS-DEBUG] Migration {MigrationId}: Found {EntryCount} entity progress entries from storage", 
+                    migrationId, entityProgressEntries.Count);
+                
+                foreach (var entry in entityProgressEntries)
+                {
+                    _logger.LogInformation("🔍 [GET-DETAILED-PROGRESS-DEBUG] Migration {MigrationId}: Entry {EntityType} - Success: {Success}, Failed: {Failed}, Skipped: {Skipped}", 
+                        migrationId, entry.EntityType, entry.SuccessCount, entry.FailureCount, entry.SkippedCount);
+                }
+                
                 foreach (var entry in entityProgressEntries)
                 {
                     entityProgress[entry.EntityType] = new EntityProgress
@@ -1770,6 +1883,7 @@ public class MigrationHttpFunctions
                         ProcessedCount = entry.ProcessedCount,
                         SuccessCount = entry.SuccessCount,
                         FailureCount = entry.FailureCount,
+                        SkippedCount = entry.SkippedCount, // 🚨 FIX: Include SkippedCount from storage
                         ProgressPercentage = entry.ProgressPercentage,
                         Status = entry.Status,
                         StartTime = entry.StartTime,
@@ -1787,8 +1901,9 @@ public class MigrationHttpFunctions
                     OverallProgressPercentage = migrationEntry.ProgressPercentage,
                     TotalEntities = migrationEntry.TotalEntities,
                     ProcessedEntities = migrationEntry.ProcessedEntities,
-                    SuccessfulEntities = migrationEntry.ProcessedEntities - migrationEntry.FailedEntities,
+                    SuccessfulEntities = migrationEntry.ProcessedEntities - migrationEntry.FailedEntities - migrationEntry.SkippedEntities,
                     FailedEntities = migrationEntry.FailedEntities,
+                    SkippedEntities = migrationEntry.SkippedEntities, // 🚨 FIX: Include SkippedEntities in migration summary
                     CurrentPhase = migrationEntry.CurrentPhase ?? "completed",
                     EntityProgress = entityProgress
                 };
@@ -1805,6 +1920,7 @@ public class MigrationHttpFunctions
                 ProcessedEntities = 0,
                 SuccessfulEntities = 0,
                 FailedEntities = 0,
+                SkippedEntities = 0, // 🚨 FIX: Include SkippedEntities in fallback
                 CurrentPhase = "unknown",
                 EntityProgress = new Dictionary<string, EntityProgress>()
             };
@@ -1823,6 +1939,7 @@ public class MigrationHttpFunctions
                 ProcessedEntities = 0,
                 SuccessfulEntities = 0,
                 FailedEntities = 0,
+                SkippedEntities = 0, // 🚨 FIX: Include SkippedEntities in fallback
                 CurrentPhase = "unknown",
                 EntityProgress = new Dictionary<string, EntityProgress>()
             };

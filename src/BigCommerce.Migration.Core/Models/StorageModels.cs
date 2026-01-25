@@ -46,6 +46,22 @@ public class EntityMapping
     public string? Metadata { get; set; }
 
     /// <summary>
+    /// Related products data stored as JSON (for products with related products)
+    /// </summary>
+    public string? RelatedProductsData { get; set; }
+
+    /// <summary>
+    /// Channels data stored as JSON (for products with channel assignments)
+    /// </summary>
+    public string? ChannelsData { get; set; }
+
+    /// <summary>
+    /// Option and option value mappings stored as JSON for variant migration
+    /// Format: { "options": [{ "sourceOptionId": "123", "destinationOptionId": "456", "optionValues": [{ "sourceId": "111", "destinationId": "222" }] }] }
+    /// </summary>
+    public string? OptionsMappingData { get; set; }
+
+    /// <summary>
     /// When the mapping was created
     /// </summary>
     public DateTime CreatedAt { get; set; }
@@ -463,6 +479,16 @@ public class MigrationEntry
     /// Number of entities that failed
     /// </summary>
     public int FailedEntities { get; set; }
+
+    /// <summary>
+    /// Number of entities that were skipped (duplicates, etc.)
+    /// </summary>
+    public int SkippedEntities { get; set; }
+
+    /// <summary>
+    /// Number of entities that were cancelled (due to migration cancellation)
+    /// </summary>
+    public int CancelledEntities { get; set; }
 }
 
 /// <summary>
@@ -642,6 +668,11 @@ public class BatchCompletionMessage
     /// Number of entities that failed processing
     /// </summary>
     public int FailureCount { get; set; }
+
+    /// <summary>
+    /// Number of entities that were skipped
+    /// </summary>
+    public int SkippedCount { get; set; }
 
     /// <summary>
     /// List of failed entity IDs with error details
@@ -1235,6 +1266,16 @@ public class EntityProgressEntry
     /// Number of failed entities
     /// </summary>
     public int FailureCount { get; set; }
+
+    /// <summary>
+    /// Number of skipped entities (e.g., duplicates, transformations)
+    /// </summary>
+    public int SkippedCount { get; set; }
+
+    /// <summary>
+    /// Number of cancelled entities (e.g., due to migration cancellation)
+    /// </summary>
+    public int CancelledCount { get; set; }
 
     /// <summary>
     /// Progress percentage for this entity type (0.0 to 100.0)

@@ -153,7 +153,6 @@ resource "azurerm_linux_function_app" "migration_functions" {
     "MigrationStartQueueName"              = "migration-start"
     "EntityBatchQueueName"                 = "entity-batch"
     "BatchCompletionQueueName"             = "batch-completion"
-    "CancellationQueueName"                = "cancellation"
     "ProgressUpdateQueueName"              = "progress-update"
     "DeadLetterQueueName"                  = "dead-letter"
     "RetryQueueName"                       = "retry"

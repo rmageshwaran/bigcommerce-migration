@@ -15,6 +15,12 @@ namespace BigCommerce.Migration.Core.Models
     [JsonDerivedType(typeof(EntityProgressEvent), "entity")]
     [JsonDerivedType(typeof(ErrorProgressEvent), "error")]
     [JsonDerivedType(typeof(StatusProgressEvent), "status")]
+    [JsonDerivedType(typeof(SubBatchStartedEvent), "subbatch-started")]
+    [JsonDerivedType(typeof(SubBatchCompletedEvent), "subbatch-completed")]
+    [JsonDerivedType(typeof(SubBatchMigrationProgressEvent), "subbatch-progress")]
+    [JsonDerivedType(typeof(QuotaUpdateEvent), "quota-update")]
+    [JsonDerivedType(typeof(PredictiveRateLimitEvent), "predictive-rate-limit")]
+    [JsonDerivedType(typeof(SystemHealthEvent), "system-health")]
     public abstract class ProgressEvent
     {
         /// <summary>
@@ -106,14 +112,56 @@ namespace BigCommerce.Migration.Core.Models
         public int FailedEntities { get; set; }
 
         /// <summary>
+        /// Number of entities successfully processed (ProcessedEntities - FailedEntities)
+        /// Calculated by backend to avoid frontend computation
+        /// </summary>
+        public int SuccessfulEntities { get; set; }
+
+        /// <summary>
         /// Current entity type being processed
         /// </summary>
         public string? CurrentEntityType { get; set; }
 
         /// <summary>
+        /// When the migration started
+        /// Used to calculate elapsed time and processing speed
+        /// </summary>
+        public DateTime? StartTime { get; set; }
+
+        /// <summary>
+        /// How long the migration has been running
+        /// Calculated from StartTime to current time
+        /// </summary>
+        public TimeSpan? ElapsedTime { get; set; }
+
+        /// <summary>
+        /// Current processing speed in entities per second
+        /// Calculated as ProcessedEntities / ElapsedTime.TotalSeconds
+        /// </summary>
+        public double? EntitiesPerSecond { get; set; }
+
+        /// <summary>
         /// Estimated time remaining (optional)
         /// </summary>
         public TimeSpan? EstimatedTimeRemaining { get; set; }
+
+        /// <summary>
+        /// Current batch number being processed
+        /// Used for "Current Processing Status" section
+        /// </summary>
+        public int? CurrentBatchNumber { get; set; }
+
+        /// <summary>
+        /// Current processing activity (e.g., "Fetching", "Processing", "Transforming")
+        /// Used for "Current Processing Status" section
+        /// </summary>
+        public string? CurrentActivity { get; set; }
+
+        /// <summary>
+        /// Detailed information about the current batch being processed
+        /// Used for "Current Processing Status" section batch progress display
+        /// </summary>
+        public CurrentBatchDetails? CurrentBatch { get; set; }
     }
 
     /// <summary>
@@ -161,6 +209,16 @@ namespace BigCommerce.Migration.Core.Models
         /// Number of entities that failed in this batch
         /// </summary>
         public int FailedCount { get; set; }
+
+        /// <summary>
+        /// Number of entities that were skipped in this batch
+        /// </summary>
+        public int SkippedCount { get; set; }
+
+        /// <summary>
+        /// Number of entities that were cancelled in this batch
+        /// </summary>
+        public int CancelledCount { get; set; }
 
         /// <summary>
         /// Batch processing status (starting, processing, completed, failed)
@@ -213,6 +271,16 @@ namespace BigCommerce.Migration.Core.Models
         /// Number of entities that failed to process
         /// </summary>
         public int FailureCount { get; set; }
+
+        /// <summary>
+        /// Number of entities that were skipped during processing
+        /// </summary>
+        public int SkippedCount { get; set; }
+
+        /// <summary>
+        /// Number of entities that were cancelled during processing
+        /// </summary>
+        public int CancelledCount { get; set; }
 
         /// <summary>
         /// Entity processing status (starting, processing, completed)
@@ -321,5 +389,237 @@ namespace BigCommerce.Migration.Core.Models
         /// Additional metadata about the status change
         /// </summary>
         public object? Metadata { get; set; }
+    }
+
+    /// <summary>
+    /// 🎯 SUB-BATCH PROGRESS: Event fired when a sub-batch starts processing
+    /// Provides granular progress tracking within pages for real-time dashboard updates
+    /// </summary>
+    public class SubBatchStartedEvent : ProgressEvent
+    {
+        /// <summary>
+        /// Initializes a new instance of SubBatchStartedEvent
+        /// </summary>
+        [JsonConstructor]
+        public SubBatchStartedEvent()
+        {
+            EventType = "subbatch-started";
+            HubMethod = "SubBatchStarted";
+        }
+
+        /// <summary>
+        /// Original page/batch number (1-4 for 192 brands)
+        /// </summary>
+        public int ParentBatchNumber { get; set; }
+        
+        /// <summary>
+        /// Sub-batch number within the parent batch (1-10 for each page)
+        /// </summary>
+        public int SubBatchNumber { get; set; }
+        
+        /// <summary>
+        /// Total number of sub-batches in this page
+        /// </summary>
+        public int TotalSubBatches { get; set; }
+        
+        /// <summary>
+        /// Number of entities in this sub-batch (typically 5)
+        /// </summary>
+        public int EntitiesInSubBatch { get; set; }
+        
+        /// <summary>
+        /// Maximum concurrency for this sub-batch
+        /// </summary>
+        public int MaxConcurrency { get; set; }
+        
+        /// <summary>
+        /// Entity type being processed
+        /// </summary>
+        public string EntityType { get; set; } = string.Empty;
+        
+        /// <summary>
+        /// When this sub-batch started processing
+        /// </summary>
+        public DateTime StartedAt { get; set; } = DateTime.UtcNow;
+    }
+
+    /// <summary>
+    /// 🎯 SUB-BATCH PROGRESS: Event fired when a sub-batch completes processing
+    /// Enables 10x more granular progress updates (40 total vs 4 page-level updates)
+    /// </summary>
+    public class SubBatchCompletedEvent : ProgressEvent
+    {
+        /// <summary>
+        /// Initializes a new instance of SubBatchCompletedEvent
+        /// </summary>
+        [JsonConstructor]
+        public SubBatchCompletedEvent()
+        {
+            EventType = "subbatch-completed";
+            HubMethod = "SubBatchCompleted";
+        }
+
+        /// <summary>
+        /// Original page/batch number (1-4 for 192 brands)
+        /// </summary>
+        public int ParentBatchNumber { get; set; }
+        
+        /// <summary>
+        /// Sub-batch number within the parent batch (1-10 for each page)
+        /// </summary>
+        public int SubBatchNumber { get; set; }
+        
+        /// <summary>
+        /// Total number of sub-batches in this page
+        /// </summary>
+        public int TotalSubBatches { get; set; }
+        
+        /// <summary>
+        /// Number of entities successfully processed in this sub-batch
+        /// </summary>
+        public int SuccessfulEntities { get; set; }
+        
+        /// <summary>
+        /// Number of entities that failed in this sub-batch
+        /// </summary>
+        public int FailedEntities { get; set; }
+        
+        /// <summary>
+        /// Total entities processed in this sub-batch
+        /// </summary>
+        public int TotalEntities { get; set; }
+        
+        /// <summary>
+        /// Entity type being processed
+        /// </summary>
+        public string EntityType { get; set; } = string.Empty;
+        
+        /// <summary>
+        /// Time taken to process this sub-batch
+        /// </summary>
+        public TimeSpan ProcessingTime { get; set; }
+        
+        /// <summary>
+        /// When this sub-batch completed
+        /// </summary>
+        public DateTime CompletedAt { get; set; } = DateTime.UtcNow;
+        
+        /// <summary>
+        /// List of errors that occurred in this sub-batch
+        /// </summary>
+        public List<string> Errors { get; set; } = new();
+        
+        /// <summary>
+        /// Cumulative successful entities across all completed sub-batches in this migration
+        /// </summary>
+        public int CumulativeSuccessfulEntities { get; set; }
+        
+        /// <summary>
+        /// Cumulative failed entities across all completed sub-batches in this migration
+        /// </summary>
+        public int CumulativeFailedEntities { get; set; }
+        
+        /// <summary>
+        /// Total entities expected to be processed in the entire migration
+        /// </summary>
+        public int TotalMigrationEntities { get; set; }
+        
+        /// <summary>
+        /// Progress percentage based on completed sub-batches (0-100)
+        /// Calculated as: (completed sub-batches / total sub-batches) * 100
+        /// </summary>
+        public double ProgressPercentage { get; set; }
+        
+        /// <summary>
+        /// Estimated time remaining based on current processing speed
+        /// </summary>
+        public TimeSpan? EstimatedTimeRemaining { get; set; }
+    }
+
+    /// <summary>
+    /// 🎯 SUB-BATCH PROGRESS: Aggregate progress event for the entire migration
+    /// Combines progress from all pages and sub-batches for dashboard display
+    /// </summary>
+    public class SubBatchMigrationProgressEvent : ProgressEvent
+    {
+        /// <summary>
+        /// Initializes a new instance of SubBatchMigrationProgressEvent
+        /// </summary>
+        [JsonConstructor]
+        public SubBatchMigrationProgressEvent()
+        {
+            EventType = "subbatch-progress";
+            HubMethod = "SubBatchMigrationProgress";
+        }
+
+        /// <summary>
+        /// Total number of pages in this migration
+        /// </summary>
+        public int TotalPages { get; set; }
+        
+        /// <summary>
+        /// Number of pages that have completed processing
+        /// </summary>
+        public int CompletedPages { get; set; }
+        
+        /// <summary>
+        /// Total number of sub-batches across all pages
+        /// </summary>
+        public int TotalSubBatches { get; set; }
+        
+        /// <summary>
+        /// Number of sub-batches that have completed processing
+        /// </summary>
+        public int CompletedSubBatches { get; set; }
+        
+        /// <summary>
+        /// Total entities successfully processed across all sub-batches
+        /// </summary>
+        public int TotalSuccessfulEntities { get; set; }
+        
+        /// <summary>
+        /// Total entities that failed across all sub-batches
+        /// </summary>
+        public int TotalFailedEntities { get; set; }
+        
+        /// <summary>
+        /// Total entities expected to be processed
+        /// </summary>
+        public int TotalExpectedEntities { get; set; }
+        
+        /// <summary>
+        /// Current processing rate (entities per second)
+        /// </summary>
+        public double ProcessingRate { get; set; }
+        
+        /// <summary>
+        /// Overall progress percentage (0-100)
+        /// </summary>
+        public double OverallProgressPercentage { get; set; }
+        
+        /// <summary>
+        /// Estimated time remaining for the entire migration
+        /// </summary>
+        public TimeSpan? EstimatedTimeRemaining { get; set; }
+        
+        /// <summary>
+        /// When this progress update was generated
+        /// </summary>
+        public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+        
+        /// <summary>
+        /// Time elapsed since migration started
+        /// </summary>
+        public TimeSpan ElapsedTime { get; set; }
+        
+        /// <summary>
+        /// List of recent errors across all sub-batches
+        /// </summary>
+        public List<string> RecentErrors { get; set; } = new();
+        
+        /// <summary>
+        /// Performance metrics for monitoring
+        /// </summary>
+        public Dictionary<string, object> PerformanceMetrics { get; set; } = new();
     }
 } 

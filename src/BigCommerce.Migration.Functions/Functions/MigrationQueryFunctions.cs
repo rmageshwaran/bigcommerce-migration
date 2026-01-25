@@ -80,7 +80,8 @@ public class MigrationQueryFunctions
             MigrationProgress? detailedProgress = null;
             try
             {
-                detailedProgress = await _progressTracker.GetProgressAsync(migrationId, CancellationToken.None);
+                // 🆕 TASK 4.1: Use enhanced progress with real-time aggregated data
+                detailedProgress = await _progressTracker.GetLatestAggregatedProgressAsync(migrationId, CancellationToken.None);
             }
             catch (Exception ex)
             {
@@ -303,7 +304,8 @@ public class MigrationQueryFunctions
         try
         {
             // Try to get from progress tracker first
-            var progress = await _progressTracker.GetProgressAsync(migrationId, CancellationToken.None);
+                            // 🆕 TASK 4.1: Use enhanced progress with real-time aggregated data
+                var progress = await _progressTracker.GetLatestAggregatedProgressAsync(migrationId, CancellationToken.None);
             
             // If progress tracker has meaningful data, use it
             if (progress != null && progress.TotalEntities > 0)
@@ -328,6 +330,8 @@ public class MigrationQueryFunctions
                         ProcessedCount = entry.ProcessedCount,
                         SuccessCount = entry.SuccessCount,
                         FailureCount = entry.FailureCount,
+                        SkippedCount = entry.SkippedCount, // 🚨 FIX: Include SkippedCount from storage
+                        CancelledCount = entry.CancelledCount, // 🚨 CANCELLATION FIX: Include CancelledCount from storage
                         ProgressPercentage = entry.ProgressPercentage,
                         Status = entry.Status,
                         StartTime = entry.StartTime,
@@ -345,8 +349,10 @@ public class MigrationQueryFunctions
                     OverallProgressPercentage = migrationEntry.ProgressPercentage,
                     TotalEntities = migrationEntry.TotalEntities,
                     ProcessedEntities = migrationEntry.ProcessedEntities,
-                    SuccessfulEntities = migrationEntry.ProcessedEntities - migrationEntry.FailedEntities,
+                    SuccessfulEntities = migrationEntry.ProcessedEntities - migrationEntry.FailedEntities - migrationEntry.SkippedEntities - migrationEntry.CancelledEntities,
                     FailedEntities = migrationEntry.FailedEntities,
+                    SkippedEntities = migrationEntry.SkippedEntities, // 🚨 FIX: Include SkippedEntities in migration summary
+                    CancelledEntities = migrationEntry.CancelledEntities, // 🚨 CANCELLATION FIX: Include CancelledEntities in migration summary
                     CurrentPhase = migrationEntry.CurrentPhase ?? "completed",
                     EntityProgress = entityProgress
                 };

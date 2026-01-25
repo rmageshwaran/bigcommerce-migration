@@ -22,7 +22,6 @@ public class QueueService : IQueueService
     private const string MigrationStartQueueName = "migration-start";
     private const string EntityBatchQueueName = "entity-batch";
     private const string BatchCompletionQueueName = "batch-completion";
-    private const string CancellationQueueName = "migration-cancellation";
     private const string DeadLetterQueueName = "dead-letter";
 
     /// <summary>
@@ -133,49 +132,7 @@ public class QueueService : IQueueService
         }
     }
 
-    /// <summary>
-    /// Creates a migration cancellation message for queue output binding
-    /// </summary>
-    /// <param name="migrationId">Migration ID to cancel</param>
-    /// <param name="reason">Cancellation reason</param>
-    /// <returns>Queue message ready for output binding</returns>
-    public Core.Models.QueueMessage CreateCancellationMessage(string migrationId, string reason)
-    {
-        try
-        {
-            _logger.LogInformation("Creating cancellation message: {MigrationId}, Reason: {Reason}", migrationId, reason);
-
-            var messageContent = new
-            {
-                MessageType = "MigrationCancellation",
-                MigrationId = migrationId,
-                Reason = reason,
-                RequestedBy = "System", // Could be enhanced to track actual user
-                CreatedAt = DateTime.UtcNow,
-                Version = "1.0"
-            };
-
-            var queueMessage = new Core.Models.QueueMessage
-            {
-                MessageId = Guid.NewGuid().ToString(),
-                Content = JsonSerializer.Serialize(messageContent, new JsonSerializerOptions
-                {
-                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-                }),
-                MessageType = "MigrationCancellation",
-                InsertionTime = DateTime.UtcNow,
-                ExpirationTime = DateTime.UtcNow.AddDays(1) // Cancellations expire quickly
-            };
-
-            _logger.LogInformation("Successfully created cancellation message: {MessageId}", queueMessage.MessageId);
-            return queueMessage;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error creating cancellation message: {MigrationId}", migrationId);
-            throw;
-        }
-    }
+    // REMOVED: CreateCancellationMessage - Use native Durable Functions cancellation with ICancellationStore instead
 
     /// <summary>
     /// Creates multiple entity batch messages for parallel processing
@@ -316,7 +273,7 @@ public class QueueService : IQueueService
             {
                 IsSuccess = false,
                 ErrorDetails = ex.Message,
-                ShouldRetry = true, // Retry on unexpected errors
+                ShouldRetry = false, // 🚨 DISABLED: No retries to avoid rate limit issues
                 ProcessedAt = DateTime.UtcNow
             };
         }
@@ -380,56 +337,7 @@ public class QueueService : IQueueService
         }
     }
 
-    /// <summary>
-    /// Processes a cancellation message received from queue trigger
-    /// </summary>
-    /// <param name="queueMessage">Queue message from trigger</param>
-    /// <returns>Processed message result</returns>
-    public async Task<MessageProcessingResult> ProcessCancellationMessageAsync(Core.Models.QueueMessage queueMessage)
-    {
-        try
-        {
-            _logger.LogInformation("Processing cancellation message: {MessageId}", queueMessage.MessageId);
-
-            // Validate and parse message
-            var validationResult = await ValidateQueueMessageAsync(queueMessage);
-            if (!validationResult.IsValid)
-            {
-                return new MessageProcessingResult
-                {
-                    IsSuccess = false,
-                    ErrorDetails = validationResult.ValidationError,
-                    ShouldRetry = false,
-                    ProcessedAt = DateTime.UtcNow
-                };
-            }
-
-            // TODO: Implement actual cancellation processing logic
-            await Task.Delay(500);
-
-            _logger.LogInformation("Successfully processed cancellation message: {MessageId}", queueMessage.MessageId);
-            
-            return new MessageProcessingResult
-            {
-                IsSuccess = true,
-                Message = "Cancellation processed successfully",
-                ProcessedAt = DateTime.UtcNow,
-                ProcessingDuration = TimeSpan.FromMilliseconds(500)
-            };
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error processing cancellation message: {MessageId}", queueMessage.MessageId);
-            
-            return new MessageProcessingResult
-            {
-                IsSuccess = false,
-                ErrorDetails = ex.Message,
-                ShouldRetry = true,
-                ProcessedAt = DateTime.UtcNow
-            };
-        }
-    }
+    // REMOVED: ProcessCancellationMessageAsync - Use native Durable Functions cancellation with ICancellationStore instead
 
     /// <summary>
     /// Processes a batch completion message received from queue trigger
@@ -575,7 +483,7 @@ public class QueueService : IQueueService
             }
 
             // Message type validation
-            var validMessageTypes = new[] { "MigrationStart", "EntityBatch", "BatchCompletion", "MigrationCancellation" };
+            var validMessageTypes = new[] { "MigrationStart", "EntityBatch", "BatchCompletion" };
             if (!string.IsNullOrWhiteSpace(queueMessage.MessageType) && 
                 !validMessageTypes.Contains(queueMessage.MessageType))
             {
@@ -656,19 +564,18 @@ public class QueueService : IQueueService
             await Task.Delay(100); // Simulate processing
 
             // Determine if message should be retried based on error type and retry count
-            var shouldRetry = deadLetterMessage.RetryAttempts < 3 && 
-                             !deadLetterMessage.ErrorDetails.Contains("ValidationError");
+            var shouldRetry = false; // 🚨 DISABLED: No dead letter retries to avoid rate limit issues
 
             var result = new DeadLetterProcessingResult
             {
                 IsSuccess = true,
                 Message = "Dead letter message processed",
                 ShouldRetry = shouldRetry,
-                MaxRetryAttempts = 3,
+                MaxRetryAttempts = 0, // 🚨 DISABLED: No retries
                 CurrentRetryAttempt = deadLetterMessage.RetryAttempts,
                 ProcessedAt = DateTime.UtcNow,
-                ShouldDiscard = !shouldRetry && deadLetterMessage.RetryAttempts >= 3,
-                DiscardReason = shouldRetry ? null : "Maximum retry attempts exceeded"
+                ShouldDiscard = true, // 🚨 Always discard to prevent retries
+                DiscardReason = "Retries disabled to avoid rate limit issues"
             };
 
             if (shouldRetry)
@@ -706,9 +613,9 @@ public class QueueService : IQueueService
     /// </summary>
     /// <param name="queueName">Target queue name</param>
     /// <param name="queueMessage">Message to send</param>
-    /// <param name="retryCount">Number of retry attempts (default: 3)</param>
+    /// <param name="retryCount">Number of retry attempts (default: 0 - no retries)</param>
     /// <returns>Task representing the send operation</returns>
-    public async Task SendMessageAsync(string queueName, Core.Models.QueueMessage queueMessage, int retryCount = 3)
+    public async Task SendMessageAsync(string queueName, Core.Models.QueueMessage queueMessage, int retryCount = 0)
     {
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         
@@ -852,19 +759,7 @@ public class QueueService : IQueueService
         _logger.LogInformation("Migration start message sent to queue for MigrationId: {MigrationId}", migrationId);
     }
 
-    /// <summary>
-    /// Sends a cancellation message directly to the cancellation queue
-    /// </summary>
-    /// <param name="migrationId">Migration ID</param>
-    /// <param name="reason">Cancellation reason</param>
-    /// <returns>Task representing the send operation</returns>
-    public async Task SendCancellationMessageAsync(string migrationId, string reason)
-    {
-        var queueMessage = CreateCancellationMessage(migrationId, reason);
-        await SendMessageAsync(CancellationQueueName, queueMessage);
-        
-        _logger.LogInformation("Cancellation message sent to queue for MigrationId: {MigrationId}", migrationId);
-    }
+
 
     #endregion
 

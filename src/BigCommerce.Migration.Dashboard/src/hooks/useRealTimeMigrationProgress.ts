@@ -107,7 +107,7 @@ export const useRealTimeMigrationProgress = (
     autoConnect = true,
     enableNotifications = true,
     enablePerformanceTracking = true,
-    pollInterval = 30000 // 30 seconds fallback
+    pollInterval = 3000 // 🆕 TASK 4.2: Reduced to 3 seconds for better real-time experience
   } = options;
 
   // State management
@@ -418,6 +418,8 @@ export const useRealTimeMigrationProgress = (
               processedCount: entityProgress.processedCount || 0,
               successCount: entityProgress.successCount || 0,
               failureCount: entityProgress.failureCount || 0,
+              skippedCount: entityProgress.skippedCount || 0,
+              cancelledCount: entityProgress.cancelledCount || 0,  // 🚨 CANCELLATION FIX: Add cancelledCount
               progressPercentage: entityProgress.progressPercentage || 0,
               status: mappedStatus,
               startTime: new Date(entityProgress.startTime || Date.now()),
@@ -442,10 +444,8 @@ export const useRealTimeMigrationProgress = (
     updatePerformanceMetrics(progressData);
     addEvent('progress', progressData, `Progress: ${progressData.overallProgressPercentage?.toFixed(1)}%`);
 
-    // Show completion notification
-    if (enableNotifications && progressData.status === 'completed') {
-      notificationService.success('Migration Complete', `Migration ${migrationId} completed successfully!`);
-    }
+    // ✅ FIX: Don't show completion notification here - DashboardContext handles this centrally
+    // This prevents duplicate notifications when migration completes
   }, [migrationId, updatePerformanceMetrics, addEvent, enableNotifications]);
 
   // Handle migration status updates
@@ -496,6 +496,8 @@ export const useRealTimeMigrationProgress = (
             processedCount: 0,
             successCount: 0,
             failureCount: 0,
+            skippedCount: 0,
+            cancelledCount: 0,  // 🚨 CANCELLATION FIX: Add cancelledCount
             progressPercentage: 0,
             status: 'pending',
             startTime: new Date(),

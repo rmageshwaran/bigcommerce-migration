@@ -33,6 +33,7 @@ interface MigrationFormData {
     // Product Data Migration
     brands: boolean;
     categories: boolean;
+    products: boolean;
     priceLists: boolean;
     promotions: boolean;
     
@@ -49,19 +50,14 @@ interface MigrationFormData {
 
 // Hardcoded store configurations for development
 const storeConfigurations = {
-  production: {
-    storeId: "v6q95r5n91",
-    accessToken: "2jxzl0n457l7dbz9jgeo8tzbj6xw6ba",
-    channelId: "1"
-  },
   staging: {
-    storeId: "in2msaitrc", 
-    accessToken: "bntqbbjvnnap8agkdbo5bekqehb473z",
+    storeId: "4diwbwzw1t", 
+    accessToken: "4ym1thwfbm941mfj8jpvwzm5zlxecmk",
     channelId: "1"
   },
   development: {
-    storeId: "dev12345xyz",
-    accessToken: "dev_token_abc123def456ghi789",
+    storeId: "in2msaitrc",
+    accessToken: "bntqbbjvnnap8agkdbo5bekqehb473z",
     channelId: "1"
   }
 };
@@ -130,6 +126,7 @@ export const MigrationStartForm: React.FC = () => {
       couponCodes: false,
       brands: false,
       categories: false,
+      products: false,
       priceLists: false,
       promotions: false,
       orders: false,
@@ -216,6 +213,7 @@ export const MigrationStartForm: React.FC = () => {
           couponCodes: false,
           brands: false,
           categories: false,
+          products: false,
           priceLists: false,
           promotions: false,
           orders: false,
@@ -251,6 +249,7 @@ export const MigrationStartForm: React.FC = () => {
       entities: [
         { key: 'brands' as const, label: 'Brands' },
         { key: 'categories' as const, label: 'Categories' },
+        { key: 'products' as const, label: 'Products' },
         { key: 'priceLists' as const, label: 'Price Lists' },
         { key: 'promotions' as const, label: 'Promotions' },
       ],

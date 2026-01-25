@@ -66,7 +66,6 @@ resource "azurerm_windows_function_app" "function_app" {
     "MigrationStartQueueName"              = "migration-start"
     "EntityBatchQueueName"                 = "entity-batch"
     "BatchCompletionQueueName"             = "batch-completion"
-    "CancellationQueueName"                = "cancellation"
     "ProgressUpdateQueueName"              = "progress-update"
     "DeadLetterQueueName"                  = "dead-letter"
     "RetryQueueName"                       = "retry"

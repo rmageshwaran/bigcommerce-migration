@@ -544,9 +544,17 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
       console.log('🎯 DashboardContext received MigrationStatus:', statusData);
       // Handle different types of migration status updates
       if (statusData.status === 'completed') {
+        console.log('🎉 [DASHBOARD-CONTEXT] Migration completion detected:', statusData);
+        
         // Calculate duration if possible (fallback to "just now" if no duration data)
-        const duration = statusData.data?.duration || 'just now';
-        const migrationName = statusData.data?.name || `Migration ${statusData.migrationId}`;
+        const duration = statusData.data?.duration || statusData.data?.processingTime || 'just now';
+        const migrationName = statusData.data?.name || `Migration ${statusData.migrationId?.slice(-8) || 'Unknown'}`;
+        
+        console.log('🔔 [DASHBOARD-CONTEXT] Triggering completion notification:', {
+          migrationId: statusData.migrationId?.slice(-8),
+          migrationName,
+          duration
+        });
         
         notificationService.migrationCompleted(
           statusData.migrationId,
@@ -562,6 +570,8 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
           processedEntities: 0,
           successfulEntities: 0,
           failedEntities: 0,
+          skippedEntities: 0,
+          cancelledEntities: 0,  // 🚨 CANCELLATION FIX: Add cancelledEntities
           startTime: new Date(),
           lastUpdated: new Date(),
           entitiesPerSecond: 0,
@@ -600,6 +610,49 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
       }
     });
 
+    // Sub-batch completion progress updates (real-time progress from sub-batch optimization)
+    const subBatchCompletedUnsubscribe = signalRService.on('subBatchCompleted', (subBatchData: any) => {
+      console.log('🎯 DashboardContext received subBatchCompleted:', subBatchData);
+      
+      const migrationId = subBatchData.migrationId || subBatchData.MigrationId;
+      if (!migrationId) return;
+      
+      // Don't update cancelled migrations
+      if (state.cancelledMigrations.has(migrationId)) {
+        console.log('🚫 Skipping sub-batch update for cancelled migration:', migrationId);
+        return;
+      }
+      
+      // Get current migration to preserve other data
+      const currentMigration = state.activeMigrations.get(migrationId);
+      if (!currentMigration) return;
+      
+      // Create updated progress using cumulative data from sub-batch
+      const updatedProgress: MigrationProgress = {
+        ...currentMigration,
+        migrationId: migrationId,
+        totalEntities: subBatchData.totalMigrationEntities || currentMigration.totalEntities,
+        processedEntities: subBatchData.cumulativeSuccessfulEntities + (subBatchData.cumulativeFailedEntities || 0),
+        successfulEntities: subBatchData.cumulativeSuccessfulEntities || currentMigration.successfulEntities,
+        failedEntities: subBatchData.cumulativeFailedEntities || currentMigration.failedEntities,
+        overallProgressPercentage: subBatchData.progressPercentage || currentMigration.overallProgressPercentage,
+        currentEntity: subBatchData.entityType || currentMigration.currentEntity,
+        lastUpdated: new Date(),
+        status: subBatchData.progressPercentage >= 100 ? 'completed' : 'in_progress',
+        currentPhase: subBatchData.progressPercentage >= 100 ? 'Completed' : 'Processing'
+      };
+      
+      console.log('📊 DashboardContext updating progress from sub-batch:', {
+        migrationId,
+        totalEntities: updatedProgress.totalEntities,
+        processedEntities: updatedProgress.processedEntities,
+        successfulEntities: updatedProgress.successfulEntities,
+        progressPercentage: updatedProgress.overallProgressPercentage
+      });
+      
+      dispatch({ type: 'UPDATE_MIGRATION_PROGRESS', payload: updatedProgress });
+    });
+
     // Entity progress updates (when individual entities complete)
     const entityProgressUnsubscribe = signalRService.on('EntityProgressUpdated', (entityData: any) => {
       console.log('🔄 DashboardContext received EntityProgressUpdated:', entityData);
@@ -619,6 +672,8 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
           processedEntities: entityData.ProcessedCount || entityData.processedCount || 0,
           successfulEntities: entityData.SuccessCount || entityData.successCount || 0,
           failedEntities: entityData.FailureCount || entityData.failureCount || 0,
+          skippedEntities: entityData.SkippedCount || entityData.skippedCount || 0,
+          cancelledEntities: entityData.CancelledCount || entityData.cancelledCount || 0,  // 🚨 CANCELLATION FIX: Add cancelledEntities
           startTime: new Date(),
           lastUpdated: new Date(),
           entitiesPerSecond: 0,
@@ -632,13 +687,8 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
         };
         dispatch({ type: 'UPDATE_MIGRATION_PROGRESS', payload: completedProgress });
         
-        // Show completion notification
-        const migrationName = `Migration ${migrationId}`;
-        notificationService.migrationCompleted(
-          migrationId,
-          migrationName,
-          entityData.ProcessingTime || 'just completed'
-        );
+        // ✅ FIX: Don't show completion notification here - MigrationStatus handler already does this
+        // This prevents duplicate notifications when migration completes
       } else if (migrationId) {
         // Update entity counts for other statuses
         dispatch({ 
@@ -679,6 +729,7 @@ export const DashboardProvider: React.FC<DashboardProviderProps> = ({
       connectionUnsubscribe();
       progressUnsubscribe();
       statusUnsubscribe();
+      subBatchCompletedUnsubscribe();
       entityProgressUnsubscribe();
       healthUnsubscribe();
       errorUnsubscribe();

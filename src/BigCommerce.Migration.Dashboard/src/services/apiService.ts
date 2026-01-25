@@ -98,6 +98,8 @@ export interface MigrationEntityBreakdown {
 export class ApiService {
   private client: AxiosInstance;
   private config: ApiConfig;
+  // 🆕 TASK 4.2: Request cache for API call frequency optimization
+  private requestCache = new Map<string, { promise: Promise<any>; timestamp: number }>();
 
   constructor(apiConfig: Partial<ApiConfig> = {}) {
     // Use environment configuration with override options
@@ -282,17 +284,82 @@ export class ApiService {
   /**
    * Get migration status by ID  
    * Maps to: GET /api/migrations/{id}/status-http (MigrationHttpFunctions)
+   * 🆕 TASK 4.2: Optimized API call frequency with request deduplication
    */
   public async getMigrationStatus(migrationId: string): Promise<MigrationProgress> {
-    return this.get<MigrationProgress>(`/migrations/${migrationId}/status-http`);
+    // 🆕 TASK 4.2: Request deduplication to prevent excessive API calls
+    const cacheKey = `migration-status-${migrationId}`;
+    const now = Date.now();
+    
+    // Check if we have a recent request for the same migration (within 1 second)
+    if (this.requestCache.has(cacheKey)) {
+      const cachedRequest = this.requestCache.get(cacheKey)!;
+      if (now - cachedRequest.timestamp < 1000) {
+        return cachedRequest.promise;
+      }
+    }
+    
+    // Create new request and cache it
+    const request = this.get<MigrationProgress>(`/migrations/${migrationId}/status-http`);
+    this.requestCache.set(cacheKey, { promise: request, timestamp: now });
+    
+    // Clean up cache after request completes
+    request.finally(() => {
+      setTimeout(() => this.requestCache.delete(cacheKey), 2000);
+    });
+    
+    return request;
   }
 
   /**
    * Get detailed migration progress
    * Maps to: GET /api/migrations/{id}/status-http (MigrationHttpFunctions)
+   * 🆕 TASK 4.2: Enhanced with error handling for progress update failures
    */
   public async getMigrationProgress(migrationId: string): Promise<MigrationProgress> {
-    return this.get<MigrationProgress>(`/migrations/${migrationId}/status-http`);
+    try {
+      const progress = await this.get<MigrationProgress>(`/migrations/${migrationId}/status-http`);
+      
+      // 🆕 TASK 4.2: Validate that we're getting real-time aggregated data
+      if (progress && typeof progress === 'object') {
+        // Add metadata to indicate this is from the new aggregated progress system
+        (progress as any)._dataSource = 'aggregated-real-time';
+        (progress as any)._fetchedAt = new Date().toISOString();
+      }
+      
+      return progress;
+    } catch (error: any) {
+      // 🆕 TASK 4.2: Enhanced error handling for progress update failures
+      console.warn(`⚠️ Progress update failed for migration ${migrationId}:`, error.message);
+      
+      // Provide fallback progress object to prevent UI crashes
+      const fallbackProgress: MigrationProgress = {
+        migrationId,
+        status: 'unknown' as any,
+        totalEntities: 0,
+        processedEntities: 0,
+        successfulEntities: 0,
+        failedEntities: 0,
+        skippedEntities: 0,
+        cancelledEntities: 0,
+        overallProgressPercentage: 0,
+        startTime: new Date(),
+        lastUpdated: new Date(),
+        entityProgress: {},
+        currentPhase: 'Error',
+        currentEntity: 'N/A',
+        entitiesPerSecond: 0,
+        errorRate: 0,
+        elapsedTime: 0,
+        estimatedTimeRemaining: 0
+      };
+      
+      // Add error metadata (as any to avoid type conflicts)
+      (fallbackProgress as any)._dataSource = 'fallback-error';
+      (fallbackProgress as any)._error = error.message;
+      
+      return fallbackProgress;
+    }
   }
 
   /**

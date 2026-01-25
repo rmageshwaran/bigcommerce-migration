@@ -47,6 +47,7 @@ import { useNavigate } from 'react-router-dom';
 import { useDetailedMigrationProgress } from '../../hooks/useDetailedMigrationProgress';
 import type { DetailedMigrationProgress, ProcessingContext, BatchProgressSummary, RemainingWorkload, RealTimeMetrics } from '../../hooks/useDetailedMigrationProgress';
 import { apiService } from '../../services/apiService';
+import { RealTimeIndicator } from '../Progress/RealTimeIndicator';
 
 interface EnhancedMigrationDashboardProps {
   migrationId: string;
@@ -94,16 +95,14 @@ export const EnhancedMigrationDashboard: React.FC<EnhancedMigrationDashboardProp
     autoConnect,
     enableNotifications,
     enablePerformanceTracking: true,
-    pollInterval: 0 // Temporarily disable polling to test if this is causing refreshes
+    pollInterval: 3000 // 🆕 TASK 4.2: Optimized 3-second polling for real-time incremental progress
   });
 
   // Handle migration completion
   useEffect(() => {
     if (progress?.status === 'completed' && onMigrationComplete) {
       onMigrationComplete(migrationId);
-      setSnackbarMessage('🎉 Migration completed successfully!');
-      setSnackbarSeverity('success');
-      setSnackbarOpen(true);
+      // ✅ FIX: Don't create duplicate notifications - DashboardContext already handles this via notificationService
     }
   }, [progress?.status, migrationId, onMigrationComplete]);
 
@@ -111,9 +110,7 @@ export const EnhancedMigrationDashboard: React.FC<EnhancedMigrationDashboardProp
   useEffect(() => {
     if (progress?.status === 'failed' && onMigrationError) {
       onMigrationError(migrationId, { status: 'failed' });
-      setSnackbarMessage('❌ Migration failed. Check error details.');
-      setSnackbarSeverity('error');
-      setSnackbarOpen(true);
+      // ✅ FIX: Don't create duplicate notifications - DashboardContext already handles this via notificationService
     }
   }, [progress?.status, migrationId, onMigrationError]);
 
@@ -171,19 +168,54 @@ export const EnhancedMigrationDashboard: React.FC<EnhancedMigrationDashboardProp
     }
   };
 
-  // Calculate display values
+  // 🆕 TASK 4.2: Enhanced progress calculation logic for real-time aggregated data
   const displayValues = useMemo(() => {
     if (!progress) return null;
 
+    // 🚀 TASK 4.2: Enhanced calculations that work with real-time incremental progress
+    const totalEntities = progress.totalEntities || 0;
+    const processedEntities = progress.processedEntities || 0;
+    const successfulEntities = progress.successfulEntities || 0;
+    const failedEntities = progress.failedEntities || 0;
+    const skippedEntities = (progress as any).skippedEntities || 0;
+    const cancelledEntities = (progress as any).cancelledEntities || 0;
+
+    // Calculate more accurate progress percentage from aggregated data
+    const accurateProgressPercentage = totalEntities > 0 ? 
+      (processedEntities / totalEntities) * 100 : 0;
+
+    // Calculate success rate from real aggregated data
+    const successRate = processedEntities > 0 ? 
+      (successfulEntities / processedEntities) * 100 : 0;
+
+    // Detect if we're getting real-time aggregated data
+    const isRealTimeData = (progress as any)._dataSource === 'aggregated-real-time';
+    const dataFreshness = (progress as any)._fetchedAt ? 
+      new Date((progress as any)._fetchedAt) : lastUpdated;
+
     return {
-      overallProgress: progress.overallProgressPercentage || 0,
-      currentEntity: progress.currentProcessing?.currentEntity || progress.currentEntity || 'Unknown',
+      // 🆕 TASK 4.2: Use calculated progress from aggregated data (more accurate)
+      overallProgress: accurateProgressPercentage,
+      successRate,
+      isRealTimeData,
+      dataFreshness,
+      
+      // Enhanced entity breakdown from aggregated data
+      totalEntities,
+      processedEntities,
+      successfulEntities,
+      failedEntities,
+      skippedEntities,
+      cancelledEntities,
+      
+      // Legacy fields for backward compatibility
+      currentEntity: progress.currentProcessing?.currentEntity || progress.currentEntity || 'Processing...',
       currentBatch: progress.currentProcessing?.currentBatchNumber || 0,
-      currentActivity: progress.currentProcessing?.currentActivity || 'Initializing...',
+      currentActivity: progress.currentProcessing?.currentActivity || 'Processing entities...',
       totalBatches: progress.batchProgress?.totalBatches || 0,
       completedBatches: progress.batchProgress?.completedBatches || 0,
       remainingBatches: progress.remainingWork?.remainingBatches || 0,
-      remainingEntities: progress.remainingWork?.remainingEntities || 0,
+      remainingEntities: totalEntities - processedEntities,
       currentSpeed: progress.performance?.currentProcessingSpeed || progress.entitiesPerSecond || 0,
       averageSpeed: progress.performance?.averageProcessingSpeed || 0,
       performanceTrend: progress.performance?.performanceTrend || 'stable',
@@ -193,7 +225,7 @@ export const EnhancedMigrationDashboard: React.FC<EnhancedMigrationDashboardProp
       batchSpeed: progress.currentProcessing?.currentBatch?.batchProcessingSpeed || 0,
       estimatedCompletion: progress.remainingWork?.estimatedTimeRemaining || 0
     };
-  }, [progress]);
+  }, [progress, lastUpdated]);
 
   if (isLoading && !progress) {
     return (
@@ -554,7 +586,21 @@ export const EnhancedMigrationDashboard: React.FC<EnhancedMigrationDashboardProp
                         At current speed ({displayValues.currentSpeed.toFixed(1)} entities/sec)
                       </Typography>
                       <Typography variant="caption" color="textSecondary">
-                        Expected completion: {format(new Date(Date.now() + displayValues.estimatedCompletion * 1000), 'PPpp')}
+                        Expected completion: {(() => {
+                          try {
+                            const estimatedMs = displayValues.estimatedCompletion * 1000;
+                            if (isNaN(estimatedMs) || estimatedMs < 0) {
+                              return 'Calculating...';
+                            }
+                            const completionDate = new Date(Date.now() + estimatedMs);
+                            if (isNaN(completionDate.getTime())) {
+                              return 'Calculating...';
+                            }
+                            return format(completionDate, 'PPpp');
+                          } catch {
+                            return 'Calculating...';
+                          }
+                        })()}
                       </Typography>
                     </Box>
                   </Stack>

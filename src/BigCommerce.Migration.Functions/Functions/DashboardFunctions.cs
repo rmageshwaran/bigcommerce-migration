@@ -56,8 +56,8 @@ namespace BigCommerce.Migration.Functions.Functions
                     return badRequestResponse;
                 }
 
-                // Get progress from tracker
-                var progress = await _progressTracker.GetProgressAsync(migrationId, cancellationToken);
+                // 🆕 TASK 4.1: Get enhanced progress with real-time aggregated data
+                var progress = await _progressTracker.GetLatestAggregatedProgressAsync(migrationId, cancellationToken);
                 
                 // Get migration from storage for consistency
                 var migrationEntry = await _migrationStorageService.GetMigrationAsync(migrationId);
@@ -229,7 +229,8 @@ namespace BigCommerce.Migration.Functions.Functions
                     try
                     {
                         // Get detailed progress information
-                        var detailedProgress = await _progressTracker.GetProgressAsync(migration.Id, cancellationToken);
+                        // 🆕 TASK 4.1: Use enhanced progress with real-time aggregated data for dashboard
+                var detailedProgress = await _progressTracker.GetLatestAggregatedProgressAsync(migration.Id, cancellationToken);
                         
                         _logger.LogInformation("DEBUG: Got progress for migration {MigrationId}: Total={Total}, Processed={Processed}", 
                             migration.Id, detailedProgress?.TotalEntities ?? 0, detailedProgress?.ProcessedEntities ?? 0);

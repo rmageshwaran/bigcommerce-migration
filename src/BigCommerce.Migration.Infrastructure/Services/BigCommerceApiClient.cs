@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using BigCommerce.Migration.Core.Interfaces;
 using BigCommerce.Migration.Core.Models;
 using Microsoft.Extensions.Logging;
@@ -133,12 +134,26 @@ public class BigCommerceApiClient : IBigCommerceApiClient
             var request = ApiRequest.CreatePost(url, jsonContent, storeConfig);
             var response = await _apiRequestHandler.ExecuteRequestAsync<Dictionary<string, object>>(request, cancellationToken);
             
+            // 🔍 DEBUG: Log the complete API response structure
+            if (response != null)
+            {
+                var responseJson = JsonSerializer.Serialize(response);
+                _logger.LogInformation("🔍 [API-RESPONSE-DEBUG] Complete BigCommerce API response: {ResponseJson}", responseJson);
+                _logger.LogInformation("🔍 [API-RESPONSE-DEBUG] Response keys: {Keys}", string.Join(", ", response.Keys));
+            }
+            else
+            {
+                _logger.LogWarning("🔍 [API-RESPONSE-DEBUG] Response is null!");
+            }
+            
             if (response?.TryGetValue("data", out var dataValue) == true && dataValue is JsonElement dataElement)
             {
                 var createdCategories = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(dataElement.GetRawText()) ?? new List<Dictionary<string, object>>();
+                _logger.LogInformation("🔍 [API-RESPONSE-DEBUG] Successfully parsed {Count} categories from 'data' field", createdCategories.Count);
                 return createdCategories;
             }
 
+            _logger.LogWarning("🔍 [API-RESPONSE-DEBUG] No 'data' field found in response - returning empty list!");
             return new List<Dictionary<string, object>>();
         }
         catch (Exception ex)
@@ -152,20 +167,53 @@ public class BigCommerceApiClient : IBigCommerceApiClient
     /// <summary>
     /// Gets products for a specific store and channel with pagination
     /// </summary>
-    public async Task<List<Dictionary<string, object>>> GetProductsAsync(StoreConfiguration storeConfig, int page = 1, int limit = 50, CancellationToken cancellationToken = default)
+    public async Task<List<Dictionary<string, object>>> GetProductsAsync(StoreConfiguration storeConfig, int page = 1, int limit = 50, string? include = null, CancellationToken cancellationToken = default)
     {
         ValidateStoreConfiguration(storeConfig);
 
-        var url = $"{storeConfig.GetApiBaseUrl()}/catalog/products?page={page}&limit={limit}&channel_id={storeConfig.ChannelId}";
+        var url = $"{storeConfig.GetApiBaseUrl()}/catalog/products?page={page}&limit={limit}";
+        
+        // Add include parameter if provided
+        if (!string.IsNullOrEmpty(include))
+        {
+            url += $"&include={include}";
+        }
 
         try
         {
             var request = ApiRequest.CreateGet(url, storeConfig);
             var response = await _apiRequestHandler.ExecuteRequestAsync<Dictionary<string, object>>(request, cancellationToken);
             
+            // 🔍 STAGE 1 DEBUG: Log raw API response to trace options data
+            if (include?.Contains("options") == true)
+            {
+                _logger.LogInformation("🔍 [STAGE-1-API] Raw API Response for products with options: {RawResponse}", 
+                    JsonSerializer.Serialize(response, new JsonSerializerOptions { WriteIndented = true }));
+            }
+            
             if (response?.TryGetValue("data", out var dataValue) == true && dataValue is JsonElement dataElement)
             {
-                var products = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(dataElement.GetRawText()) ?? new List<Dictionary<string, object>>();
+                var rawDataText = dataElement.GetRawText();
+                
+                // 🔍 STAGE 1 DEBUG: Log raw data text before deserialization
+                if (include?.Contains("options") == true)
+                {
+                    _logger.LogInformation("🔍 [STAGE-1-API] Raw data text: {RawDataText}", rawDataText);
+                }
+                
+                var products = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(rawDataText) ?? new List<Dictionary<string, object>>();
+                
+                // 🔍 STAGE 1 DEBUG: Log deserialized products to see if options include IDs
+                if (include?.Contains("options") == true && products.Any())
+                {
+                    var firstProduct = products.First();
+                    if (firstProduct.TryGetValue("options", out var optionsValue))
+                    {
+                        _logger.LogInformation("🔍 [STAGE-1-API] First product options after deserialization: {OptionsData}", 
+                            JsonSerializer.Serialize(optionsValue, new JsonSerializerOptions { WriteIndented = true }));
+                    }
+                }
+                
                 return products;
             }
 
@@ -179,36 +227,8 @@ public class BigCommerceApiClient : IBigCommerceApiClient
         }
     }
 
-    /// <summary>
-    /// Creates products in a specific store and channel
-    /// </summary>
-    public async Task<List<Dictionary<string, object>>> CreateProductsAsync(StoreConfiguration storeConfig, List<Dictionary<string, object>> products, CancellationToken cancellationToken = default)
-    {
-        ValidateStoreConfiguration(storeConfig);
-
-        var url = $"{storeConfig.GetApiBaseUrl()}/catalog/products?channel_id={storeConfig.ChannelId}";
-        var jsonContent = JsonSerializer.Serialize(products);
-
-        try
-        {
-            var request = ApiRequest.CreatePost(url, jsonContent, storeConfig);
-            var response = await _apiRequestHandler.ExecuteRequestAsync<Dictionary<string, object>>(request, cancellationToken);
-            
-            if (response?.TryGetValue("data", out var dataValue) == true && dataValue is JsonElement dataElement)
-            {
-                var createdProducts = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(dataElement.GetRawText()) ?? new List<Dictionary<string, object>>();
-                return createdProducts;
-            }
-
-            return new List<Dictionary<string, object>>();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to create products for store {StoreId}, channel {ChannelId}", 
-                storeConfig.StoreId, storeConfig.ChannelId);
-            throw;
-        }
-    }
+    // NOTE: CreateProductsAsync batch method removed - replaced with individual processing
+    // in ProductCreationStrategy.CreateSingleProductAsync for better error isolation
 
     /// <summary>
     /// Checks if the API client can communicate with BigCommerce for a specific store
@@ -597,14 +617,28 @@ public class BigCommerceApiClient : IBigCommerceApiClient
     /// </summary>
     private string BuildEntityUrl(StoreConfiguration storeConfig, string entityType, BigCommercePaginationRequest request)
     {
+        _logger.LogInformation("🔗 [BUILD-URL-DEBUG] Building URL for EntityType='{EntityType}', Include='{Include}', Page={Page}, Limit={Limit}", 
+            entityType, request.Include, request.Page, request.Limit);
+            
         var baseUrl = storeConfig.GetApiBaseUrl();
         var endpoint = entityType.ToLowerInvariant() switch
         {
             "products" => "catalog/products",
-            "categories" => "catalog/categories",
+            "categories" => "catalog/categories", 
             "brands" => "catalog/brands",
+            "variants" => "catalog/variants",
+            
+            // 🚀 ENHANCED PRODUCT MIGRATION: Phase-specific entity type mappings
+            "product-components" => "catalog/products",    // Phase 2: Fetch products with includes
+            "product-variants" => "catalog/variants",      // Phase 3: Map to variants endpoint
+            "product-related" => "catalog/products",       // Phase 4: Fetch products for relationship updates
+            "product-metafields" => "catalog/products",    // Phase 5: Fetch products for metafield updates  
+            "product-channels" => "catalog/products",      // Phase 6: Fetch products for channel assignments
+            
             _ => throw new ArgumentException($"Unsupported entity type: {entityType}")
         };
+        
+        _logger.LogInformation("🔗 [BUILD-URL-DEBUG] EntityType '{EntityType}' mapped to endpoint '{Endpoint}'", entityType, endpoint);
         
         var queryParams = new List<string>
         {
@@ -616,10 +650,26 @@ public class BigCommerceApiClient : IBigCommerceApiClient
         switch (entityType.ToLowerInvariant())
         {
             case "products":
-                // Products API supports channel_id parameter
-                if (storeConfig.ChannelId != null)
+                // ✅ ENHANCED PRODUCTS: Add include parameter for additional product data WITHOUT channel_id filtering
+                if (!string.IsNullOrEmpty(request.Include))
                 {
-                    queryParams.Add($"channel_id={storeConfig.ChannelId}");
+                    queryParams.Add($"include={request.Include}");
+                }
+                break;
+                
+            case "product-components":    // 🔧 FIX: Phase 2 - NO channel_id to get all products
+            case "product-related":       // 🔧 FIX: Phase 4 - NO channel_id for relationship updates  
+            case "product-metafields":    // 🔧 FIX: Phase 5 - NO channel_id for metafield updates
+            case "product-channels":      // 🔧 FIX: Phase 6 - NO channel_id for channel assignment updates
+                // ✅ ENHANCED PRODUCTS: Add include parameter WITHOUT channel_id filtering
+                if (!string.IsNullOrEmpty(request.Include))
+                {
+                    queryParams.Add($"include={request.Include}");
+                    _logger.LogInformation("🔗 [BUILD-URL-DEBUG] Added include parameter for {EntityType}: include={Include}", entityType, request.Include);
+                }
+                else
+                {
+                    _logger.LogWarning("🔗 [BUILD-URL-DEBUG] ⚠️ No include parameter for {EntityType} - this may result in 0 components!", entityType);
                 }
                 break;
                 
@@ -634,9 +684,27 @@ public class BigCommerceApiClient : IBigCommerceApiClient
             case "brands":
                 // Brands API doesn't support channel_id or tree_id parameters
                 break;
+                
+            case "variants":
+            case "product-variants":      // 🔧 FIX: Phase 3 parameter handling
+                // Variants API doesn't require additional parameters
+                break;
         }
         
-        return $"{baseUrl}/{endpoint}?{string.Join("&", queryParams)}";
+        // Add any additional parameters from the request
+        if (request.AdditionalParams != null && request.AdditionalParams.Any())
+        {
+            foreach (var param in request.AdditionalParams)
+            {
+                queryParams.Add($"{param.Key}={param.Value}");
+            }
+        }
+        
+        var finalUrl = $"{baseUrl}/{endpoint}?{string.Join("&", queryParams)}";
+        
+        _logger.LogInformation("🔗 [BUILD-URL-DEBUG] ✅ Final URL constructed: {FinalUrl}", finalUrl);
+        
+        return finalUrl;
     }
     
     /// <summary>
@@ -648,6 +716,9 @@ public class BigCommerceApiClient : IBigCommerceApiClient
         BigCommercePaginationRequest request,
         long elapsedMilliseconds)
     {
+        _logger.LogInformation("📊 [PARSE-RESPONSE-DEBUG] Parsing API response - HasResult: {HasResult}, ApiVersion: {ApiVersion}", 
+            result != null, apiVersion);
+            
         var response = new BigCommercePaginatedResponse<Dictionary<string, object>>
         {
             ApiVersion = apiVersion,
@@ -660,6 +731,11 @@ public class BigCommerceApiClient : IBigCommerceApiClient
         if (result?.TryGetValue("data", out var dataValue) == true && dataValue is JsonElement dataElement)
         {
             response.Data = ParseDataArray(dataElement);
+            _logger.LogInformation("📊 [PARSE-RESPONSE-DEBUG] Parsed data array - Count: {DataCount}", response.Data.Count);
+        }
+        else
+        {
+            _logger.LogWarning("📊 [PARSE-RESPONSE-DEBUG] ⚠️ No 'data' field found in response or data is not JsonElement!");
         }
         
         if (result?.TryGetValue("meta", out var metaValue) == true && metaValue is JsonElement metaElement)
@@ -672,6 +748,9 @@ public class BigCommerceApiClient : IBigCommerceApiClient
             response.TotalPages = meta.Pagination.TotalPages;
             response.HasNextPage = meta.Pagination.CurrentPage < meta.Pagination.TotalPages;
             response.IsLastPage = meta.Pagination.CurrentPage >= meta.Pagination.TotalPages;
+            
+            _logger.LogInformation("📊 [PARSE-RESPONSE-DEBUG] Parsed pagination metadata - Total: {Total}, TotalPages: {TotalPages}, CurrentPage: {CurrentPage}, PerPage: {PerPage}", 
+                meta.Pagination.Total, meta.Pagination.TotalPages, meta.Pagination.CurrentPage, meta.Pagination.PerPage);
         }
         else
         {

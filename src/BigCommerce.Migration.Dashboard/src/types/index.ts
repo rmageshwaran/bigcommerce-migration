@@ -14,6 +14,8 @@ export interface MigrationProgress {
   processedEntities: number;
   successfulEntities: number;
   failedEntities: number;
+  skippedEntities: number;
+  cancelledEntities: number;  // 🚨 CANCELLATION FIX: Add cancelledEntities
   overallProgressPercentage: number;
   entityProgress: Record<string, EntityProgress>;
   currentPhase: string;
@@ -28,6 +30,8 @@ export interface EntityProgress {
   processedCount: number;
   successCount: number;
   failureCount: number;
+  skippedCount: number;
+  cancelledCount: number;  // 🚨 CANCELLATION FIX: Add cancelledCount
   progressPercentage: number;
   status: string;
   startTime: Date;
@@ -347,6 +351,10 @@ export interface BatchEvent {
   summary?: BatchCompletionSummary;
   timestamp: Date;
 }
+
+// 🚨 GLOBAL COORDINATION CLEANUP: Sub-batch event types removed
+// These interfaces are no longer needed since we use coordinated MigrationProgress events
+// from the global ParallelProgressAggregator instead of individual sub-batch events
 
 export interface EntityPhaseTransition {
   migrationId: string;

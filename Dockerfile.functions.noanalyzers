@@ -11,13 +11,13 @@ ENV NUGET_XMLDOC_MODE=skip
 # Copy project files
 COPY src/BigCommerce.Migration.Core/BigCommerce.Migration.Core.csproj src/BigCommerce.Migration.Core/
 COPY src/BigCommerce.Migration.Infrastructure/BigCommerce.Migration.Infrastructure.csproj src/BigCommerce.Migration.Infrastructure/
-COPY src/BigCommerce.Migration.Orchestration/BigCommerce.Migration.Orchestration.csproj src/BigCommerce.Migration.Orchestration/
+COPY src/BigCommerce.Migration.Activities/BigCommerce.Migration.Activities.csproj src/BigCommerce.Migration.Activities/
 COPY src/BigCommerce.Migration.Functions/BigCommerce.Migration.Functions.csproj src/BigCommerce.Migration.Functions/
 
 # Copy source code
 COPY src/BigCommerce.Migration.Core/ src/BigCommerce.Migration.Core/
 COPY src/BigCommerce.Migration.Infrastructure/ src/BigCommerce.Migration.Infrastructure/
-COPY src/BigCommerce.Migration.Orchestration/ src/BigCommerce.Migration.Orchestration/
+COPY src/BigCommerce.Migration.Activities/ src/BigCommerce.Migration.Activities/
 COPY src/BigCommerce.Migration.Functions/ src/BigCommerce.Migration.Functions/
 
 # Build with analyzers completely disabled

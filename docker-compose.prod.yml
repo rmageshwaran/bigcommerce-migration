@@ -28,18 +28,82 @@ services:
       - MigrationStartQueueName=migration-start-prod
       - EntityBatchQueueName=entity-batch-prod
       - BatchCompletionQueueName=batch-completion-prod
-      - CancellationQueueName=cancellation-prod
       - ProgressUpdateQueueName=progress-update-prod
       - DeadLetterQueueName=dead-letter-prod
       - RetryQueueName=retry-prod
       
-      # Production BigCommerce Configuration
-      - BigCommerce__RateLimitRequestsPerSecond=12
+      # ✅ UPDATED Production BigCommerce Configuration (Higher Performance)
+      - BigCommerce__RateLimitRequestsPerSecond=25
+      - BigCommerce__DefaultRateLimit=20
+      - BigCommerce__ConcurrentRequests=15
       - BigCommerce__UserAgent=BigCommerce-Migration-System/1.0-Production
       - BigCommerce__BaseUrl=https://api.bigcommerce.com
       - BigCommerce__RequestTimeout=00:00:30
       - BigCommerce__MaxRetries=3
       - BigCommerce__EnableDebugLogging=false
+      
+      # ✅ PREDICTIVE RATE LIMITING CONFIGURATION (Production)
+      # Feature Flags - Enable Predictive Distribution
+      - DynamicRateLimiting__Features__EnableDynamicRateLimiting=true
+      - DynamicRateLimiting__Features__EnableApiHealthMonitoring=true
+      - DynamicRateLimiting__Features__EnableRealTimeEvents=true
+      - DynamicRateLimiting__Features__EnableAdvancedRateCalculation=true
+      - DynamicRateLimiting__Features__EnableBigCommerceRateLimitIntegration=true
+      - DynamicRateLimiting__Features__EnableDetailedLogging=false
+      - DynamicRateLimiting__Features__EnablePredictiveDistribution=true
+      - DynamicRateLimiting__Features__EnableInstanceCoordination=true
+      - DynamicRateLimiting__Features__EnableQuotaTracking=true
+      
+      # Rate Calculation Settings - Production Optimized
+      - DynamicRateLimiting__RateCalculation__MinimumRate=5.0
+      - DynamicRateLimiting__RateCalculation__MaximumRate=50.0
+      - DynamicRateLimiting__RateCalculation__DefaultRate=12.0
+      - DynamicRateLimiting__RateCalculation__ResponseTimeWeight=0.2
+      - DynamicRateLimiting__RateCalculation__ErrorRateWeight=0.12
+      - DynamicRateLimiting__RateCalculation__BigCommerceRateLimitWeight=0.12
+      - DynamicRateLimiting__RateCalculation__HealthFactorWeight=0.56
+      - DynamicRateLimiting__RateCalculation__CriticalHealthThreshold=25.0
+      - DynamicRateLimiting__RateCalculation__ExcellentHealthThreshold=85.0
+      - DynamicRateLimiting__RateCalculation__ExcellentHealthBoostMultiplier=1.3
+      
+      # Health Monitoring Settings - Production
+      - DynamicRateLimiting__HealthMonitoring__MonitoringWindowMinutes=5
+      - DynamicRateLimiting__HealthMonitoring__MaxCallHistorySize=1000
+      - DynamicRateLimiting__HealthMonitoring__SlowResponseThresholdMs=1000.0
+      - DynamicRateLimiting__HealthMonitoring__CriticalResponseThresholdMs=3000.0
+      - DynamicRateLimiting__HealthMonitoring__ErrorRateThreshold=0.05
+      - DynamicRateLimiting__HealthMonitoring__CleanupIntervalSeconds=300
+      - DynamicRateLimiting__HealthMonitoring__EnableAutomaticCleanup=true
+      
+      # Event Settings - Production
+      - DynamicRateLimiting__Events__SignificantRateChangeThreshold=0.2
+      - DynamicRateLimiting__Events__SignificantHealthChangeThreshold=15.0
+      - DynamicRateLimiting__Events__EventThrottleIntervalSeconds=30
+      - DynamicRateLimiting__Events__EnableEventBatching=false
+      - DynamicRateLimiting__Events__IncludeDetailedHealthInEvents=false
+      
+      # Safety Settings - Production
+      - DynamicRateLimiting__Safety__FallbackRateRequestsPerSecond=8.0
+      - DynamicRateLimiting__Safety__MaxConsecutiveFailures=3
+      - DynamicRateLimiting__Safety__FallbackRetryDelayMinutes=10
+      - DynamicRateLimiting__Safety__EnableAutomaticRecovery=true
+      - DynamicRateLimiting__Safety__EnableCircuitBreaker=true
+      - DynamicRateLimiting__Safety__HealthMonitoringTimeoutMs=1000
+      - DynamicRateLimiting__Safety__EnableGracefulDegradation=true
+      
+      # ✅ PREDICTIVE SETTINGS - PRODUCTION OPTIMIZED
+      - DynamicRateLimiting__Predictive__SafetyBufferPercentage=0.25
+      - DynamicRateLimiting__Predictive__HealthyQuotaThreshold=0.3
+      - DynamicRateLimiting__Predictive__CriticalQuotaThreshold=0.1
+      - DynamicRateLimiting__Predictive__TokenExpirySeconds=20
+      - DynamicRateLimiting__Predictive__InstanceTimeoutSeconds=90
+      - DynamicRateLimiting__Predictive__HeartbeatIntervalSeconds=45
+      - DynamicRateLimiting__Predictive__MaxETagRetries=5
+      - DynamicRateLimiting__Predictive__CoordinationHealthCheckSeconds=20
+      - DynamicRateLimiting__Predictive__TableStorage__QuotaTableName=RateLimitQuotas
+      - DynamicRateLimiting__Predictive__TableStorage__InstanceTableName=RateLimitInstances
+      - DynamicRateLimiting__Predictive__TableStorage__TokenTableName=RateLimitTokens
+      - DynamicRateLimiting__Predictive__TableStorage__AutoCreateTables=true
       
       # Production OpenSearch Configuration
       - OpenSearch__Endpoint=${OPENSEARCH_ENDPOINT}
@@ -50,10 +114,74 @@ services:
       - OpenSearch__MaxRetries=3
       - OpenSearch__EnableDebugMode=false
       
-      # Production Processing Configuration
-      - AppSettings__BatchSize=20
-      - AppSettings__MaxConcurrency=8
-      - AppSettings__RetryAttempts=3
+      # ✅ NEW PRODUCTION PERFORMANCE CONFIGURATION
+      # Global Parallel Processing Settings (Production Optimized)
+      - ParallelProcessing__maxConcurrentBatches=6
+      - ParallelProcessing__chunkingThreshold=100
+      - ParallelProcessing__defaultChunkSize=50
+      - ParallelProcessing__enableSubBatchOptimization=true
+      - ParallelProcessing__signalRUpdateIntervalMs=500
+      
+      # Brand-Specific Production Settings (Conservative but Fast)
+      - ParallelProcessing__subBatchConfigurations__brands__entityType=brands
+      - ParallelProcessing__subBatchConfigurations__brands__pageSize=250
+      - ParallelProcessing__subBatchConfigurations__brands__chunkSize=250
+      - ParallelProcessing__subBatchConfigurations__brands__fetchBatchSize=250
+      - ParallelProcessing__subBatchConfigurations__brands__subBatchSize=20
+      - ParallelProcessing__subBatchConfigurations__brands__maxConcurrency=15
+      - ParallelProcessing__subBatchConfigurations__brands__enableSubBatching=true
+      - ParallelProcessing__subBatchConfigurations__brands__subBatchDelayMs=75
+      - ParallelProcessing__subBatchConfigurations__brands__processSubBatchesSequentially=false
+      
+      # ✅ Enhanced Product Configuration (Production - Phase 1) - OPTIMIZED FOR TIMEOUT SAFETY  
+      - ParallelProcessing__subBatchConfigurations__products__entityType=products
+      - ParallelProcessing__subBatchConfigurations__products__pageSize=250
+      - ParallelProcessing__subBatchConfigurations__products__chunkSize=250
+      - ParallelProcessing__subBatchConfigurations__products__fetchBatchSize=250
+      - ParallelProcessing__subBatchConfigurations__products__subBatchSize=25
+      - ParallelProcessing__subBatchConfigurations__products__maxConcurrency=10
+      - ParallelProcessing__subBatchConfigurations__products__enableSubBatching=true
+      - ParallelProcessing__subBatchConfigurations__products__subBatchDelayMs=50
+      - ParallelProcessing__subBatchConfigurations__products__processSubBatchesSequentially=false
+      - ParallelProcessing__subBatchConfigurations__products__include=bulk_pricing_rules,custom_fields,channels,videos
+      
+      # ✅ Phase 2: Product Components Configuration (Production) - 10/page with includes
+      - ParallelProcessing__subBatchConfigurations__product-components__entityType=product-components
+      - ParallelProcessing__subBatchConfigurations__product-components__pageSize=10
+      - ParallelProcessing__subBatchConfigurations__product-components__chunkSize=10
+      - ParallelProcessing__subBatchConfigurations__product-components__fetchBatchSize=10
+      - ParallelProcessing__subBatchConfigurations__product-components__subBatchSize=5
+      - ParallelProcessing__subBatchConfigurations__product-components__maxConcurrency=5
+      - ParallelProcessing__subBatchConfigurations__product-components__enableSubBatching=true
+      - ParallelProcessing__subBatchConfigurations__product-components__subBatchDelayMs=100
+      - ParallelProcessing__subBatchConfigurations__product-components__processSubBatchesSequentially=false
+      - ParallelProcessing__subBatchConfigurations__product-components__include=options,modifiers,images,reviews
+      
+      # Variants Configuration - Phase 3: Batch API with 50 variants per call
+      - ParallelProcessing__subBatchConfigurations__variants__entityType=variants
+      - ParallelProcessing__subBatchConfigurations__variants__fetchBatchSize=250
+      - ParallelProcessing__subBatchConfigurations__variants__chunkSize=250
+      - ParallelProcessing__subBatchConfigurations__variants__pageSize=250
+      - ParallelProcessing__subBatchConfigurations__variants__subBatchSize=50
+      - ParallelProcessing__subBatchConfigurations__variants__maxConcurrency=5
+      - ParallelProcessing__subBatchConfigurations__variants__enableSubBatching=true
+      - ParallelProcessing__subBatchConfigurations__variants__subBatchDelayMs=100
+      - ParallelProcessing__subBatchConfigurations__variants__processSubBatchesSequentially=false
+      - ParallelProcessing__subBatchConfigurations__variants__include=
+      
+      # ✅ Enhanced Product Configuration (Production - Phase 2 comprehensive entity migration)
+
+      
+      # Default Production Configuration for Other Entities
+      - ParallelProcessing__defaultSubBatchConfiguration__entityType=default
+      - ParallelProcessing__defaultSubBatchConfiguration__pageSize=250
+      - ParallelProcessing__defaultSubBatchConfiguration__chunkSize=250
+      - ParallelProcessing__defaultSubBatchConfiguration__fetchBatchSize=250
+      - ParallelProcessing__defaultSubBatchConfiguration__subBatchSize=15
+      - ParallelProcessing__defaultSubBatchConfiguration__maxConcurrency=10
+      - ParallelProcessing__defaultSubBatchConfiguration__enableSubBatching=true
+      - ParallelProcessing__defaultSubBatchConfiguration__subBatchDelayMs=100
+      - ParallelProcessing__defaultSubBatchConfiguration__processSubBatchesSequentially=false
       
       # Production SignalR Configuration
       - AzureSignalR=${AZURE_SIGNALR_CONNECTION_STRING}
@@ -73,18 +201,18 @@ services:
       - functions-logs-prod:/tmp/functions-logs:rw
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost/api/health"]
-      interval: 60s
-      timeout: 10s
-      retries: 3
-      start_period: 120s
+      interval: 30s      # ✅ More frequent monitoring for high-performance workloads
+      timeout: 15s       # ✅ Extended timeout for concurrent operations
+      retries: 3         # ✅ Keep retries conservative for production
+      start_period: 60s  # ✅ Reduced startup time with optimized config
     deploy:
       resources:
         limits:
-          cpus: '2.0'
-          memory: 4G
+          cpus: '4.0'      # ✅ Increased for 15-20 concurrent requests
+          memory: 8G       # ✅ Increased for parallel processing
         reservations:
-          cpus: '0.5'
-          memory: 1G
+          cpus: '1.0'      # ✅ Higher baseline for consistent performance
+          memory: 2G       # ✅ Higher baseline for sub-batch processing
       replicas: 2
       update_config:
         parallelism: 1

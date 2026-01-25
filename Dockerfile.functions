@@ -27,7 +27,7 @@ RUN mkdir -p /tmp/.nuget/packages && \
 # Copy project files (including CodeAnalysis project)
 COPY src/BigCommerce.Migration.Core/BigCommerce.Migration.Core.csproj src/BigCommerce.Migration.Core/
 COPY src/BigCommerce.Migration.Infrastructure/BigCommerce.Migration.Infrastructure.csproj src/BigCommerce.Migration.Infrastructure/
-COPY src/BigCommerce.Migration.Orchestration/BigCommerce.Migration.Orchestration.csproj src/BigCommerce.Migration.Orchestration/
+COPY src/BigCommerce.Migration.Activities/BigCommerce.Migration.Activities.csproj src/BigCommerce.Migration.Activities/
 COPY src/BigCommerce.Migration.CodeAnalysis/BigCommerce.Migration.CodeAnalysis.csproj src/BigCommerce.Migration.CodeAnalysis/
 COPY src/BigCommerce.Migration.Functions/BigCommerce.Migration.Functions.csproj src/BigCommerce.Migration.Functions/
 

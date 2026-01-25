@@ -30,12 +30,14 @@ public class ProductApiService : IProductApiClient
     /// <param name="storeConfig">Store configuration with credentials</param>
     /// <param name="page">Page number for pagination</param>
     /// <param name="limit">Number of products per page</param>
+    /// <param name="include">Optional comma-separated list of fields to include. Supported values: bulk_pricing_rules, reviews, modifiers, options, parent_relations, custom_fields, channels, videos</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>List of products</returns>
     public async Task<List<Dictionary<string, object>>> GetProductsAsync(
         StoreConfiguration storeConfig, 
         int page = 1, 
         int limit = 50, 
+        string? include = null,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -69,43 +71,8 @@ public class ProductApiService : IProductApiClient
         }
     }
 
-    /// <summary>
-    /// Creates products in a specific store and channel
-    /// </summary>
-    /// <param name="storeConfig">Store configuration with credentials</param>
-    /// <param name="products">Products to create</param>
-    /// <param name="cancellationToken">Cancellation token</param>
-    /// <returns>List of created products</returns>
-    public async Task<List<Dictionary<string, object>>> CreateProductsAsync(
-        StoreConfiguration storeConfig, 
-        List<Dictionary<string, object>> products, 
-        CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        if (storeConfig?.IsValid() != true)
-        {
-            throw new ArgumentException("Invalid store configuration", nameof(storeConfig));
-        }
-
-        if (products == null)
-        {
-            throw new ArgumentNullException(nameof(products));
-        }
-
-        try
-        {
-            // TODO: Implement actual BigCommerce API call
-            // For now, return the input products to satisfy tests
-            await Task.CompletedTask;
-            return products;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to create products for store {StoreId}", storeConfig.StoreId);
-            throw;
-        }
-    }
+    // NOTE: CreateProductsAsync method removed - individual product processing
+    // is now handled directly in ProductCreationStrategy.CreateSingleProductAsync
 
     /// <summary>
     /// Gets product variants for a specific product
